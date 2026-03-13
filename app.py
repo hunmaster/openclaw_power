@@ -815,7 +815,8 @@ def _run_automation(limit=0, selected_ids=None):
                 break
 
             automation_state["progress"] = i + 1
-            automation_state["current_task"] = task.get("youtube_url", "")[:60]
+            task_url_short = task.get("youtube_url", "")[:50]
+            automation_state["current_task"] = task_url_short
 
             # 계정 결정
             account = None
@@ -863,9 +864,11 @@ def _run_automation(limit=0, selected_ids=None):
                 account_label=current_label,
             )
             try:
+                automation_state["current_task"] = f"[브라우저 시작] {task_url_short}"
                 add_log(f"작업 {i+1}/{len(tasks)}: {task['youtube_url'][:50]}...", "info")
                 bot.start_browser()
 
+                automation_state["current_task"] = f"[로그인 중] {current_label}"
                 login_ok = bot.login_youtube(account["email"], account["password"])
                 if not login_ok:
                     add_log(f"로그인 실패: {current_label}", "error")
@@ -873,12 +876,16 @@ def _run_automation(limit=0, selected_ids=None):
                     notion.update_task_error(task["page_id"], "로그인 실패")
                     continue
 
+                automation_state["current_task"] = f"[댓글 작성 중] {task_url_short}"
                 comment_url = bot.post_comment(task["youtube_url"], task["comment_text"])
 
                 if comment_url:
+                    # ── 1단계: 댓글 작성 완료 ──
+                    automation_state["current_task"] = f"[1/3 댓글완료] {task_url_short}"
                     add_log(f"[1/3 댓글작성 완료] {comment_url}", "success")
 
-                    # 즉시 노션에 댓글완료 + URL 반영
+                    # ── 2단계: 즉시 노션에 댓글완료 + URL 반영 ──
+                    automation_state["current_task"] = f"[2/3 노션반영] {task_url_short}"
                     add_log("[2/3 노션 반영 중] 상태→댓글완료, 댓글 URL 저장...", "info")
                     notion_ok, notion_err = notion.update_task_result(task["page_id"], comment_url, status="댓글완료")
                     if notion_ok:
@@ -886,13 +893,12 @@ def _run_automation(limit=0, selected_ids=None):
                     else:
                         add_log(f"[2/3 노션 반영 실패] {notion_err}", "warning")
 
-                    # 즉시 좋아요 주문 (댓글 하나씩 바로 처리)
-                    like_ordered = False
+                    # ── 3단계: 즉시 좋아요 주문 ──
                     if smm_client.enabled:
+                        automation_state["current_task"] = f"[3/3 좋아요] {task_url_short}"
                         add_log(f"[3/3 좋아요 주문 중] {comment_url[:50]}...", "info")
                         single = smm_client.order_likes(comment_url)
                         if single.get("success"):
-                            like_ordered = True
                             automation_state["results"]["likes"] += 1
                             add_log(f"[3/3 좋아요 주문 성공] 주문ID: {single.get('order_id')}", "success")
                             # 즉시 노션에 좋아요작업완료 반영
@@ -911,10 +917,11 @@ def _run_automation(limit=0, selected_ids=None):
                                     "error",
                                 )
                     else:
-                        add_log("[3/3 좋아요] SMM 비활성화 상태 - 건너뜀", "info")
+                        add_log("[3/3 좋아요] SMM 비활성화 - 건너뜀", "info")
 
                     safety_rules.record_comment(current_label, task["youtube_url"], task["comment_text"])
                     automation_state["results"]["success"] += 1
+                    automation_state["current_task"] = f"[완료] {task_url_short}"
                     add_log(f"--- 작업 {i+1}/{len(tasks)} 완료 ---", "success")
                 else:
                     automation_state["results"]["fail"] += 1

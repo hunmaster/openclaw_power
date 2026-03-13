@@ -338,6 +338,7 @@
                     <span style="color:var(--green)" id="progressSuccess">성공 0</span>
                     <span style="color:var(--red)" id="progressFail">실패 0</span>
                     <span style="color:var(--yellow)" id="progressSkip">건너뜀 0</span>
+                    <span style="color:var(--blue)" id="progressLikes">좋아요 0</span>
                 </div>
             </div>
         </div>
@@ -1324,6 +1325,7 @@
         document.getElementById('progressSuccess').textContent = `성공 ${data.results.success}`;
         document.getElementById('progressFail').textContent = `실패 ${data.results.fail}`;
         document.getElementById('progressSkip').textContent = `건너뜀 ${data.results.skip}`;
+        document.getElementById('progressLikes').textContent = `좋아요 ${data.results.likes}`;
 
         const isTest = data.test_mode;
         const testLabel = isTest ? ` [테스트 ${data.limit || ''}건]` : '';
@@ -1382,7 +1384,7 @@
     // ─── 초기화 ───
     loadDashboard();
     loadTasks();
-    setInterval(pollStatus, 2000);
+    setInterval(pollStatus, 1500);
 </script>
 </body>
 </html>
