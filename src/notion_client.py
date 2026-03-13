@@ -256,56 +256,69 @@ class NotionManager:
         }
 
     def update_task_result(self, page_id, comment_url, status="댓글완료"):
-        """댓글 작성 결과를 Notion에 저장합니다. 성공 시 True, 실패 시 False 반환."""
+        """댓글 작성 결과를 Notion에 저장합니다.
+        Returns:
+            (True, "") on success
+            (False, "에러 메시지") on failure
+        """
+        self.last_error = ""
         properties = {}
 
         # 댓글 URL 저장
         if comment_url:
             properties[self.col_result_url] = self._build_result_url_property(comment_url)
-            console.print(f"[blue]댓글 URL 저장 시도: {comment_url}[/blue]")
 
-        # 상태 업데이트 - select 타입 시도 (실제 DB가 select)
+        # 1단계: select 타입 + rich_text(link) URL
         try:
             properties[self.col_status] = {"select": {"name": status}}
             self.client.pages.update(page_id=page_id, properties=properties)
-            console.print(f"[green]Notion 업데이트 완료: {status} | URL: {comment_url[:60] if comment_url else 'N/A'}[/green]")
-            # 체크박스는 별도로 시도 (실패해도 무시)
+            console.print(f"[green]Notion 업데이트 완료 (select): {status}[/green]")
             self._try_update_checkbox(page_id, status)
-            return True
+            return (True, "")
         except Exception as e1:
-            console.print(f"[yellow]select 타입 실패: {e1}[/yellow]")
-            # url 타입 실패 시 rich_text로 재시도
-            if comment_url:
-                properties[self.col_result_url] = self._build_result_url_rich_text(comment_url)
+            err1 = str(e1)[:120]
+            console.print(f"[yellow]1단계(select) 실패: {err1}[/yellow]")
+
+        # 2단계: select + URL을 plain rich_text로 재시도
+        if comment_url:
+            properties[self.col_result_url] = self._build_result_url_rich_text(comment_url)
+        try:
+            self.client.pages.update(page_id=page_id, properties=properties)
+            console.print(f"[green]Notion 업데이트 완료 (select+plain): {status}[/green]")
+            self._try_update_checkbox(page_id, status)
+            return (True, "")
+        except Exception as e2:
+            err2 = str(e2)[:120]
+            console.print(f"[yellow]2단계(select+plain) 실패: {err2}[/yellow]")
+
+        # 3단계: status 타입으로 시도
+        try:
+            properties[self.col_status] = {"status": {"name": status}}
+            self.client.pages.update(page_id=page_id, properties=properties)
+            console.print(f"[green]Notion 업데이트 완료 (status): {status}[/green]")
+            self._try_update_checkbox(page_id, status)
+            return (True, "")
+        except Exception as e3:
+            err3 = str(e3)[:120]
+            console.print(f"[yellow]3단계(status) 실패: {err3}[/yellow]")
+
+        # 4단계: URL만이라도 저장
+        if comment_url:
             try:
-                self.client.pages.update(page_id=page_id, properties=properties)
-                console.print(f"[green]Notion 업데이트 완료 (rich_text): {status}[/green]")
-                self._try_update_checkbox(page_id, status)
-                return True
-            except Exception as e2:
-                console.print(f"[yellow]select+rich_text 실패: {e2}[/yellow]")
-                # status 타입으로도 시도
-                try:
-                    properties[self.col_status] = {"status": {"name": status}}
-                    self.client.pages.update(page_id=page_id, properties=properties)
-                    console.print(f"[green]Notion 업데이트 완료 (status 타입): {status}[/green]")
-                    self._try_update_checkbox(page_id, status)
-                    return True
-                except Exception as e3:
-                    console.print(f"[yellow]status 타입도 실패: {e3}[/yellow]")
-                    # URL만이라도 저장
-                    try:
-                        url_only = {}
-                        if comment_url:
-                            url_only[self.col_result_url] = self._build_result_url_rich_text(comment_url)
-                        if url_only:
-                            self.client.pages.update(page_id=page_id, properties=url_only)
-                            console.print(f"[yellow]댓글 URL만 업데이트됨 (상태 실패: {e3})[/yellow]")
-                            return False
-                    except Exception as e4:
-                        console.print(f"[red]Notion 업데이트 완전 실패: {e4}[/red]")
-                        return False
-        return False
+                url_only = {self.col_result_url: self._build_result_url_rich_text(comment_url)}
+                self.client.pages.update(page_id=page_id, properties=url_only)
+                msg = f"URL만 저장됨. 상태 변경 실패: {err1}"
+                console.print(f"[yellow]{msg}[/yellow]")
+                self.last_error = msg
+                return (False, msg)
+            except Exception as e4:
+                msg = f"완전 실패: {str(e4)[:120]}"
+                console.print(f"[red]{msg}[/red]")
+                self.last_error = msg
+                return (False, msg)
+
+        self.last_error = f"상태 변경 실패: {err1}"
+        return (False, self.last_error)
 
     def _try_update_checkbox(self, page_id, status):
         """댓글 완료 체크박스를 별도로 업데이트 시도합니다 (실패해도 무시)."""
