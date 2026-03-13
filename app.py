@@ -570,8 +570,17 @@ def api_manual_login():
     if not data or not data.get("email"):
         return jsonify({"error": "이메일이 필요합니다."}), 400
 
+    # 이전 세션이 남아있으면 강제 정리
     if manual_login_state["active"]:
-        return jsonify({"error": "이미 수동 로그인이 진행 중입니다."}), 409
+        print("[manual_login] 이전 세션 강제 정리")
+        try:
+            if manual_login_bot:
+                manual_login_bot.close_browser()
+        except Exception:
+            pass
+        manual_login_bot = None
+        manual_login_state["active"] = False
+        manual_login_state["status"] = "idle"
 
     email = data["email"]
     accounts = load_accounts()
