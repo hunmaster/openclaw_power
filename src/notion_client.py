@@ -62,9 +62,18 @@ class NotionManager:
                 response = self.client.databases.query(database_id=self.database_id, page_size=100)
                 console.print(f"[blue]전체 조회: {len(response.get('results', []))}건[/blue]")
 
+        results = response.get("results", [])
+        console.print(f"[blue]조회된 결과: {len(results)}건[/blue]")
+
         tasks = []
-        for page in response.get("results", []):
+        for idx, page in enumerate(results):
             task = self._parse_page(page)
+            console.print(
+                f"[dim]  [{idx}] youtube_url={bool(task.get('youtube_url'))}, "
+                f"comment_text={bool(task.get('comment_text'))}, "
+                f"status={task.get('status')}, "
+                f"url={str(task.get('youtube_url', ''))[:50]}[/dim]"
+            )
             if task and task.get("youtube_url") and task.get("comment_text"):
                 # 이미 완료된 항목 제외
                 if task.get("status") not in ("댓글완료", "대댓글완료", "에러"):

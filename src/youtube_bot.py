@@ -208,25 +208,22 @@ class YouTubeBot:
             for i in range(timeout // 3):
                 time.sleep(3)
 
-                # 컨텍스트의 모든 페이지 URL을 확인 (Google 로그인이 새 페이지로 이동할 수 있음)
-                active_page = self.page
-                all_urls = []
+                # 모든 페이지에서 실제 URL을 JS로 확인 (Playwright page.url이 갱신 안 되는 문제 우회)
                 login_detected = False
+                active_page = self.page
                 for p in self.context.pages:
                     try:
-                        url = p.url
-                        all_urls.append(url[:60])
+                        real_url = p.evaluate("window.location.href")
+                        console.print(f"[dim]  페이지 URL(JS): {real_url[:80]}[/dim]")
                         if (
-                            "myaccount.google.com" in url
-                            or ("youtube.com" in url and "signin" not in url)
-                            or "accounts.google.com/SignOutOptions" in url
+                            "myaccount.google.com" in real_url
+                            or ("youtube.com" in real_url and "signin" not in real_url)
+                            or "accounts.google.com/SignOutOptions" in real_url
                         ):
                             active_page = p
                             login_detected = True
                     except Exception:
                         continue
-
-                console.print(f"[dim]페이지 URLs: {all_urls}[/dim]")
 
                 if login_detected:
                     self.page = active_page

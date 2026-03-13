@@ -634,6 +634,44 @@ def api_manual_login_status():
     return jsonify(manual_login_state)
 
 
+@app.route("/api/accounts/manual-login/confirm", methods=["POST"])
+def api_manual_login_confirm():
+    """사용자가 로그인 완료를 수동으로 확인합니다. 쿠키를 저장하고 브라우저를 닫습니다."""
+    global manual_login_bot
+
+    if not manual_login_bot:
+        return jsonify({"error": "진행 중인 수동 로그인이 없습니다."}), 400
+
+    try:
+        bot = manual_login_bot
+        # YouTube로 이동하여 YouTube 쿠키도 저장
+        try:
+            bot.page.goto(
+                "https://www.youtube.com",
+                wait_until="domcontentloaded",
+                timeout=15000,
+            )
+            import time as _time
+            _time.sleep(3)
+        except Exception:
+            pass
+        bot.save_cookies()
+
+        manual_login_state["status"] = "success"
+        manual_login_state["message"] = "로그인 성공! 쿠키가 저장되었습니다."
+
+        try:
+            bot.close_browser()
+        except Exception:
+            pass
+        manual_login_bot = None
+        manual_login_state["active"] = False
+
+        return jsonify({"message": "로그인 확인 완료! 쿠키가 저장되었습니다."})
+    except Exception as e:
+        return jsonify({"error": f"확인 중 오류: {str(e)}"}), 500
+
+
 @app.route("/api/accounts/login-status/<email>")
 def api_login_status(email):
     """계정의 저장된 쿠키 상태를 확인합니다."""

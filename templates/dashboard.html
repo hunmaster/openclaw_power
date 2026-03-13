@@ -867,7 +867,10 @@
         // 수동 로그인 상태 폴링
         const safeId = email.replace(/[^a-zA-Z0-9]/g, '_');
         const statusEl = document.getElementById('loginStatus-' + safeId);
-        if (statusEl) statusEl.innerHTML = '<span style="color:var(--yellow)">브라우저에서 로그인 진행 중...</span>';
+        if (statusEl) statusEl.innerHTML = `
+            <span style="color:var(--yellow)">브라우저에서 로그인 진행 중...</span>
+            <button class="btn btn-sm btn-primary" onclick="confirmManualLogin('${safeId}', '${email}')" style="margin-left:8px;font-size:11px;">로그인 완료 확인</button>
+        `;
 
         const pollInterval = setInterval(async () => {
             const status = await api('/api/accounts/manual-login/status');
@@ -882,6 +885,26 @@
                 setTimeout(() => loadLoginStatus(email), 1000);
             }
         }, 3000);
+    }
+
+    // ─── 수동 로그인 완료 확인 (사용자가 직접 클릭) ───
+    async function confirmManualLogin(safeId, email) {
+        const statusEl = document.getElementById('loginStatus-' + safeId);
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--yellow)">쿠키 저장 중...</span>';
+
+        const data = await api('/api/accounts/manual-login/confirm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+        });
+
+        if (data && data.error) {
+            if (statusEl) statusEl.innerHTML = `<span class="badge badge-red">${data.error}</span>`;
+            return;
+        }
+
+        if (statusEl) statusEl.innerHTML = `<span class="badge badge-green">${data.message || '로그인 완료!'}</span>`;
+        setTimeout(() => loadLoginStatus(email), 1000);
     }
 
     // ─── 계정 로그인 테스트 ───
