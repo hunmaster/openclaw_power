@@ -214,6 +214,72 @@ def api_get_settings():
     })
 
 
+@app.route("/api/check-connections", methods=["GET"])
+def api_check_connections():
+    """모든 API 연동 상태를 확인합니다."""
+    results = {}
+
+    # 1. .env 파일 존재 여부
+    env_exists = os.path.exists(os.path.join(os.path.dirname(__file__), ".env"))
+    results["env_file"] = {"ok": env_exists, "message": ".env 파일 존재" if env_exists else ".env 파일이 없습니다. .env.example을 복사하세요."}
+
+    # 2. Notion API 연결 테스트
+    notion_token = os.getenv("NOTION_API_TOKEN", "")
+    notion_db_id = os.getenv("NOTION_DATABASE_ID", "")
+    if not notion_token or not notion_db_id:
+        results["notion"] = {"ok": False, "message": "NOTION_API_TOKEN 또는 NOTION_DATABASE_ID 미설정"}
+    else:
+        try:
+            notion = NotionManager()
+            tasks = notion.get_pending_tasks()
+            results["notion"] = {"ok": True, "message": f"연결 성공! 대기 작업 {len(tasks)}개"}
+        except Exception as e:
+            results["notion"] = {"ok": False, "message": f"연결 실패: {str(e)}"}
+
+    # 3. SMM Kings API 연결 테스트
+    smm_enabled = os.getenv("SMM_ENABLED", "false").lower() == "true"
+    smm_api_key = os.getenv("SMM_API_KEY", "")
+    if not smm_enabled:
+        results["smm"] = {"ok": None, "message": "SMM 비활성 (SMM_ENABLED=false)"}
+    elif not smm_api_key:
+        results["smm"] = {"ok": False, "message": "SMM_API_KEY 미설정"}
+    else:
+        try:
+            smm = SMMClient()
+            balance = smm.get_balance()
+            if balance is not None:
+                service_id = os.getenv("SMM_LIKE_SERVICE_ID", "")
+                msg = f"연결 성공! 잔액: ${balance:.2f}"
+                if not service_id:
+                    msg += " (SMM_LIKE_SERVICE_ID 미설정 - 서비스 조회 필요)"
+                results["smm"] = {"ok": True, "message": msg}
+            else:
+                results["smm"] = {"ok": False, "message": "API 응답 없음 (API 키 확인 필요)"}
+        except Exception as e:
+            results["smm"] = {"ok": False, "message": f"연결 실패: {str(e)}"}
+
+    # 4. 계정 파일 확인
+    accounts = load_accounts()
+    if accounts:
+        results["accounts"] = {"ok": True, "message": f"계정 {len(accounts)}개 로드됨"}
+    else:
+        results["accounts"] = {"ok": False, "message": "등록된 계정이 없습니다"}
+
+    # 5. 프록시 상태
+    use_proxy = os.getenv("USE_PROXY", "false").lower() == "true"
+    if not use_proxy:
+        results["proxy"] = {"ok": None, "message": "프록시 비활성 (USE_PROXY=false)"}
+    else:
+        try:
+            proxy = ProxyManager()
+            status = proxy.get_status()
+            results["proxy"] = {"ok": True, "message": f"프록시 활성: {status}"}
+        except Exception as e:
+            results["proxy"] = {"ok": False, "message": f"프록시 오류: {str(e)}"}
+
+    return jsonify(results)
+
+
 @app.route("/api/accounts", methods=["GET"])
 def api_get_accounts():
     """계정 목록을 반환합니다."""

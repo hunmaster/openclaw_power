@@ -463,6 +463,18 @@
 
     <!-- ━━━ 설정 탭 ━━━ -->
     <div class="tab-content" id="tab-settings">
+        <!-- API 연동 상태 -->
+        <div class="card" style="margin-bottom:20px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                <h3 style="font-size:15px">API 연동 상태</h3>
+                <button class="btn btn-sm btn-primary" onclick="checkConnections()">연동 테스트</button>
+            </div>
+            <div id="connectionResults">
+                <p style="color:var(--text-dim);font-size:13px">"연동 테스트" 버튼을 클릭하여 각 서비스 연결 상태를 확인하세요.</p>
+            </div>
+        </div>
+
+        <!-- 설정값 -->
         <div class="card">
             <div class="settings-grid">
                 <div>
@@ -729,6 +741,40 @@
         document.getElementById('setSmmServiceId').value = data.SMM_LIKE_SERVICE_ID;
         document.getElementById('setSmmQuantity').value = data.SMM_LIKE_QUANTITY;
         document.getElementById('setHeadless').value = data.HEADLESS;
+    }
+
+    // ─── API 연동 테스트 ───
+    async function checkConnections() {
+        const container = document.getElementById('connectionResults');
+        container.innerHTML = '<p style="color:var(--text-dim);font-size:13px">연동 상태 확인 중...</p>';
+
+        const data = await api('/api/check-connections');
+        if (!data || data.error) {
+            container.innerHTML = `<p style="color:var(--red);font-size:13px">${data?.error || '연동 확인 실패'}</p>`;
+            return;
+        }
+
+        const labels = {
+            env_file: '.env 설정 파일',
+            notion: 'Notion API',
+            smm: 'SMM Kings API',
+            accounts: '계정 파일',
+            proxy: '프록시',
+        };
+
+        let html = '<div style="display:flex;flex-direction:column;gap:10px">';
+        for (const [key, info] of Object.entries(data)) {
+            const icon = info.ok === true ? '&#10004;' : info.ok === false ? '&#10008;' : '&#9644;';
+            const color = info.ok === true ? 'var(--green)' : info.ok === false ? 'var(--red)' : 'var(--text-dim)';
+            const bg = info.ok === true ? 'rgba(0,184,148,0.08)' : info.ok === false ? 'rgba(255,107,107,0.08)' : 'rgba(136,136,160,0.08)';
+            html += `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:${bg};border-radius:8px;border:1px solid ${color}22">`;
+            html += `<span style="color:${color};font-size:18px;font-weight:bold;min-width:20px">${icon}</span>`;
+            html += `<div><div style="font-size:13px;font-weight:600;color:var(--text)">${labels[key] || key}</div>`;
+            html += `<div style="font-size:12px;color:${color}">${info.message}</div></div>`;
+            html += '</div>';
+        }
+        html += '</div>';
+        container.innerHTML = html;
     }
 
     // ─── 자동화 실행/중지 ───
