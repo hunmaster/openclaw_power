@@ -311,20 +311,20 @@
             </div>
         </div>
 
-        <!-- 진행 상태 패널 -->
-        <div class="card" id="progressWrap" style="display:none;margin-bottom:24px;border:1px solid var(--accent)44">
+        <!-- 진행 상태 패널 (항상 표시) -->
+        <div class="card" id="progressWrap" style="margin-bottom:24px;border:1px solid var(--border)">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
                 <div style="display:flex;align-items:center;gap:10px">
-                    <span class="status-dot running"></span>
-                    <span style="font-size:15px;font-weight:600" id="progressTitle">자동화 진행 중</span>
+                    <span class="status-dot stopped" id="progressDot"></span>
+                    <span style="font-size:15px;font-weight:600" id="progressTitle">자동화 대기 중</span>
                 </div>
-                <span style="font-size:24px;font-weight:700;color:var(--accent-light)" id="progressPercent">0%</span>
+                <span style="font-size:24px;font-weight:700;color:var(--text-dim)" id="progressPercent">0%</span>
             </div>
             <div style="height:12px;background:var(--border);border-radius:6px;overflow:hidden;margin-bottom:12px">
-                <div id="progressFill" style="height:100%;border-radius:6px;background:linear-gradient(90deg, var(--accent), var(--accent-light));transition:width 0.5s ease;width:0%"></div>
+                <div id="progressFill" style="height:100%;border-radius:6px;background:var(--border);transition:width 0.5s ease;width:0%"></div>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center">
-                <span style="font-size:13px;color:var(--text-dim)" id="progressLabel">준비 중...</span>
+                <span style="font-size:13px;color:var(--text-dim)" id="progressLabel">상단 [실행] 버튼을 눌러 자동화를 시작하세요</span>
                 <div style="display:flex;gap:16px;font-size:12px">
                     <span style="color:var(--green)" id="progressSuccess">성공 0</span>
                     <span style="color:var(--red)" id="progressFail">실패 0</span>
@@ -1039,29 +1039,48 @@
         document.getElementById('btnStop').disabled = !data.running;
         updateStatusIndicator(data.running);
 
-        // 진행률
-        if (data.running || data.total > 0) {
-            document.getElementById('progressWrap').style.display = 'block';
-            const pct = data.total > 0 ? Math.round((data.progress / data.total) * 100) : 0;
-            document.getElementById('progressFill').style.width = pct + '%';
-            document.getElementById('progressPercent').textContent = pct + '%';
+        // 진행률 패널 업데이트
+        const pct = data.total > 0 ? Math.round((data.progress / data.total) * 100) : 0;
+        const progressDot = document.getElementById('progressDot');
+        const progressWrap = document.getElementById('progressWrap');
+        const progressFill = document.getElementById('progressFill');
+        const progressPercent = document.getElementById('progressPercent');
+
+        progressFill.style.width = pct + '%';
+        progressPercent.textContent = pct + '%';
+        document.getElementById('progressSuccess').textContent = `성공 ${data.results.success}`;
+        document.getElementById('progressFail').textContent = `실패 ${data.results.fail}`;
+        document.getElementById('progressSkip').textContent = `건너뜀 ${data.results.skip}`;
+
+        if (data.running) {
+            // 실행 중
+            progressDot.className = 'status-dot running';
+            progressWrap.style.borderColor = 'rgba(108,92,231,0.4)';
+            progressPercent.style.color = 'var(--accent-light)';
+            progressFill.style.background = 'linear-gradient(90deg, var(--accent), var(--accent-light))';
+            document.getElementById('progressTitle').textContent = '자동화 진행 중';
             document.getElementById('progressLabel').textContent =
                 data.current_task ? `${data.progress}/${data.total}: ${data.current_task}` : `${data.progress}/${data.total}`;
-            document.getElementById('progressSuccess').textContent = `성공 ${data.results.success}`;
-            document.getElementById('progressFail').textContent = `실패 ${data.results.fail}`;
-            document.getElementById('progressSkip').textContent = `건너뜀 ${data.results.skip}`;
-
-            // 완료 시 스타일 변경
-            if (!data.running && data.total > 0 && data.progress >= data.total) {
-                document.getElementById('progressTitle').textContent = '자동화 완료';
-                document.getElementById('progressFill').style.background = 'linear-gradient(90deg, var(--green), #00d2a0)';
-            } else if (data.running) {
-                document.getElementById('progressTitle').textContent = '자동화 진행 중';
-                document.getElementById('progressFill').style.background = 'linear-gradient(90deg, var(--accent), var(--accent-light))';
+        } else if (data.total > 0 && data.progress >= data.total) {
+            // 완료
+            progressDot.className = 'status-dot';
+            progressDot.style.background = 'var(--green)';
+            progressWrap.style.borderColor = 'rgba(0,184,148,0.4)';
+            progressPercent.style.color = 'var(--green)';
+            progressFill.style.background = 'linear-gradient(90deg, var(--green), #00d2a0)';
+            document.getElementById('progressTitle').textContent = '자동화 완료';
+            document.getElementById('progressLabel').textContent =
+                `전체 ${data.total}건 처리 완료`;
+        } else {
+            // 대기 중
+            progressDot.className = 'status-dot stopped';
+            progressWrap.style.borderColor = 'var(--border)';
+            progressPercent.style.color = 'var(--text-dim)';
+            progressFill.style.background = 'var(--border)';
+            document.getElementById('progressTitle').textContent = '자동화 대기 중';
+            if (data.total === 0) {
+                document.getElementById('progressLabel').textContent = '상단 [실행] 버튼을 눌러 자동화를 시작하세요';
             }
-        }
-        if (!data.running && data.total === 0) {
-            document.getElementById('progressWrap').style.display = 'none';
         }
 
         // 결과 카드
