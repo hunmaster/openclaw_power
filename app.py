@@ -877,14 +877,14 @@ def _run_automation(limit=0, selected_ids=None):
                 comment_url = bot.post_comment(task["youtube_url"], task["comment_text"])
 
                 if comment_url:
+                    add_log(f"댓글 URL 복사 완료: {comment_url}", "success")
                     notion_ok = notion.update_task_result(task["page_id"], comment_url, status="댓글완료")
                     if notion_ok:
-                        add_log("노션 '댓글완료' 업데이트 성공", "success")
+                        add_log(f"노션 업데이트 성공: 상태→댓글완료, URL→{comment_url[:50]}", "success")
                     else:
-                        add_log("노션 '댓글완료' 업데이트 실패 (콘솔 로그 확인)", "warning")
+                        add_log(f"노션 상태 업데이트 실패 (URL 저장은 콘솔 로그 확인)", "warning")
                     safety_rules.record_comment(current_label, task["youtube_url"], task["comment_text"])
                     automation_state["results"]["success"] += 1
-                    add_log(f"댓글 성공: {comment_url[:60]}", "success")
                     successful_comments.append({"url": comment_url, "page_id": task["page_id"]})
                 else:
                     automation_state["results"]["fail"] += 1
@@ -915,14 +915,23 @@ def _run_automation(limit=0, selected_ids=None):
                 if mass_result.get("errors"):
                     for err in mass_result["errors"]:
                         add_log(f"대량 주문 오류: {err}", "warning")
-                add_log("대량 주문 실패 → 개별 주문으로 전환합니다", "info")
-                for c in successful_comments:
-                    single = smm_client.order_likes(c["url"])
-                    if single.get("success"):
-                        like_success_count += 1
-                        add_log(f"개별 좋아요 주문 성공: 주문ID {single.get('order_id')}", "success")
-                    else:
-                        add_log(f"개별 좋아요 주문 실패: {single.get('error', '?')}", "warning")
+                # 서비스 ID 오류면 개별 주문도 같은 결과이므로 스킵
+                errors_str = " ".join(mass_result.get("errors", []))
+                if "incorrect_service" in errors_str.lower():
+                    add_log(
+                        f"서비스 ID '{smm_client.service_id}'가 유효하지 않습니다. "
+                        "대시보드 → SMM 좋아요 탭 → '서비스 조회'에서 올바른 ID를 확인 후 설정에서 변경하세요.",
+                        "error",
+                    )
+                else:
+                    add_log("대량 주문 실패 → 개별 주문으로 전환합니다", "info")
+                    for c in successful_comments:
+                        single = smm_client.order_likes(c["url"])
+                        if single.get("success"):
+                            like_success_count += 1
+                            add_log(f"개별 좋아요 주문 성공: 주문ID {single.get('order_id')}", "success")
+                        else:
+                            add_log(f"개별 좋아요 주문 실패: {single.get('error', '?')}", "warning")
 
             automation_state["results"]["likes"] = like_success_count
 

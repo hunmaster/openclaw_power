@@ -139,10 +139,17 @@ class SMMClient:
             console.print(f"[green]좋아요 주문 완료! 주문 ID: {order_id}[/green]")
             return {"success": True, "order_id": order_id}
         elif result and "error" in result:
-            console.print(f"[red]좋아요 주문 실패: {result['error']}[/red]")
-            return {"success": False, "error": result["error"]}
+            error_msg = result["error"]
+            console.print(f"[red]좋아요 주문 실패: {error_msg}[/red]")
+            if "incorrect_service" in str(error_msg).lower():
+                console.print(
+                    f"[yellow]서비스 ID '{self.service_id}'가 유효하지 않습니다. "
+                    "대시보드 SMM 탭에서 올바른 서비스 ID를 확인하세요.[/yellow]"
+                )
+            return {"success": False, "error": error_msg}
         else:
-            return {"success": False, "error": "알 수 없는 오류"}
+            console.print(f"[red]좋아요 주문: 예상치 못한 응답: {str(result)[:200]}[/red]")
+            return {"success": False, "error": f"예상치 못한 응답: {str(result)[:100]}"}
 
     def order_mass_likes(self, comment_urls, quantity=None):
         """
@@ -194,11 +201,18 @@ class SMMClient:
                 f"실패: {len(errors)}건[/green]"
             )
             return {"success": len(order_ids) > 0, "order_ids": order_ids, "errors": errors}
-        elif result and "error" in result:
-            console.print(f"[red]대량 주문 실패: {result['error']}[/red]")
-            return {"success": False, "order_ids": [], "errors": [result["error"]]}
+        elif result and isinstance(result, dict) and "error" in result:
+            error_msg = result["error"]
+            console.print(f"[red]대량 주문 실패: {error_msg}[/red]")
+            if "incorrect_service" in str(error_msg).lower():
+                console.print(
+                    f"[yellow]서비스 ID '{self.service_id}'가 유효하지 않습니다. "
+                    "대시보드 SMM 탭에서 올바른 서비스 ID를 확인하세요.[/yellow]"
+                )
+            return {"success": False, "order_ids": [], "errors": [error_msg]}
         else:
-            return {"success": False, "order_ids": [], "errors": ["알 수 없는 오류"]}
+            console.print(f"[red]대량 주문: 예상치 못한 응답: {str(result)[:200]}[/red]")
+            return {"success": False, "order_ids": [], "errors": [f"예상치 못한 응답: {str(result)[:100]}"]}
 
     def check_order_status(self, order_id):
         """주문 상태를 확인합니다."""
