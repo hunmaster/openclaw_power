@@ -839,8 +839,7 @@
             return;
         }
 
-        // 대시보드 카운터 업데이트 (날짜 필터 없을 때만)
-        if (statusParam === '댓글작업전' && !currentDateFilter) document.getElementById('pendingCount').textContent = data.count;
+        // 대시보드 카운터는 dashboard API의 pending_count(전체 개수)를 사용하므로 여기서 덮어쓰지 않음
         const dateLabel = currentDateFilter ? ` (${currentDateFilter})` : '';
         if (msgEl && data.count >= 0) msgEl.innerHTML = `<span style="color:var(--green)">${data.count}개 작업 로드됨${dateLabel}</span>`;
 
