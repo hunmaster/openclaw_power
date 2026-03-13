@@ -10,6 +10,7 @@ API: https://smmkings.com/api/v2
 import os
 import time
 import requests
+from dotenv import load_dotenv
 from rich.console import Console
 
 console = Console()
@@ -19,6 +20,7 @@ API_URL = "https://smmkings.com/api/v2"
 
 class SMMClient:
     def __init__(self):
+        load_dotenv(override=True)
         self.api_key = os.getenv("SMM_API_KEY", "")
         self.service_id = os.getenv("SMM_LIKE_SERVICE_ID", "")
         self.like_quantity = int(os.getenv("SMM_LIKE_QUANTITY", "10"))
