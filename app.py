@@ -218,7 +218,6 @@ def api_get_settings():
 def api_get_accounts():
     """계정 목록을 반환합니다."""
     accounts = load_accounts()
-    # 비밀번호 마스킹
     safe_accounts = []
     for acc in accounts:
         safe_accounts.append({
@@ -227,6 +226,57 @@ def api_get_accounts():
             "account_type": acc.get("account_type", ""),
         })
     return jsonify({"accounts": safe_accounts})
+
+
+@app.route("/api/accounts", methods=["POST"])
+def api_add_account():
+    """계정을 추가합니다."""
+    data = request.get_json()
+    if not data or not data.get("email") or not data.get("password"):
+        return jsonify({"error": "이메일과 비밀번호는 필수입니다."}), 400
+
+    accounts = load_accounts()
+    new_account = {
+        "email": data["email"],
+        "password": data["password"],
+        "account_type": data.get("account_type", "sub"),
+        "label": data.get("label", data["email"].split("@")[0]),
+    }
+
+    # 중복 확인
+    for acc in accounts:
+        if acc.get("email") == new_account["email"]:
+            return jsonify({"error": "이미 등록된 이메일입니다."}), 409
+
+    accounts.append(new_account)
+    _save_accounts(accounts)
+    return jsonify({"message": "계정이 추가되었습니다.", "account": {
+        "email": new_account["email"],
+        "label": new_account["label"],
+        "account_type": new_account["account_type"],
+    }})
+
+
+@app.route("/api/accounts/<email>", methods=["DELETE"])
+def api_delete_account(email):
+    """계정을 삭제합니다."""
+    accounts = load_accounts()
+    original_len = len(accounts)
+    accounts = [a for a in accounts if a.get("email") != email]
+
+    if len(accounts) == original_len:
+        return jsonify({"error": "해당 계정을 찾을 수 없습니다."}), 404
+
+    _save_accounts(accounts)
+    return jsonify({"message": f"계정 {email}이 삭제되었습니다."})
+
+
+def _save_accounts(accounts):
+    """계정 목록을 파일에 저장합니다."""
+    accounts_file = os.getenv("ACCOUNTS_FILE", "config/accounts.json")
+    os.makedirs(os.path.dirname(accounts_file), exist_ok=True)
+    with open(accounts_file, "w", encoding="utf-8") as f:
+        json.dump(accounts, f, indent=2, ensure_ascii=False)
 
 
 # ──────────────────────────── 자동화 실행 ────────────────────────────

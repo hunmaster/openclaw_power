@@ -372,23 +372,52 @@
 
     <!-- ━━━ 계정 관리 탭 ━━━ -->
     <div class="tab-content" id="tab-accounts">
+        <!-- 계정 추가 폼 -->
+        <div class="card" style="margin-bottom:20px">
+            <h3 style="margin-bottom:16px;font-size:15px">계정 추가</h3>
+            <div class="settings-grid">
+                <div>
+                    <div class="form-group">
+                        <label>이메일 (Gmail)</label>
+                        <input type="email" id="newEmail" placeholder="example@gmail.com">
+                    </div>
+                    <div class="form-group">
+                        <label>비밀번호</label>
+                        <input type="password" id="newPassword" placeholder="비밀번호 입력">
+                    </div>
+                </div>
+                <div>
+                    <div class="form-group">
+                        <label>라벨 (별명)</label>
+                        <input type="text" id="newLabel" placeholder="부계정1">
+                    </div>
+                    <div class="form-group">
+                        <label>유형</label>
+                        <select id="newType">
+                            <option value="sub">부계정 (프록시 사용)</option>
+                            <option value="main">찐계정 (프록시 미사용)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <button class="btn btn-primary" onclick="addAccount()">계정 추가</button>
+            <span id="addAccountMsg" style="margin-left:12px;font-size:13px"></span>
+        </div>
+
+        <!-- 계정 목록 -->
         <div class="table-wrap">
             <div class="table-title">
                 <span>등록된 계정</span>
+                <button class="btn btn-sm btn-secondary" onclick="loadAccountList()">새로고침</button>
             </div>
             <table>
                 <thead>
-                    <tr><th>라벨</th><th>이메일</th><th>유형</th></tr>
+                    <tr><th>라벨</th><th>이메일</th><th>유형</th><th>관리</th></tr>
                 </thead>
                 <tbody id="accountListBody">
-                    <tr><td colspan="3" style="text-align:center;color:var(--text-dim)">로딩 중...</td></tr>
+                    <tr><td colspan="4" style="text-align:center;color:var(--text-dim)">로딩 중...</td></tr>
                 </tbody>
             </table>
-        </div>
-        <div class="card" style="margin-top:16px">
-            <p style="font-size:13px;color:var(--text-dim)">
-                계정 추가/수정은 <code style="background:var(--bg);padding:2px 6px;border-radius:4px">config/accounts.json</code> 파일을 직접 편집하세요.
-            </p>
         </div>
     </div>
 
@@ -572,7 +601,7 @@
 
         const tbody = document.getElementById('accountListBody');
         if (data.accounts.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text-dim)">등록된 계정이 없습니다</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-dim)">등록된 계정이 없습니다. 위에서 계정을 추가하세요.</td></tr>';
             return;
         }
         tbody.innerHTML = data.accounts.map(acc => `
@@ -580,8 +609,53 @@
                 <td><strong>${acc.label}</strong></td>
                 <td>${acc.email}</td>
                 <td><span class="badge ${acc.account_type === 'sub' ? 'badge-yellow' : 'badge-blue'}">${acc.account_type === 'sub' ? '부계정' : '찐계정'}</span></td>
+                <td><button class="btn btn-sm btn-danger" onclick="deleteAccount('${acc.email}')">삭제</button></td>
             </tr>
         `).join('');
+    }
+
+    // ─── 계정 추가 ───
+    async function addAccount() {
+        const email = document.getElementById('newEmail').value.trim();
+        const password = document.getElementById('newPassword').value;
+        const label = document.getElementById('newLabel').value.trim();
+        const type = document.getElementById('newType').value;
+        const msgEl = document.getElementById('addAccountMsg');
+
+        if (!email || !password) {
+            msgEl.innerHTML = '<span style="color:var(--red)">이메일과 비밀번호를 입력하세요.</span>';
+            return;
+        }
+
+        const res = await api('/api/accounts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password, label: label || undefined, account_type: type }),
+        });
+
+        if (res && !res.error) {
+            msgEl.innerHTML = '<span style="color:var(--green)">계정이 추가되었습니다!</span>';
+            document.getElementById('newEmail').value = '';
+            document.getElementById('newPassword').value = '';
+            document.getElementById('newLabel').value = '';
+            loadAccountList();
+            loadDashboard();
+        } else {
+            msgEl.innerHTML = `<span style="color:var(--red)">${res?.error || '추가 실패'}</span>`;
+        }
+    }
+
+    // ─── 계정 삭제 ───
+    async function deleteAccount(email) {
+        if (!confirm(`정말 ${email} 계정을 삭제하시겠습니까?`)) return;
+
+        const res = await api(`/api/accounts/${encodeURIComponent(email)}`, { method: 'DELETE' });
+        if (res && !res.error) {
+            loadAccountList();
+            loadDashboard();
+        } else {
+            alert(res?.error || '삭제 실패');
+        }
     }
 
     // ─── SMM 정보 ───
