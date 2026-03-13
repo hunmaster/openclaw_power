@@ -390,6 +390,7 @@
                 <span id="taskTableTitle">노션 DB 작업 목록</span>
                 <div style="display:flex;gap:8px;align-items:center">
                     <button class="btn btn-sm btn-primary" onclick="fetchNotionTasks()">불러오기</button>
+                    <button class="btn btn-sm btn-green" id="btnRunSelected" onclick="runSelectedTasks()" style="display:none;background:var(--green);color:#fff">선택 실행 (<span id="selectedCount">0</span>건)</button>
                     <button class="btn btn-sm btn-secondary" onclick="debugNotionDB()">DB 구조 확인</button>
                     <span id="taskFetchMsg" style="font-size:12px;line-height:28px;color:var(--text-dim)"></span>
                 </div>
@@ -397,6 +398,7 @@
             <table>
                 <thead>
                     <tr>
+                        <th><input type="checkbox" id="selectAllTasks" onclick="toggleSelectAll(this)" title="전체 선택"></th>
                         <th>#</th>
                         <th>영상 제목</th>
                         <th>영상 링크</th>
@@ -408,7 +410,7 @@
                     </tr>
                 </thead>
                 <tbody id="taskTableBody">
-                    <tr><td colspan="8" style="text-align:center;color:var(--text-dim)">상태를 선택하고 불러오기를 클릭하세요</td></tr>
+                    <tr><td colspan="9" style="text-align:center;color:var(--text-dim)">상태를 선택하고 불러오기를 클릭하세요</td></tr>
                 </tbody>
             </table>
         </div>
@@ -724,7 +726,7 @@
         const msgEl = document.getElementById('taskFetchMsg');
         const tbody = document.getElementById('taskTableBody');
         msgEl.textContent = '노션에서 불러오는 중...';
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-dim)">노션 DB 조회 중...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-dim)">노션 DB 조회 중...</td></tr>';
         await loadTasks(currentTaskStatus);
         msgEl.textContent = '';
     }
@@ -829,7 +831,7 @@
         const msgEl = document.getElementById('taskFetchMsg');
 
         if (!data || data.error) {
-            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--red)">${data?.error || '작업 목록 조회 실패'}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--red)">${data?.error || '작업 목록 조회 실패'}</td></tr>`;
             if (msgEl) msgEl.innerHTML = `<span style="color:var(--red)">${data?.error || '조회 실패'}</span>`;
             return;
         }
@@ -843,7 +845,7 @@
             const emptyMsg = currentDateFilter
                 ? `'${statusParam}' 상태의 ${currentDateFilter} 작업이 없습니다`
                 : `'${statusParam}' 상태의 작업이 없습니다`;
-            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-dim)">${emptyMsg}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text-dim)">${emptyMsg}</td></tr>`;
             return;
         }
 
@@ -862,8 +864,11 @@
                 const d = new Date(task.last_edited);
                 editDate = `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
             }
+            const pageId = task.page_id || '';
+            const isSelectable = (statusParam === '댓글작업전');
             return `
             <tr>
+                <td>${isSelectable ? `<input type="checkbox" class="task-checkbox" data-page-id="${pageId}" onchange="updateSelectedCount()">` : ''}</td>
                 <td>${i + 1}</td>
                 <td>${task.video_title ? task.video_title.substring(0, 30) + (task.video_title.length > 30 ? '...' : '') : '-'}</td>
                 <td>${urlDisplay}</td>
@@ -874,6 +879,19 @@
                 <td><span class="badge ${badgeClass}">${task.status || statusParam}</span></td>
             </tr>`;
         }).join('');
+
+        // 선택 실행 버튼 표시 (댓글작업전 상태일 때만)
+        const btnRunSelected = document.getElementById('btnRunSelected');
+        const selectAllCheckbox = document.getElementById('selectAllTasks');
+        if (statusParam === '댓글작업전' && data.tasks.length > 0) {
+            btnRunSelected.style.display = '';
+            selectAllCheckbox.style.display = '';
+            selectAllCheckbox.checked = false;
+        } else {
+            btnRunSelected.style.display = 'none';
+            selectAllCheckbox.style.display = 'none';
+        }
+        updateSelectedCount();
     }
 
     // ─── 계정 목록 ───
@@ -1203,6 +1221,46 @@
         }
         html += '</div>';
         container.innerHTML = html;
+    }
+
+    // ─── 작업 선택 ───
+    function toggleSelectAll(master) {
+        document.querySelectorAll('.task-checkbox').forEach(cb => cb.checked = master.checked);
+        updateSelectedCount();
+    }
+
+    function updateSelectedCount() {
+        const checked = document.querySelectorAll('.task-checkbox:checked');
+        const countEl = document.getElementById('selectedCount');
+        const btn = document.getElementById('btnRunSelected');
+        if (countEl) countEl.textContent = checked.length;
+        if (btn) btn.style.opacity = checked.length > 0 ? '1' : '0.5';
+    }
+
+    async function runSelectedTasks() {
+        const checked = document.querySelectorAll('.task-checkbox:checked');
+        if (checked.length === 0) {
+            alert('실행할 작업을 선택해주세요.');
+            return;
+        }
+        const selectedIds = Array.from(checked).map(cb => cb.dataset.pageId);
+        if (!confirm(`선택한 ${selectedIds.length}건의 작업을 실행합니다. 계속하시겠습니까?`)) return;
+
+        const res = await api('/api/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ limit: selectedIds.length, selected_ids: selectedIds })
+        });
+        if (res && !res.error) {
+            document.getElementById('btnStart').disabled = true;
+            document.getElementById('btnStop').disabled = false;
+            document.getElementById('progressWrap').style.display = 'block';
+            updateStatusIndicator(true, `선택 ${selectedIds.length}건`);
+            // 대시보드 탭으로 전환
+            switchTab('dashboard');
+        } else {
+            alert(res?.error || '실행 실패');
+        }
     }
 
     // ─── 자동화 실행/중지 ───

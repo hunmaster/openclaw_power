@@ -258,15 +258,23 @@ def api_run():
 
     data = request.get_json(silent=True) or {}
     limit = data.get("limit", 0)  # 0 = 전체, 1~N = 테스트 건수
+    selected_ids = data.get("selected_ids", [])  # 선택된 page_id 목록
     test_mode = limit > 0
 
     automation_state["test_mode"] = test_mode
     automation_state["limit"] = limit
 
-    thread = threading.Thread(target=_run_automation, args=(limit,), daemon=True)
+    thread = threading.Thread(
+        target=_run_automation, args=(limit, selected_ids), daemon=True
+    )
     thread.start()
 
-    mode_text = f"테스트 모드 ({limit}건)" if test_mode else "전체 실행"
+    if selected_ids:
+        mode_text = f"선택 실행 ({len(selected_ids)}건)"
+    elif test_mode:
+        mode_text = f"테스트 모드 ({limit}건)"
+    else:
+        mode_text = "전체 실행"
     return jsonify({"message": f"자동화가 시작되었습니다. [{mode_text}]"})
 
 
@@ -745,15 +753,21 @@ def _save_accounts(accounts):
 
 # ──────────────────────────── 자동화 실행 ────────────────────────────
 
-def _run_automation(limit=0):
+def _run_automation(limit=0, selected_ids=None):
     """백그라운드에서 자동화를 실행합니다. limit>0이면 해당 건수만 테스트 실행."""
     import time
     from src.youtube_bot import YouTubeBot
 
+    selected_ids = selected_ids or []
     test_mode = limit > 0
 
     try:
-        mode_label = f"[테스트 {limit}건]" if test_mode else "[전체 실행]"
+        if selected_ids:
+            mode_label = f"[선택 실행 {len(selected_ids)}건]"
+        elif test_mode:
+            mode_label = f"[테스트 {limit}건]"
+        else:
+            mode_label = "[전체 실행]"
         add_log(f"자동화 시작 {mode_label}", "info")
 
         notion = NotionManager()
@@ -774,8 +788,17 @@ def _run_automation(limit=0):
             automation_state["running"] = False
             return
 
+        # 선택 실행: 선택된 page_id만 필터링
+        if selected_ids:
+            selected_set = set(selected_ids)
+            tasks = [t for t in tasks if t.get("page_id") in selected_set]
+            if not tasks:
+                add_log("선택된 작업을 찾을 수 없습니다.", "warning")
+                automation_state["running"] = False
+                return
+            add_log(f"선택된 {len(tasks)}건 작업 실행", "info")
         # 테스트 모드: 지정 건수만 처리
-        if test_mode and len(tasks) > limit:
+        elif test_mode and len(tasks) > limit:
             add_log(f"테스트 모드: 전체 {len(tasks)}건 중 {limit}건만 실행", "warning")
             tasks = tasks[:limit]
 
@@ -815,10 +838,11 @@ def _run_automation(limit=0):
                 add_log(f"같은 계정 연속 - {comment_interval}초 대기", "info")
                 time.sleep(comment_interval)
 
-            # 안전 규칙 검사 (테스트 모드에서는 시간 간격 규칙 건너뜀)
+            # 안전 규칙 검사 (테스트/선택 실행 모드에서는 시간 간격 규칙 건너뜀)
+            skip = test_mode or bool(selected_ids)
             passed, reason = safety_rules.check_all_rules(
                 current_label, task["youtube_url"], task["comment_text"],
-                skip_interval=test_mode,
+                skip_interval=skip,
             )
             if not passed:
                 add_log(f"[건너뜀] {reason}", "warning")
