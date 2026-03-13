@@ -128,11 +128,12 @@ def api_dashboard():
 
 @app.route("/api/tasks")
 def api_tasks():
-    """노션 DB에서 대기 중인 작업 목록을 가져옵니다."""
+    """노션 DB에서 작업 목록을 가져옵니다. ?status= 파라미터로 상태 필터링."""
     try:
         notion = NotionManager()
-        tasks = notion.get_pending_tasks()
-        return jsonify({"tasks": tasks, "count": len(tasks)})
+        status_filter = request.args.get("status", "댓글작업전")
+        tasks = notion.get_tasks_by_status(status_filter)
+        return jsonify({"tasks": tasks, "count": len(tasks), "status": status_filter})
     except Exception as e:
         return jsonify({"error": str(e), "tasks": [], "count": 0}), 500
 
@@ -142,6 +143,7 @@ def api_notion_debug():
     """노션 DB 구조를 확인합니다 (디버깅용)."""
     try:
         from notion_client import Client
+        load_dotenv(override=True)
         token = os.getenv("NOTION_API_TOKEN", "")
         db_id = os.getenv("NOTION_DATABASE_ID", "")
 

@@ -285,21 +285,21 @@
     <!-- ━━━ 대시보드 탭 ━━━ -->
     <div class="tab-content active" id="tab-dashboard">
         <div class="cards">
-            <div class="card">
-                <div class="card-label">대기 작업</div>
+            <div class="card" style="cursor:pointer" onclick="goToTasks('댓글작업전')">
+                <div class="card-label">댓글 대기</div>
                 <div class="card-value accent" id="pendingCount">-</div>
+            </div>
+            <div class="card" style="cursor:pointer" onclick="goToTasks('댓글완료')">
+                <div class="card-label">대댓글 대기</div>
+                <div class="card-value green" id="replyPendingCount">-</div>
+            </div>
+            <div class="card" style="cursor:pointer" onclick="goToTasks('대댓글완료')">
+                <div class="card-label">좋아요 대기</div>
+                <div class="card-value blue" id="likePendingCount">-</div>
             </div>
             <div class="card">
                 <div class="card-label">오늘 성공</div>
                 <div class="card-value green" id="successCount">0</div>
-            </div>
-            <div class="card">
-                <div class="card-label">실패</div>
-                <div class="card-value red" id="failCount">0</div>
-            </div>
-            <div class="card">
-                <div class="card-label">좋아요 주문</div>
-                <div class="card-value blue" id="likeCount">0</div>
             </div>
             <div class="card">
                 <div class="card-label">활성 계정</div>
@@ -359,11 +359,19 @@
 
     <!-- ━━━ 작업 목록 탭 ━━━ -->
     <div class="tab-content" id="tab-tasks">
+        <!-- 상태 필터 탭 -->
+        <div style="display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:0">
+            <button class="tab task-filter active" data-status="댓글작업전" onclick="switchTaskFilter('댓글작업전', this)">댓글작업전</button>
+            <button class="tab task-filter" data-status="댓글완료" onclick="switchTaskFilter('댓글완료', this)">댓글완료 (대댓글 대기)</button>
+            <button class="tab task-filter" data-status="대댓글완료" onclick="switchTaskFilter('대댓글완료', this)">대댓글완료 (좋아요 대기)</button>
+            <button class="tab task-filter" data-status="좋아요작업완료" onclick="switchTaskFilter('좋아요작업완료', this)">좋아요 완료</button>
+        </div>
+
         <div class="table-wrap">
             <div class="table-title">
-                <span>노션 DB 대기 작업</span>
+                <span id="taskTableTitle">노션 DB 작업 목록</span>
                 <div style="display:flex;gap:8px;align-items:center">
-                    <button class="btn btn-sm btn-primary" onclick="fetchNotionTasks()">노션에서 불러오기</button>
+                    <button class="btn btn-sm btn-primary" onclick="fetchNotionTasks()">불러오기</button>
                     <button class="btn btn-sm btn-secondary" onclick="debugNotionDB()">DB 구조 확인</button>
                     <span id="taskFetchMsg" style="font-size:12px;line-height:28px;color:var(--text-dim)"></span>
                 </div>
@@ -381,7 +389,7 @@
                     </tr>
                 </thead>
                 <tbody id="taskTableBody">
-                    <tr><td colspan="7" style="text-align:center;color:var(--text-dim)">로딩 중...</td></tr>
+                    <tr><td colspan="7" style="text-align:center;color:var(--text-dim)">상태를 선택하고 불러오기를 클릭하세요</td></tr>
                 </tbody>
             </table>
         </div>
@@ -637,6 +645,17 @@
         document.getElementById('smmBalance').textContent =
             data.smm_balance !== null ? '$' + parseFloat(data.smm_balance).toFixed(2) : 'N/A';
 
+        // 상태별 카운트 로드 (병렬)
+        Promise.all([
+            api('/api/tasks?status=댓글작업전'),
+            api('/api/tasks?status=댓글완료'),
+            api('/api/tasks?status=대댓글완료'),
+        ]).then(([comment, reply, like]) => {
+            if (comment) document.getElementById('pendingCount').textContent = comment.count || 0;
+            if (reply) document.getElementById('replyPendingCount').textContent = reply.count || 0;
+            if (like) document.getElementById('likePendingCount').textContent = like.count || 0;
+        });
+
         // 계정 테이블
         const tbody = document.getElementById('accountTableBody');
         if (data.accounts.length === 0) {
@@ -655,14 +674,36 @@
         `).join('');
     }
 
+    // ─── 현재 선택된 상태 필터 ───
+    let currentTaskStatus = '댓글작업전';
+
     // ─── 작업 목록 로드 ───
     async function fetchNotionTasks() {
         const msgEl = document.getElementById('taskFetchMsg');
         const tbody = document.getElementById('taskTableBody');
         msgEl.textContent = '노션에서 불러오는 중...';
         tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-dim)">노션 DB 조회 중...</td></tr>';
-        await loadTasks();
+        await loadTasks(currentTaskStatus);
         msgEl.textContent = '';
+    }
+
+    function switchTaskFilter(status, btn) {
+        currentTaskStatus = status;
+        document.querySelectorAll('.task-filter').forEach(b => b.classList.remove('active'));
+        if (btn) btn.classList.add('active');
+        document.getElementById('taskTableTitle').textContent = `노션 DB 작업 (${status})`;
+        fetchNotionTasks();
+    }
+
+    function goToTasks(status) {
+        switchTab('tasks');
+        // 해당 필터 탭 활성화
+        document.querySelectorAll('.task-filter').forEach(b => {
+            b.classList.toggle('active', b.dataset.status === status);
+        });
+        currentTaskStatus = status;
+        document.getElementById('taskTableTitle').textContent = `노션 DB 작업 (${status})`;
+        fetchNotionTasks();
     }
 
     // ─── 노션 DB 구조 디버그 ───
@@ -724,8 +765,9 @@
         content.innerHTML = html;
     }
 
-    async function loadTasks() {
-        const data = await api('/api/tasks');
+    async function loadTasks(status) {
+        const statusParam = status || currentTaskStatus;
+        const data = await api(`/api/tasks?status=${encodeURIComponent(statusParam)}`);
         const tbody = document.getElementById('taskTableBody');
         const msgEl = document.getElementById('taskFetchMsg');
 
@@ -735,24 +777,35 @@
             return;
         }
 
-        document.getElementById('pendingCount').textContent = data.count;
+        // 대시보드 카운터 업데이트
+        if (statusParam === '댓글작업전') document.getElementById('pendingCount').textContent = data.count;
         if (msgEl && data.count >= 0) msgEl.innerHTML = `<span style="color:var(--green)">${data.count}개 작업 로드됨</span>`;
 
         if (data.tasks.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-dim)">대기 중인 작업이 없습니다</td></tr>';
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-dim)">'${statusParam}' 상태의 작업이 없습니다</td></tr>`;
             return;
         }
-        tbody.innerHTML = data.tasks.map((task, i) => `
+
+        const statusColors = {
+            '댓글작업전': 'badge-yellow', '댓글완료': 'badge-green',
+            '대댓글완료': 'badge-blue', '좋아요작업완료': 'badge-green',
+        };
+        const badgeClass = statusColors[statusParam] || 'badge-yellow';
+
+        tbody.innerHTML = data.tasks.map((task, i) => {
+            const url = task.youtube_url || '';
+            const urlDisplay = url ? `<a href="${url}" target="_blank" style="color:var(--blue);text-decoration:none">${url.substring(0, 40)}...</a>` : '-';
+            return `
             <tr>
                 <td>${i + 1}</td>
                 <td>${task.video_title ? task.video_title.substring(0, 30) + (task.video_title.length > 30 ? '...' : '') : '-'}</td>
-                <td><a href="${task.youtube_url}" target="_blank" style="color:var(--blue);text-decoration:none">${task.youtube_url.substring(0, 40)}...</a></td>
-                <td>${task.comment_text.substring(0, 30)}${task.comment_text.length > 30 ? '...' : ''}</td>
+                <td>${urlDisplay}</td>
+                <td>${task.comment_text ? task.comment_text.substring(0, 30) + (task.comment_text.length > 30 ? '...' : '') : '-'}</td>
                 <td>${task.account || '-'}</td>
                 <td>${task.brand || '-'}</td>
-                <td><span class="badge badge-yellow">${task.status || '댓글작업전'}</span></td>
-            </tr>
-        `).join('');
+                <td><span class="badge ${badgeClass}">${task.status || statusParam}</span></td>
+            </tr>`;
+        }).join('');
     }
 
     // ─── 계정 목록 ───

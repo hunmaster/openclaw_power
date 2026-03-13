@@ -5,6 +5,7 @@ Notion API 연동 모듈
 """
 
 import os
+from dotenv import load_dotenv
 from notion_client import Client
 from rich.console import Console
 
@@ -13,6 +14,9 @@ console = Console()
 
 class NotionManager:
     def __init__(self):
+        # .env 변경사항을 매번 반영
+        load_dotenv(override=True)
+
         self.token = os.getenv("NOTION_API_TOKEN")
         self.database_id = os.getenv("NOTION_DATABASE_ID")
 
@@ -30,37 +34,37 @@ class NotionManager:
 
     def get_pending_tasks(self):
         """상태가 '댓글작업전'인 작업 목록만 가져옵니다."""
-        console.print(f"[blue]노션 DB 조회 시작 (DB: {self.database_id[:8]}..., 상태 컬럼: {self.col_status})[/blue]")
+        return self.get_tasks_by_status("댓글작업전")
+
+    def get_tasks_by_status(self, status_value):
+        """지정된 상태의 작업 목록을 가져옵니다."""
+        console.print(f"[blue]노션 DB 조회 (상태: '{status_value}', 컬럼: {self.col_status})[/blue]")
         try:
-            # select 타입 먼저 시도 (실제 DB가 select 타입)
             response = self.client.databases.query(
                 database_id=self.database_id,
                 page_size=100,
                 filter={
                     "property": self.col_status,
-                    "select": {"equals": "댓글작업전"},
+                    "select": {"equals": status_value},
                 },
             )
             console.print(f"[green]select 필터 성공: {len(response.get('results', []))}건[/green]")
         except Exception as e1:
             console.print(f"[yellow]select 필터 실패: {e1}[/yellow]")
-            # status 타입으로 재시도
             try:
                 response = self.client.databases.query(
                     database_id=self.database_id,
                     page_size=100,
                     filter={
                         "property": self.col_status,
-                        "status": {"equals": "댓글작업전"},
+                        "status": {"equals": status_value},
                     },
                 )
                 console.print(f"[green]status 필터 성공: {len(response.get('results', []))}건[/green]")
             except Exception as e2:
                 console.print(f"[yellow]status 필터도 실패: {e2}[/yellow]")
-                # 필터 없이 전체 조회 후 코드에서 필터링
                 console.print("[yellow]필터 없이 전체 데이터를 가져옵니다.[/yellow]")
                 response = self.client.databases.query(database_id=self.database_id, page_size=100)
-                console.print(f"[blue]전체 조회: {len(response.get('results', []))}건[/blue]")
 
         results = response.get("results", [])
         console.print(f"[blue]조회된 결과: {len(results)}건[/blue]")
@@ -69,19 +73,17 @@ class NotionManager:
         tasks = []
         for idx, page in enumerate(results):
             task = self._parse_page(page, debug=(idx == 0))
-            console.print(
-                f"[dim]  [{idx}] youtube_url={bool(task.get('youtube_url'))}, "
-                f"comment_text={bool(task.get('comment_text'))}, "
-                f"status={task.get('status')}, "
-                f"url={str(task.get('youtube_url', ''))[:50]}[/dim]"
-            )
-            # 댓글 원고가 있는 작업만 (youtube_url은 없어도 목록에 표시)
-            if task and task.get("comment_text"):
-                # 이미 완료된 항목 제외
-                if task.get("status") not in ("댓글완료", "대댓글완료", "에러"):
-                    tasks.append(task)
+            if idx < 3:
+                console.print(
+                    f"[dim]  [{idx}] youtube_url={bool(task.get('youtube_url'))}, "
+                    f"comment_text={bool(task.get('comment_text'))}, "
+                    f"status={task.get('status')}, "
+                    f"url={str(task.get('youtube_url', ''))[:50]}[/dim]"
+                )
+            if task:
+                tasks.append(task)
 
-        console.print(f"[green]대기 중인 작업: {len(tasks)}개[/green]")
+        console.print(f"[green]'{status_value}' 작업: {len(tasks)}개[/green]")
         return tasks
 
     def _parse_page(self, page, debug=False):
