@@ -256,7 +256,7 @@ class NotionManager:
         }
 
     def update_task_result(self, page_id, comment_url, status="댓글완료"):
-        """댓글 작성 결과를 Notion에 저장합니다."""
+        """댓글 작성 결과를 Notion에 저장합니다. 성공 시 True, 실패 시 False 반환."""
         properties = {}
 
         # 댓글 URL 저장 - url 타입 먼저 시도
@@ -272,19 +272,23 @@ class NotionManager:
             properties[self.col_status] = {"select": {"name": status}}
             self.client.pages.update(page_id=page_id, properties=properties)
             console.print(f"[green]Notion 업데이트 완료: {status}[/green]")
-        except Exception:
+            return True
+        except Exception as e1:
+            console.print(f"[yellow]select 타입 실패: {e1}[/yellow]")
             # url 타입 실패 시 rich_text로 재시도
             if comment_url:
                 properties[self.col_result_url] = self._build_result_url_rich_text(comment_url)
             try:
                 self.client.pages.update(page_id=page_id, properties=properties)
                 console.print(f"[green]Notion 업데이트 완료: {status}[/green]")
+                return True
             except Exception:
                 # status 타입으로도 시도
                 try:
                     properties[self.col_status] = {"status": {"name": status}}
                     self.client.pages.update(page_id=page_id, properties=properties)
                     console.print(f"[green]Notion 업데이트 완료: {status}[/green]")
+                    return True
                 except Exception as e:
                     # URL만이라도 저장
                     try:
@@ -294,8 +298,11 @@ class NotionManager:
                         if url_only:
                             self.client.pages.update(page_id=page_id, properties=url_only)
                             console.print(f"[yellow]댓글 URL만 업데이트됨 (상태 실패: {e})[/yellow]")
+                            return False
                     except Exception as e2:
-                        console.print(f"[red]Notion 업데이트 실패: {e2}[/red]")
+                        console.print(f"[red]Notion 업데이트 완전 실패: {e2}[/red]")
+                        return False
+        return False
 
     def update_task_error(self, page_id, error_message):
         """에러 상태를 Notion에 저장합니다."""

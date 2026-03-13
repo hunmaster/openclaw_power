@@ -852,7 +852,11 @@ def _run_automation(limit=0):
                 comment_url = bot.post_comment(task["youtube_url"], task["comment_text"])
 
                 if comment_url:
-                    notion.update_task_result(task["page_id"], comment_url, status="댓글완료")
+                    notion_ok = notion.update_task_result(task["page_id"], comment_url, status="댓글완료")
+                    if notion_ok:
+                        add_log("노션 '댓글완료' 업데이트 성공", "success")
+                    else:
+                        add_log("노션 '댓글완료' 업데이트 실패 (콘솔 로그 확인)", "warning")
                     safety_rules.record_comment(current_label, task["youtube_url"], task["comment_text"])
                     automation_state["results"]["success"] += 1
                     add_log(f"댓글 성공: {comment_url[:60]}", "success")
@@ -869,27 +873,42 @@ def _run_automation(limit=0):
                 bot.close_browser()
                 prev_account_label = current_label
 
-        # SMM 대량 좋아요 주문 (모든 댓글 완료 후 한 번에)
+        # SMM 좋아요 주문 (모든 댓글 완료 후)
+        like_success_count = 0
         if smm_client.enabled and successful_comments:
             comment_urls = [c["url"] for c in successful_comments]
+
+            # 1) 대량 주문 시도
             add_log(f"SMM 대량 좋아요 주문 시작: {len(comment_urls)}개 댓글", "info")
             mass_result = smm_client.order_mass_likes(comment_urls)
+
             if mass_result["success"]:
-                automation_state["results"]["likes"] = len(mass_result["order_ids"])
-                add_log(
-                    f"대량 좋아요 주문 완료! 성공: {len(mass_result['order_ids'])}건",
-                    "success",
-                )
-                # 좋아요 주문 성공한 작업의 노션 상태를 '좋아요작업완료'로 업데이트
+                like_success_count = len(mass_result["order_ids"])
+                add_log(f"대량 좋아요 주문 완료! 성공: {like_success_count}건", "success")
+            else:
+                # 2) 대량 주문 실패 → 개별 주문 폴백
+                if mass_result.get("errors"):
+                    for err in mass_result["errors"]:
+                        add_log(f"대량 주문 오류: {err}", "warning")
+                add_log("대량 주문 실패 → 개별 주문으로 전환합니다", "info")
+                for c in successful_comments:
+                    single = smm_client.order_likes(c["url"])
+                    if single.get("success"):
+                        like_success_count += 1
+                        add_log(f"개별 좋아요 주문 성공: 주문ID {single.get('order_id')}", "success")
+                    else:
+                        add_log(f"개별 좋아요 주문 실패: {single.get('error', '?')}", "warning")
+
+            automation_state["results"]["likes"] = like_success_count
+
+            # 좋아요 주문 성공 시 노션 상태를 '좋아요작업완료'로 업데이트
+            if like_success_count > 0:
                 for c in successful_comments:
                     try:
                         notion.update_task_status(c["page_id"], "좋아요작업완료")
                     except Exception as e:
-                        add_log(f"노션 상태 업데이트 실패: {e}", "warning")
+                        add_log(f"노션 '좋아요작업완료' 업데이트 실패: {e}", "warning")
                 add_log(f"노션 상태 업데이트: {len(successful_comments)}건 → 좋아요작업완료", "success")
-            if mass_result.get("errors"):
-                for err in mass_result["errors"]:
-                    add_log(f"좋아요 주문 오류: {err}", "warning")
 
         summary_prefix = "[테스트 완료]" if test_mode else "[전체 완료]"
         add_log(

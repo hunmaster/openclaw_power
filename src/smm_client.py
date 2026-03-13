@@ -39,12 +39,15 @@ class SMMClient:
     def _request(self, params):
         """SMM Kings API에 요청을 보냅니다."""
         params["key"] = self.api_key
+        action = params.get("action", "unknown")
         try:
             response = requests.post(API_URL, data=params, timeout=30)
             response.raise_for_status()
-            return response.json()
+            result = response.json()
+            console.print(f"[dim]SMM API 응답 ({action}): {str(result)[:200]}[/dim]")
+            return result
         except requests.exceptions.RequestException as e:
-            console.print(f"[red]SMM API 요청 실패: {e}[/red]")
+            console.print(f"[red]SMM API 요청 실패 ({action}): {e}[/red]")
             return None
 
     def get_balance(self):
