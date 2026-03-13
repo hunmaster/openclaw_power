@@ -311,14 +311,25 @@
             </div>
         </div>
 
-        <!-- 진행 상태 -->
-        <div class="progress-wrap" id="progressWrap" style="display:none">
-            <div class="progress-text">
-                <span id="progressLabel">진행 중...</span>
-                <span id="progressPercent">0%</span>
+        <!-- 진행 상태 패널 -->
+        <div class="card" id="progressWrap" style="display:none;margin-bottom:24px;border:1px solid var(--accent)44">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <div style="display:flex;align-items:center;gap:10px">
+                    <span class="status-dot running"></span>
+                    <span style="font-size:15px;font-weight:600" id="progressTitle">자동화 진행 중</span>
+                </div>
+                <span style="font-size:24px;font-weight:700;color:var(--accent-light)" id="progressPercent">0%</span>
             </div>
-            <div class="progress-bar">
-                <div class="progress-fill" id="progressFill" style="width:0%"></div>
+            <div style="height:12px;background:var(--border);border-radius:6px;overflow:hidden;margin-bottom:12px">
+                <div id="progressFill" style="height:100%;border-radius:6px;background:linear-gradient(90deg, var(--accent), var(--accent-light));transition:width 0.5s ease;width:0%"></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:13px;color:var(--text-dim)" id="progressLabel">준비 중...</span>
+                <div style="display:flex;gap:16px;font-size:12px">
+                    <span style="color:var(--green)" id="progressSuccess">성공 0</span>
+                    <span style="color:var(--red)" id="progressFail">실패 0</span>
+                    <span style="color:var(--yellow)" id="progressSkip">건너뜀 0</span>
+                </div>
             </div>
         </div>
 
@@ -1029,13 +1040,28 @@
         updateStatusIndicator(data.running);
 
         // 진행률
-        if (data.total > 0) {
+        if (data.running || data.total > 0) {
             document.getElementById('progressWrap').style.display = 'block';
-            const pct = Math.round((data.progress / data.total) * 100);
+            const pct = data.total > 0 ? Math.round((data.progress / data.total) * 100) : 0;
             document.getElementById('progressFill').style.width = pct + '%';
             document.getElementById('progressPercent').textContent = pct + '%';
             document.getElementById('progressLabel').textContent =
                 data.current_task ? `${data.progress}/${data.total}: ${data.current_task}` : `${data.progress}/${data.total}`;
+            document.getElementById('progressSuccess').textContent = `성공 ${data.results.success}`;
+            document.getElementById('progressFail').textContent = `실패 ${data.results.fail}`;
+            document.getElementById('progressSkip').textContent = `건너뜀 ${data.results.skip}`;
+
+            // 완료 시 스타일 변경
+            if (!data.running && data.total > 0 && data.progress >= data.total) {
+                document.getElementById('progressTitle').textContent = '자동화 완료';
+                document.getElementById('progressFill').style.background = 'linear-gradient(90deg, var(--green), #00d2a0)';
+            } else if (data.running) {
+                document.getElementById('progressTitle').textContent = '자동화 진행 중';
+                document.getElementById('progressFill').style.background = 'linear-gradient(90deg, var(--accent), var(--accent-light))';
+            }
+        }
+        if (!data.running && data.total === 0) {
+            document.getElementById('progressWrap').style.display = 'none';
         }
 
         // 결과 카드
