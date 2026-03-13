@@ -143,6 +143,9 @@ class NotionManager:
         elif prop_type == "title":
             titles = prop.get("title", [])
             return "".join(t.get("plain_text", "") for t in titles)
+        elif prop_type == "select":
+            select = prop.get("select")
+            return select.get("name", "") if select else ""
         return ""
 
     def _extract_status(self, prop):
@@ -159,35 +162,56 @@ class NotionManager:
             return self._extract_text(prop)
         return ""
 
+    def _build_result_url_property(self, comment_url):
+        """댓글 URL 속성을 DB 컬럼 타입에 맞게 생성합니다."""
+        # url 타입 시도, 실패하면 rich_text로 폴백
+        return {"url": comment_url}
+
+    def _build_result_url_rich_text(self, comment_url):
+        """댓글 URL을 rich_text 형식으로 생성합니다."""
+        return {
+            "rich_text": [
+                {"type": "text", "text": {"content": comment_url, "link": {"url": comment_url}}}
+            ]
+        }
+
     def update_task_result(self, page_id, comment_url, status="완료"):
         """댓글 작성 결과를 Notion에 저장합니다."""
         properties = {}
 
-        # 댓글 URL 저장
+        # 댓글 URL 저장 - url 타입 먼저 시도
         if comment_url:
-            properties[self.col_result_url] = {"url": comment_url}
+            properties[self.col_result_url] = self._build_result_url_property(comment_url)
 
-        # 상태 업데이트 - status 타입 시도, 실패하면 select 시도
+        # 상태 업데이트 - select 타입 시도 (실제 DB가 select)
         try:
-            properties[self.col_status] = {"status": {"name": status}}
+            properties[self.col_status] = {"select": {"name": status}}
             self.client.pages.update(page_id=page_id, properties=properties)
             console.print(f"[green]Notion 업데이트 완료: {status}[/green]")
         except Exception:
+            # url 타입 실패 시 rich_text로 재시도
+            if comment_url:
+                properties[self.col_result_url] = self._build_result_url_rich_text(comment_url)
             try:
-                properties[self.col_status] = {"select": {"name": status}}
                 self.client.pages.update(page_id=page_id, properties=properties)
                 console.print(f"[green]Notion 업데이트 완료: {status}[/green]")
-            except Exception as e:
-                # 상태 없이 URL만 업데이트
+            except Exception:
+                # status 타입으로도 시도
                 try:
-                    url_only = {}
-                    if comment_url:
-                        url_only[self.col_result_url] = {"url": comment_url}
-                    if url_only:
-                        self.client.pages.update(page_id=page_id, properties=url_only)
-                        console.print(f"[yellow]댓글 URL만 업데이트됨 (상태 업데이트 실패: {e})[/yellow]")
-                except Exception as e2:
-                    console.print(f"[red]Notion 업데이트 실패: {e2}[/red]")
+                    properties[self.col_status] = {"status": {"name": status}}
+                    self.client.pages.update(page_id=page_id, properties=properties)
+                    console.print(f"[green]Notion 업데이트 완료: {status}[/green]")
+                except Exception as e:
+                    # URL만이라도 저장
+                    try:
+                        url_only = {}
+                        if comment_url:
+                            url_only[self.col_result_url] = self._build_result_url_rich_text(comment_url)
+                        if url_only:
+                            self.client.pages.update(page_id=page_id, properties=url_only)
+                            console.print(f"[yellow]댓글 URL만 업데이트됨 (상태 실패: {e})[/yellow]")
+                    except Exception as e2:
+                        console.print(f"[red]Notion 업데이트 실패: {e2}[/red]")
 
     def update_task_error(self, page_id, error_message):
         """에러 상태를 Notion에 저장합니다."""
