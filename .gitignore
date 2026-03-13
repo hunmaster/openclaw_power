@@ -5,6 +5,10 @@
 config/accounts.json
 config/proxies.txt
 
+# 자동 생성 데이터 (런타임)
+config/fingerprints.json
+config/comment_history.json
+
 # Python
 __pycache__/
 *.py[cod]

@@ -12,16 +12,15 @@ YouTube 댓글 자동화 - 메인 오케스트레이터
    e. 댓글 작성
    f. 댓글 URL 추출
    g. 노션 DB에 결과 저장
-   h. 안전 규칙 기록 (히스토리 저장)
-   i. 브라우저 완전 종료 (세션 초기화)
-   j. IP 변경 대기
+   h. SMM Kings API로 댓글 좋아요 구매
+   i. 안전 규칙 기록 (히스토리 저장)
+   j. 브라우저 완전 종료 (세션 초기화)
+   k. IP 변경 대기
 
-유튜브 바이럴 가이드라인 적용:
-- 1일 1계정당 댓글 수 제한 (기본 8개, .env에서 조절 가능)
-- 같은 영상 다른 계정 30~60분 간격
-- 동일/유사 문구 반복 차단
-- 링크 포함 댓글 차단
-- 안티디텍트 브라우저 지문으로 계정 간 연결 차단
+운영 전략:
+- 1계정당 20개 댓글, 시간 간격을 두고 작업
+- 계정 전환 시 IP 변경 (프록시 로테이션)
+- 댓글 작성 후 자동으로 좋아요 구매
 """
 
 import os
@@ -42,6 +41,7 @@ from src.proxy_manager import ProxyManager
 from src.youtube_bot import YouTubeBot
 from src.fingerprint import FingerprintManager
 from src.safety_rules import SafetyRules
+from src.smm_client import SMMClient
 
 console = Console()
 
@@ -78,7 +78,7 @@ def find_account(accounts, account_label):
     return accounts[0] if accounts else None
 
 
-def display_status(tasks, proxy_manager, safety_rules, accounts):
+def display_status(tasks, proxy_manager, safety_rules, accounts, smm_client):
     """작업 현황을 표시합니다."""
     console.print(Panel("[bold]YouTube 댓글 자동화 프로그램[/bold]", style="blue"))
 
@@ -127,17 +127,19 @@ def display_status(tasks, proxy_manager, safety_rules, accounts):
     console.print(account_table)
     console.print(f"\n[blue]프록시 상태: {proxy_manager.get_status()}[/blue]")
 
+    # SMM 잔액 표시
+    if smm_client.enabled:
+        smm_client.get_balance()
+    else:
+        console.print("[dim]SMM 좋아요 구매: 비활성[/dim]")
+
 
 def process_task(task, account, proxy_manager, fingerprint_manager, safety_rules):
     """
     개별 댓글 작업을 처리합니다.
 
-    적용되는 규칙:
-    1. 안전 규칙 검사 (1일 제한, 시간 간격, 링크 차단)
-    2. 안티디텍트 지문 적용
-    3. 계정별 프록시 할당
-    4. 시크릿 모드 브라우저
-    5. 작업 완료 후 히스토리 기록
+    Returns:
+        (comment_url or "SKIP" or None, error_msg or None)
     """
     account_label = account.get("label", account.get("email", "unknown"))
     console.print(f"\n[bold blue]━━━ 작업 시작: {account_label} ━━━[/bold blue]")
@@ -203,7 +205,7 @@ def run():
     console.print(Panel(
         "[bold green]YouTube 댓글 자동화 프로그램 시작[/bold green]\n"
         "IP 가이드라인 + 유튜브 바이럴 가이드라인 적용\n"
-        "안티디텍트 지문 | 프록시 로테이션 | 댓글 안전 규칙",
+        "안티디텍트 지문 | 프록시 로테이션 | 댓글 안전 규칙 | 좋아요 자동 구매",
         style="green",
     ))
 
@@ -217,6 +219,7 @@ def run():
     proxy_manager = ProxyManager()
     fingerprint_manager = FingerprintManager()
     safety_rules = SafetyRules()
+    smm_client = SMMClient()
     accounts = load_accounts()
 
     if not accounts:
@@ -230,14 +233,16 @@ def run():
         return
 
     # 현황 표시
-    display_status(tasks, proxy_manager, safety_rules, accounts)
+    display_status(tasks, proxy_manager, safety_rules, accounts, smm_client)
 
     # 작업 실행
     delay_ip_change = int(os.getenv("DELAY_AFTER_IP_CHANGE", "3"))
-    comment_interval = int(os.getenv("COMMENT_INTERVAL_SEC", "120"))
+    comment_interval = int(os.getenv("COMMENT_INTERVAL_SEC", "180"))
     success_count = 0
     fail_count = 0
     skip_count = 0
+    like_order_count = 0
+    like_order_ids = []
     prev_account_label = None
 
     for i, task in enumerate(tasks, 1):
@@ -263,7 +268,7 @@ def run():
             )
             time.sleep(delay_ip_change)
         elif prev_account_label == current_label and i > 1:
-            # 같은 계정 연속 사용 시 댓글 간격 대기
+            # 같은 계정 연속 사용 시 댓글 간격 대기 (1계정 20개, 시간 간격 두고 작업)
             console.print(
                 f"[yellow]같은 계정 연속 사용 - "
                 f"댓글 간격 대기 중... ({comment_interval}초)[/yellow]"
@@ -276,13 +281,27 @@ def run():
         )
 
         if result == "SKIP":
-            console.print(f"[yellow]⊘ 작업 {i} 건너뜀: {error_msg}[/yellow]")
+            console.print(f"[yellow]작업 {i} 건너뜀: {error_msg}[/yellow]")
             skip_count += 1
         elif result:
             comment_url = result if isinstance(result, str) else ""
             notion.update_task_result(task["page_id"], comment_url, status="완료")
             success_count += 1
             console.print(f"[green]작업 {i} 완료[/green]")
+
+            # === 댓글 좋아요 자동 구매 ===
+            if smm_client.enabled and comment_url:
+                like_result = smm_client.order_likes(comment_url)
+                if like_result["success"]:
+                    like_order_count += 1
+                    like_order_ids.append(like_result["order_id"])
+                    console.print(
+                        f"[green]좋아요 주문 완료 (주문 ID: {like_result['order_id']})[/green]"
+                    )
+                else:
+                    console.print(
+                        f"[yellow]좋아요 주문 실패: {like_result.get('error', '알 수 없음')}[/yellow]"
+                    )
         else:
             notion.update_task_error(task["page_id"], error_msg or "댓글 작성 실패")
             fail_count += 1
@@ -290,13 +309,24 @@ def run():
 
         prev_account_label = current_label
 
+    # 좋아요 주문 상태 일괄 확인
+    if like_order_ids:
+        console.print(f"\n[bold blue]━━━ 좋아요 주문 상태 확인 ━━━[/bold blue]")
+        smm_client.check_multiple_orders(like_order_ids)
+
     # 결과 요약
-    console.print(Panel(
-        f"[bold]작업 완료![/bold]\n"
-        f"성공: [green]{success_count}[/green]건\n"
-        f"실패: [red]{fail_count}[/red]건\n"
-        f"건너뜀: [yellow]{skip_count}[/yellow]건\n"
+    summary_lines = [
+        f"[bold]작업 완료![/bold]",
+        f"댓글 성공: [green]{success_count}[/green]건",
+        f"댓글 실패: [red]{fail_count}[/red]건",
+        f"건너뜀: [yellow]{skip_count}[/yellow]건",
         f"전체: {len(tasks)}건",
+    ]
+    if smm_client.enabled:
+        summary_lines.append(f"좋아요 주문: [blue]{like_order_count}[/blue]건")
+
+    console.print(Panel(
+        "\n".join(summary_lines),
         style="blue",
         title="결과 요약",
     ))

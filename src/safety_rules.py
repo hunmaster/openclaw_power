@@ -18,9 +18,9 @@ from rich.console import Console
 console = Console()
 
 # 기본 제한값
-DEFAULT_MAX_COMMENTS_PER_DAY = 4  # 1일 1계정당 최대 댓글 수 (3~5개 → 안전하게 4)
-DEFAULT_SAME_VIDEO_INTERVAL_MIN = 40  # 같은 영상 다른 계정 간격 (분)
-DEFAULT_COMMENT_INTERVAL_SEC = 120  # 연속 댓글 사이 최소 간격 (초)
+DEFAULT_MAX_COMMENTS_PER_DAY = 20  # 1일 1계정당 최대 댓글 수 (시간 간격을 두고 작업)
+DEFAULT_SAME_VIDEO_INTERVAL_MIN = 30  # 같은 영상 다른 계정 간격 (분)
+DEFAULT_COMMENT_INTERVAL_SEC = 180  # 연속 댓글 사이 최소 간격 (초) - 3분
 
 
 class SafetyRules:
