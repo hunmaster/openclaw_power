@@ -25,12 +25,14 @@ class NotionManager:
 
         self.client = Client(auth=self.token)
 
-        # 컬럼명 설정
+        # 컬럼명 설정 (노션 DB 실제 컬럼명 기준)
         self.col_youtube_url = os.getenv("NOTION_COLUMN_YOUTUBE_URL", "영상 링크")
         self.col_comment_text = os.getenv("NOTION_COLUMN_COMMENT_TEXT", "댓글 원고")
         self.col_result_url = os.getenv("NOTION_COLUMN_COMMENT_RESULT_URL", "댓글 url")
         self.col_status = os.getenv("NOTION_COLUMN_STATUS", "상태")
         self.col_account = os.getenv("NOTION_COLUMN_ACCOUNT", "댓글 계정")
+        console.print(f"[dim]컬럼 설정: url='{self.col_youtube_url}', comment='{self.col_comment_text}', "
+                      f"result='{self.col_result_url}', status='{self.col_status}', account='{self.col_account}'[/dim]")
 
     def get_pending_tasks(self):
         """상태가 '댓글작업전'인 작업 목록만 가져옵니다."""
@@ -115,13 +117,27 @@ class NotionManager:
         status_prop = props.get(self.col_status, {})
         task["status"] = self._extract_status(status_prop)
 
-        # 계정 추출 - 지정된 컬럼명으로 먼저, 없으면 select 타입에서 탐색
+        # 계정 추출 - 지정된 컬럼명으로 먼저, 없으면 '계정' 포함 컬럼 자동 탐색
         account_prop = props.get(self.col_account, {})
         task["account"] = self._extract_text(account_prop)
+        if not task["account"]:
+            for name, prop in props.items():
+                if "계정" in name and prop.get("type") == "select":
+                    task["account"] = self._extract_text(prop)
+                    if debug and task["account"]:
+                        console.print(f"[yellow]  계정 자동 탐색: '{name}' → {task['account']}[/yellow]")
+                    break
 
-        # 기존 댓글 URL 확인
+        # 기존 댓글 URL 확인 - 지정된 컬럼명으로 먼저, 없으면 '댓글' + 'url' 포함 컬럼 탐색
         result_prop = props.get(self.col_result_url, {})
         task["result_url"] = self._extract_url(result_prop)
+        if not task["result_url"]:
+            for name, prop in props.items():
+                if "댓글" in name and "url" in name.lower():
+                    task["result_url"] = self._extract_url(prop) or self._extract_text(prop)
+                    if debug and task["result_url"]:
+                        console.print(f"[yellow]  댓글URL 자동 탐색: '{name}' → {task['result_url'][:50]}[/yellow]")
+                    break
 
         # 영상 제목 추출 (title 타입 컬럼)
         for name, prop in props.items():

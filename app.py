@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-load_dotenv()
+load_dotenv(override=True)
 
 from src.notion_client import NotionManager
 from src.proxy_manager import ProxyManager
@@ -201,7 +201,8 @@ def api_notion_debug():
                     page_data[name] = f"[{prop_type}]"
             sample_pages.append(page_data)
 
-        # 현재 코드에서 기대하는 컬럼명
+        # 현재 코드에서 기대하는 컬럼명 (.env 파일 직접 참조)
+        load_dotenv(override=True)
         expected = {
             "영상 링크": os.getenv("NOTION_COLUMN_YOUTUBE_URL", "영상 링크"),
             "댓글 원고": os.getenv("NOTION_COLUMN_COMMENT_TEXT", "댓글 원고"),
@@ -209,6 +210,9 @@ def api_notion_debug():
             "댓글 계정": os.getenv("NOTION_COLUMN_ACCOUNT", "댓글 계정"),
             "댓글 url": os.getenv("NOTION_COLUMN_COMMENT_RESULT_URL", "댓글 url"),
         }
+        # 실제 로드된 값 로깅
+        print(f"[DEBUG] expected columns: {expected}")
+        print(f"[DEBUG] actual DB columns: {list(properties.keys())}")
 
         # 매칭 확인
         actual_names = set(properties.keys())
