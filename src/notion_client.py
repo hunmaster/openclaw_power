@@ -29,23 +29,15 @@ class NotionManager:
         self.col_account = os.getenv("NOTION_COLUMN_ACCOUNT", "계정")
 
     def get_pending_tasks(self):
-        """상태가 '댓글작업전' 또는 비어있는 작업 목록을 가져옵니다."""
+        """상태가 '댓글작업전'인 작업 목록만 가져옵니다."""
         try:
             # select 타입 먼저 시도 (실제 DB가 select 타입)
             response = self.client.databases.query(
                 database_id=self.database_id,
                 page_size=100,
                 filter={
-                    "or": [
-                        {
-                            "property": self.col_status,
-                            "select": {"equals": "댓글작업전"},
-                        },
-                        {
-                            "property": self.col_status,
-                            "select": {"is_empty": True},
-                        },
-                    ]
+                    "property": self.col_status,
+                    "select": {"equals": "댓글작업전"},
                 },
             )
         except Exception:
@@ -55,16 +47,8 @@ class NotionManager:
                     database_id=self.database_id,
                     page_size=100,
                     filter={
-                        "or": [
-                            {
-                                "property": self.col_status,
-                                "status": {"equals": "댓글작업전"},
-                            },
-                            {
-                                "property": self.col_status,
-                                "status": {"is_empty": True},
-                            },
-                        ]
+                        "property": self.col_status,
+                        "status": {"equals": "댓글작업전"},
                     },
                 )
             except Exception:
@@ -197,6 +181,10 @@ class NotionManager:
         # 댓글 URL 저장 - url 타입 먼저 시도
         if comment_url:
             properties[self.col_result_url] = self._build_result_url_property(comment_url)
+
+        # 댓글 완료 체크박스 체크
+        if status == "댓글완료":
+            properties["댓글 완료"] = {"checkbox": True}
 
         # 상태 업데이트 - select 타입 시도 (실제 DB가 select)
         try:
