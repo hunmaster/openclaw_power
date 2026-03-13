@@ -765,18 +765,30 @@
             tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-dim)">등록된 계정이 없습니다. 위에서 계정을 추가하세요.</td></tr>';
             return;
         }
-        tbody.innerHTML = data.accounts.map(acc => `
+        tbody.innerHTML = data.accounts.map(acc => {
+            const safeId = acc.email.replace(/[^a-zA-Z0-9]/g, '_');
+            return `
             <tr>
                 <td><strong>${acc.label}</strong></td>
                 <td>${acc.email}</td>
                 <td><span class="badge ${acc.account_type === 'sub' ? 'badge-yellow' : 'badge-blue'}">${acc.account_type === 'sub' ? '부계정' : '찐계정'}</span></td>
-                <td style="display:flex;gap:6px;align-items:center">
-                    <button class="btn btn-sm btn-secondary" id="testBtn-${acc.email.replace(/[^a-zA-Z0-9]/g,'_')}" onclick="testLogin('${acc.email}')">로그인 테스트</button>
-                    <span id="testResult-${acc.email.replace(/[^a-zA-Z0-9]/g,'_')}" style="font-size:12px"></span>
-                    <button class="btn btn-sm btn-danger" onclick="deleteAccount('${acc.email}')">삭제</button>
+                <td>
+                    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                        <button class="btn btn-sm btn-primary" onclick="manualLogin('${acc.email}')">수동 로그인</button>
+                        <button class="btn btn-sm btn-secondary" id="testBtn-${safeId}" onclick="testLogin('${acc.email}')">로그인 테스트</button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteAccount('${acc.email}')">삭제</button>
+                    </div>
+                    <div style="margin-top:4px">
+                        <span id="loginStatus-${safeId}" style="font-size:11px;color:var(--text-dim)"></span>
+                        <span id="testResult-${safeId}" style="font-size:12px"></span>
+                    </div>
                 </td>
-            </tr>
-        `).join('');
+            </tr>`;
+        }).join('');
+        // 각 계정의 쿠키 상태 로드
+        for (const acc of data.accounts) {
+            loadLoginStatus(acc.email);
+        }
     }
 
     // ─── 계정 추가 ───
@@ -821,6 +833,55 @@
         } else {
             alert(res?.error || '삭제 실패');
         }
+    }
+
+    // ─── 계정 쿠키 상태 조회 ───
+    async function loadLoginStatus(email) {
+        const safeId = email.replace(/[^a-zA-Z0-9]/g, '_');
+        const el = document.getElementById('loginStatus-' + safeId);
+        if (!el) return;
+
+        const data = await api(`/api/accounts/login-status/${encodeURIComponent(email)}`);
+        if (data && data.has_cookies) {
+            el.innerHTML = `<span class="badge badge-green">${data.message}</span>`;
+        } else {
+            el.innerHTML = `<span class="badge badge-red">${data?.message || '쿠키 없음 - 수동 로그인 필요'}</span>`;
+        }
+    }
+
+    // ─── 수동 로그인 ───
+    async function manualLogin(email) {
+        if (!confirm(`${email} 계정의 수동 로그인을 시작합니다.\n\n브라우저가 열리면 직접 Google 로그인을 완료해주세요.\n계속하시겠습니까?`)) return;
+
+        const data = await api('/api/accounts/manual-login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email }),
+        });
+
+        if (data && data.error) {
+            alert(data.error);
+            return;
+        }
+
+        // 수동 로그인 상태 폴링
+        const safeId = email.replace(/[^a-zA-Z0-9]/g, '_');
+        const statusEl = document.getElementById('loginStatus-' + safeId);
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--yellow)">브라우저에서 로그인 진행 중...</span>';
+
+        const pollInterval = setInterval(async () => {
+            const status = await api('/api/accounts/manual-login/status');
+            if (!status || !status.active) {
+                clearInterval(pollInterval);
+                if (status && status.status === 'success') {
+                    if (statusEl) statusEl.innerHTML = `<span class="badge badge-green">${status.message}</span>`;
+                } else if (status && status.status === 'failed') {
+                    if (statusEl) statusEl.innerHTML = `<span class="badge badge-red">${status.message}</span>`;
+                }
+                // 쿠키 상태 새로고침
+                setTimeout(() => loadLoginStatus(email), 1000);
+            }
+        }, 3000);
     }
 
     // ─── 계정 로그인 테스트 ───

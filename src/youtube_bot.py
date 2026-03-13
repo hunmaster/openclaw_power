@@ -14,6 +14,7 @@ IP 가이드라인 + 유튜브 바이럴 가이드라인 반영:
 """
 
 import os
+import json
 import time
 import re
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
@@ -114,9 +115,128 @@ class YouTubeBot:
 
         console.print("[yellow]브라우저 완전 종료됨 (세션 초기화)[/yellow]")
 
+    def _get_cookie_path(self, account_label=None):
+        """계정별 쿠키 파일 경로를 반환합니다."""
+        label = account_label or self.account_label or "default"
+        # 파일명에 사용할 수 없는 문자 제거
+        safe_label = re.sub(r'[^\w\-]', '_', label)
+        cookie_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "sessions")
+        os.makedirs(cookie_dir, exist_ok=True)
+        return os.path.join(cookie_dir, f"{safe_label}.json")
+
+    def save_cookies(self):
+        """현재 브라우저 쿠키를 파일에 저장합니다."""
+        if not self.context:
+            return False
+        try:
+            cookies = self.context.cookies()
+            cookie_path = self._get_cookie_path()
+            with open(cookie_path, "w", encoding="utf-8") as f:
+                json.dump(cookies, f, ensure_ascii=False)
+            console.print(f"[green]쿠키 저장 완료: {cookie_path}[/green]")
+            return True
+        except Exception as e:
+            console.print(f"[red]쿠키 저장 실패: {e}[/red]")
+            return False
+
+    def load_cookies(self):
+        """저장된 쿠키를 브라우저에 로드합니다."""
+        cookie_path = self._get_cookie_path()
+        if not os.path.exists(cookie_path):
+            return False
+        try:
+            with open(cookie_path, "r", encoding="utf-8") as f:
+                cookies = json.load(f)
+            if not cookies:
+                return False
+            self.context.add_cookies(cookies)
+            console.print(f"[green]저장된 쿠키 로드 완료 ({len(cookies)}개)[/green]")
+            return True
+        except Exception as e:
+            console.print(f"[yellow]쿠키 로드 실패: {e}[/yellow]")
+            return False
+
+    def has_saved_cookies(self):
+        """저장된 쿠키 파일이 있는지 확인합니다."""
+        cookie_path = self._get_cookie_path()
+        return os.path.exists(cookie_path)
+
+    def check_login_status(self):
+        """현재 YouTube 로그인 상태를 확인합니다."""
+        try:
+            self.page.goto("https://www.youtube.com", wait_until="domcontentloaded")
+            time.sleep(3)
+            # 아바타 버튼이 있으면 로그인된 상태
+            avatar = self.page.query_selector(
+                "button#avatar-btn, "
+                "ytd-topbar-menu-button-renderer img.yt-img-shadow"
+            )
+            return avatar is not None
+        except Exception:
+            return False
+
+    def manual_login(self, email=None, timeout=300):
+        """
+        수동 로그인 - 브라우저 화면에서 사용자가 직접 로그인합니다.
+        로그인 완료 후 쿠키를 저장합니다.
+
+        Args:
+            email: 이메일 (자동 입력용, 선택)
+            timeout: 최대 대기 시간 (초)
+
+        Returns:
+            bool: 로그인 성공 여부
+        """
+        console.print("[blue]수동 로그인 모드: 브라우저에서 직접 로그인해주세요[/blue]")
+
+        try:
+            self.page.goto("https://accounts.google.com/signin")
+            time.sleep(2)
+
+            # 이메일 자동 입력 (선택)
+            if email:
+                try:
+                    email_input = self.page.wait_for_selector('input[type="email"]', timeout=5000)
+                    email_input.fill(email)
+                    self.page.click("#identifierNext")
+                    console.print(f"[blue]이메일 자동 입력됨: {email[:5]}***[/blue]")
+                except Exception:
+                    pass
+
+            # 사용자가 로그인 완료할 때까지 대기
+            console.print(f"[yellow]{timeout}초 내에 로그인을 완료해주세요...[/yellow]")
+            for i in range(timeout // 3):
+                time.sleep(3)
+                current_url = self.page.url
+                if (
+                    "myaccount.google.com" in current_url
+                    or ("youtube.com" in current_url and "signin" not in current_url)
+                ):
+                    console.print("[green]로그인 감지! 쿠키 저장 중...[/green]")
+                    # YouTube로 이동하여 YouTube 쿠키도 저장
+                    self.page.goto("https://www.youtube.com")
+                    time.sleep(3)
+                    self.save_cookies()
+                    return True
+
+            console.print("[red]로그인 시간 초과[/red]")
+            return False
+
+        except Exception as e:
+            console.print(f"[red]수동 로그인 오류: {e}[/red]")
+            return False
+
     def login_youtube(self, email, password):
-        """YouTube(Google) 계정에 로그인합니다."""
+        """YouTube(Google) 계정에 로그인합니다. 저장된 쿠키가 있으면 먼저 시도합니다."""
         console.print(f"[blue]YouTube 로그인 시도: {email[:5]}***[/blue]")
+
+        # 저장된 쿠키로 먼저 시도
+        if self.has_saved_cookies():
+            console.print("[blue]저장된 쿠키로 로그인 시도...[/blue]")
+            if self.load_cookies() and self.check_login_status():
+                console.print("[green]쿠키 로그인 성공![/green]")
+                return True
+            console.print("[yellow]쿠키 로그인 실패, 일반 로그인 시도...[/yellow]")
 
         try:
             self.page.goto("https://accounts.google.com/signin")
@@ -140,6 +260,7 @@ class YouTubeBot:
             current_url = self.page.url
             if "myaccount.google.com" in current_url or "youtube.com" in current_url:
                 console.print("[green]YouTube 로그인 성공![/green]")
+                self.save_cookies()
                 return True
 
             # 추가 인증이 필요한 경우 (2FA 등)
@@ -155,6 +276,7 @@ class YouTubeBot:
                         current_url = self.page.url
                         if "myaccount.google.com" in current_url or "youtube.com" in current_url:
                             console.print("[green]인증 완료! 로그인 성공![/green]")
+                            self.save_cookies()
                             return True
                     console.print("[red]인증 시간 초과[/red]")
                     return False

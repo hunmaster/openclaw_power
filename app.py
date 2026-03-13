@@ -534,6 +534,114 @@ def api_test_login():
         bot.close_browser()
 
 
+# 수동 로그인 상태 관리
+manual_login_state = {
+    "active": False,
+    "email": None,
+    "status": "idle",  # idle, waiting, success, failed
+    "message": "",
+}
+manual_login_bot = None
+
+
+@app.route("/api/accounts/manual-login", methods=["POST"])
+def api_manual_login():
+    """수동 로그인 - 브라우저를 열어 사용자가 직접 로그인합니다."""
+    global manual_login_bot
+
+    from src.youtube_bot import YouTubeBot
+
+    data = request.get_json()
+    if not data or not data.get("email"):
+        return jsonify({"error": "이메일이 필요합니다."}), 400
+
+    if manual_login_state["active"]:
+        return jsonify({"error": "이미 수동 로그인이 진행 중입니다."}), 409
+
+    email = data["email"]
+    accounts = load_accounts()
+    account = None
+    for acc in accounts:
+        if acc.get("email") == email:
+            account = acc
+            break
+
+    if not account:
+        return jsonify({"error": "해당 계정을 찾을 수 없습니다."}), 404
+
+    manual_login_state["active"] = True
+    manual_login_state["email"] = email
+    manual_login_state["status"] = "waiting"
+    manual_login_state["message"] = "브라우저에서 로그인을 완료해주세요..."
+
+    def _do_manual_login():
+        global manual_login_bot
+        try:
+            label = account.get("label", email.split("@")[0])
+            bot = YouTubeBot(account_label=label)
+            bot.headless = False  # 화면 보이기 필수
+            manual_login_bot = bot
+
+            bot.start_browser()
+            login_ok = bot.manual_login(email=email, timeout=300)
+
+            if login_ok:
+                manual_login_state["status"] = "success"
+                manual_login_state["message"] = f"로그인 성공! 쿠키가 저장되었습니다."
+            else:
+                manual_login_state["status"] = "failed"
+                manual_login_state["message"] = "로그인 시간 초과 또는 실패"
+        except Exception as e:
+            manual_login_state["status"] = "failed"
+            manual_login_state["message"] = f"오류: {str(e)}"
+        finally:
+            if manual_login_bot:
+                manual_login_bot.close_browser()
+                manual_login_bot = None
+            manual_login_state["active"] = False
+
+    thread = threading.Thread(target=_do_manual_login, daemon=True)
+    thread.start()
+
+    return jsonify({"message": "브라우저가 열렸습니다. 로그인을 완료해주세요."})
+
+
+@app.route("/api/accounts/manual-login/status")
+def api_manual_login_status():
+    """수동 로그인 진행 상태를 반환합니다."""
+    return jsonify(manual_login_state)
+
+
+@app.route("/api/accounts/login-status/<email>")
+def api_login_status(email):
+    """계정의 저장된 쿠키 상태를 확인합니다."""
+    from src.youtube_bot import YouTubeBot
+    import re as _re
+
+    accounts = load_accounts()
+    account = None
+    for acc in accounts:
+        if acc.get("email") == email:
+            account = acc
+            break
+
+    if not account:
+        return jsonify({"has_cookies": False, "message": "계정 없음"})
+
+    label = account.get("label", email.split("@")[0])
+    safe_label = _re.sub(r'[^\w\-]', '_', label)
+    cookie_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "sessions")
+    cookie_path = os.path.join(cookie_dir, f"{safe_label}.json")
+
+    if os.path.exists(cookie_path):
+        mtime = os.path.getmtime(cookie_path)
+        from datetime import datetime
+        saved_time = datetime.fromtimestamp(mtime).strftime("%m/%d %H:%M")
+        return jsonify({"has_cookies": True, "message": f"쿠키 저장됨 ({saved_time})"})
+
+    return jsonify({"has_cookies": False, "message": "쿠키 없음"})
+
+
 def _save_accounts(accounts):
     """계정 목록을 파일에 저장합니다."""
     accounts_file = os.getenv("ACCOUNTS_FILE", "config/accounts.json")

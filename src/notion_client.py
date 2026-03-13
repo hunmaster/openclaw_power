@@ -30,6 +30,7 @@ class NotionManager:
 
     def get_pending_tasks(self):
         """상태가 '댓글작업전'인 작업 목록만 가져옵니다."""
+        console.print(f"[blue]노션 DB 조회 시작 (DB: {self.database_id[:8]}..., 상태 컬럼: {self.col_status})[/blue]")
         try:
             # select 타입 먼저 시도 (실제 DB가 select 타입)
             response = self.client.databases.query(
@@ -40,7 +41,9 @@ class NotionManager:
                     "select": {"equals": "댓글작업전"},
                 },
             )
-        except Exception:
+            console.print(f"[green]select 필터 성공: {len(response.get('results', []))}건[/green]")
+        except Exception as e1:
+            console.print(f"[yellow]select 필터 실패: {e1}[/yellow]")
             # status 타입으로 재시도
             try:
                 response = self.client.databases.query(
@@ -51,10 +54,13 @@ class NotionManager:
                         "status": {"equals": "댓글작업전"},
                     },
                 )
-            except Exception:
+                console.print(f"[green]status 필터 성공: {len(response.get('results', []))}건[/green]")
+            except Exception as e2:
+                console.print(f"[yellow]status 필터도 실패: {e2}[/yellow]")
                 # 필터 없이 전체 조회 후 코드에서 필터링
-                console.print("[yellow]상태 필터링 실패, 전체 데이터를 가져옵니다.[/yellow]")
+                console.print("[yellow]필터 없이 전체 데이터를 가져옵니다.[/yellow]")
                 response = self.client.databases.query(database_id=self.database_id, page_size=100)
+                console.print(f"[blue]전체 조회: {len(response.get('results', []))}건[/blue]")
 
         tasks = []
         for page in response.get("results", []):
