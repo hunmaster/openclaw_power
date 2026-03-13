@@ -724,16 +724,29 @@
         // DB 이름
         html += `<p style="margin-bottom:12px"><strong>DB 이름:</strong> ${data.db_title} (총 ${data.total_pages}개 행 샘플)</p>`;
 
-        // 컬럼 매칭 상태
+        // 프론트엔드에서 직접 매칭 (서버 캐시 문제 우회)
+        const actualCols = Object.keys(data.properties || {});
+        const requiredCols = {
+            "영상 링크": "영상 링크",
+            "댓글 원고": "댓글 원고",
+            "상태": "상태",
+            "댓글 계정": "댓글 계정",
+            "댓글 url": "댓글 url",
+        };
+
         html += '<h4 style="margin:12px 0 8px;font-size:13px;color:var(--accent-light)">컬럼 매칭 상태</h4>';
         html += '<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">';
-        for (const [label, info] of Object.entries(data.expected_columns)) {
-            const ok = info.found;
-            const icon = ok ? '&#10004;' : '&#10008;';
-            const color = ok ? 'var(--green)' : 'var(--red)';
+        for (const [label, expected] of Object.entries(requiredCols)) {
+            // 대소문자/공백 무시 매칭
+            const normalExpected = expected.replace(/\s/g, '').toLowerCase();
+            const found = actualCols.some(col => col.replace(/\s/g, '').toLowerCase() === normalExpected);
+            const matchedCol = actualCols.find(col => col.replace(/\s/g, '').toLowerCase() === normalExpected) || '';
+            const icon = found ? '&#10004;' : '&#10008;';
+            const color = found ? 'var(--green)' : 'var(--red)';
+            const statusText = found ? `매칭됨 ("${matchedCol}")` : '<span style=color:var(--red)>없음!</span>';
             html += `<div style="display:flex;align-items:center;gap:8px;font-size:13px">`;
             html += `<span style="color:${color}">${icon}</span>`;
-            html += `<span><strong>${label}</strong>: "${info.expected}" → ${ok ? '매칭됨' : '<span style=color:var(--red)>없음!</span>'}</span>`;
+            html += `<span><strong>${label}</strong>: "${expected}" → ${statusText}</span>`;
             html += '</div>';
         }
         html += '</div>';
