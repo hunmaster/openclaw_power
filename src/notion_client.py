@@ -35,8 +35,90 @@ class NotionManager:
                       f"result='{self.col_result_url}', status='{self.col_status}', account='{self.col_account}'[/dim]")
 
     def get_pending_tasks(self):
-        """상태가 '댓글작업전'인 작업 목록만 가져옵니다."""
-        return self.get_tasks_by_status("댓글작업전")
+        """상태가 '댓글작업전'인 작업을 전부 가져옵니다 (페이지네이션)."""
+        return self._get_all_tasks_by_status("댓글작업전")
+
+    def _get_all_tasks_by_status(self, status_value):
+        """페이지네이션으로 해당 상태의 작업을 전부 가져옵니다."""
+        console.print(f"[blue]노션 DB 전체 조회 (상태: '{status_value}')[/blue]")
+
+        all_results = []
+        has_more = True
+        start_cursor = None
+
+        # select 타입 먼저 시도
+        query_filter = {"property": self.col_status, "select": {"equals": status_value}}
+        use_status_type = False
+
+        while has_more:
+            try:
+                kwargs = {
+                    "database_id": self.database_id,
+                    "page_size": 100,
+                    "filter": query_filter,
+                }
+                if start_cursor:
+                    kwargs["start_cursor"] = start_cursor
+                response = self.client.databases.query(**kwargs)
+            except Exception:
+                if not use_status_type:
+                    # status 타입으로 재시도
+                    use_status_type = True
+                    query_filter = {"property": self.col_status, "status": {"equals": status_value}}
+                    try:
+                        kwargs["filter"] = query_filter
+                        response = self.client.databases.query(**kwargs)
+                    except Exception as e2:
+                        console.print(f"[red]노션 조회 실패: {e2}[/red]")
+                        break
+                else:
+                    break
+
+            all_results.extend(response.get("results", []))
+            has_more = response.get("has_more", False)
+            start_cursor = response.get("next_cursor")
+
+            if has_more:
+                console.print(f"[dim]  {len(all_results)}건 로드, 추가 데이터 있음...[/dim]")
+
+        console.print(f"[green]전체 조회 완료: {len(all_results)}건[/green]")
+
+        tasks = []
+        for page in all_results:
+            task = self._parse_page(page)
+            if task:
+                tasks.append(task)
+
+        console.print(f"[green]'{status_value}' 작업: {len(tasks)}개[/green]")
+        return tasks
+
+    def count_pending_tasks(self):
+        """댓글작업전 상태의 전체 개수만 빠르게 세서 반환합니다."""
+        count = 0
+        has_more = True
+        start_cursor = None
+        query_filter = {"property": self.col_status, "select": {"equals": "댓글작업전"}}
+
+        while has_more:
+            try:
+                kwargs = {"database_id": self.database_id, "page_size": 100, "filter": query_filter}
+                if start_cursor:
+                    kwargs["start_cursor"] = start_cursor
+                response = self.client.databases.query(**kwargs)
+                count += len(response.get("results", []))
+                has_more = response.get("has_more", False)
+                start_cursor = response.get("next_cursor")
+            except Exception:
+                # status 타입으로 시도
+                try:
+                    kwargs["filter"] = {"property": self.col_status, "status": {"equals": "댓글작업전"}}
+                    response = self.client.databases.query(**kwargs)
+                    count += len(response.get("results", []))
+                    has_more = response.get("has_more", False)
+                    start_cursor = response.get("next_cursor")
+                except Exception:
+                    break
+        return count
 
     def get_tasks_by_status(self, status_value, date_filter=None):
         """지정된 상태의 작업 목록을 가져옵니다. date_filter: 'YYYY-MM-DD' 형식 날짜."""

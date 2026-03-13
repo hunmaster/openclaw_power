@@ -274,6 +274,7 @@
             <option value="3">테스트 3건</option>
             <option value="5">테스트 5건</option>
             <option value="0">전체 실행</option>
+            <option value="-1">Full Auto (무한 반복)</option>
         </select>
         <button class="btn btn-primary" id="btnStart" onclick="startAutomation()">실행</button>
         <button class="btn btn-danger" id="btnStop" onclick="stopAutomation()" disabled>중지</button>
@@ -667,13 +668,14 @@
         document.getElementById('smmBalance').textContent =
             data.smm_balance !== null ? '$' + parseFloat(data.smm_balance).toFixed(2) : 'N/A';
 
-        // 상태별 카운트 로드 (병렬)
+        // 댓글 대기는 dashboard API에서 전체 개수 반영
+        document.getElementById('pendingCount').textContent = data.pending_count || 0;
+
+        // 나머지 상태별 카운트 (병렬)
         Promise.all([
-            api('/api/tasks?status=댓글작업전'),
             api('/api/tasks?status=댓글완료'),
             api('/api/tasks?status=대댓글완료'),
-        ]).then(([comment, reply, like]) => {
-            if (comment) document.getElementById('pendingCount').textContent = comment.count || 0;
+        ]).then(([reply, like]) => {
             if (reply) document.getElementById('replyPendingCount').textContent = reply.count || 0;
             if (like) document.getElementById('likePendingCount').textContent = like.count || 0;
         });
@@ -1266,21 +1268,25 @@
 
     // ─── 자동화 실행/중지 ───
     async function startAutomation() {
-        const limit = parseInt(document.getElementById('testLimit').value) || 0;
+        const limit = parseInt(document.getElementById('testLimit').value);
         const isTest = limit > 0;
+        const isFullAuto = limit === -1;
 
-        if (!isTest && !confirm(`전체 작업을 실행합니다. 계속하시겠습니까?`)) return;
+        if (isFullAuto && !confirm('Full Auto 모드: 대기 작업이 없을 때까지 계속 실행합니다.\n중지 버튼으로만 멈출 수 있습니다. 계속하시겠습니까?')) return;
+        if (!isTest && !isFullAuto && !confirm('전체 작업을 실행합니다. 계속하시겠습니까?')) return;
 
+        const payload = isFullAuto ? { full_auto: true } : { limit: limit || 0 };
         const res = await api('/api/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ limit })
+            body: JSON.stringify(payload)
         });
         if (res && !res.error) {
             document.getElementById('btnStart').disabled = true;
             document.getElementById('btnStop').disabled = false;
             document.getElementById('progressWrap').style.display = 'block';
-            updateStatusIndicator(true, isTest ? `테스트 ${limit}건` : null);
+            const label = isFullAuto ? 'Full Auto' : isTest ? `테스트 ${limit}건` : null;
+            updateStatusIndicator(true, label);
         } else {
             alert(res?.error || '실행 실패');
         }
@@ -1328,20 +1334,31 @@
         document.getElementById('progressLikes').textContent = `좋아요 ${data.results.likes}`;
 
         const isTest = data.test_mode;
+        const isFullAuto = data.full_auto;
         const testLabel = isTest ? ` [테스트 ${data.limit || ''}건]` : '';
 
         if (data.running) {
             // 실행 중
             progressDot.className = 'status-dot running';
-            progressWrap.style.borderColor = isTest ? 'rgba(255,217,61,0.4)' : 'rgba(108,92,231,0.4)';
-            progressPercent.style.color = isTest ? 'var(--yellow)' : 'var(--accent-light)';
-            progressFill.style.background = isTest
-                ? 'linear-gradient(90deg, var(--yellow), #ffe066)'
-                : 'linear-gradient(90deg, var(--accent), var(--accent-light))';
-            document.getElementById('progressTitle').textContent = isTest ? `테스트 진행 중${testLabel}` : '자동화 진행 중';
+            if (isFullAuto) {
+                progressWrap.style.borderColor = 'rgba(0,184,148,0.4)';
+                progressPercent.style.color = 'var(--green)';
+                progressFill.style.background = 'linear-gradient(90deg, #00b894, #00d2a0)';
+            } else if (isTest) {
+                progressWrap.style.borderColor = 'rgba(255,217,61,0.4)';
+                progressPercent.style.color = 'var(--yellow)';
+                progressFill.style.background = 'linear-gradient(90deg, var(--yellow), #ffe066)';
+            } else {
+                progressWrap.style.borderColor = 'rgba(108,92,231,0.4)';
+                progressPercent.style.color = 'var(--accent-light)';
+                progressFill.style.background = 'linear-gradient(90deg, var(--accent), var(--accent-light))';
+            }
+            const title = isFullAuto ? 'Full Auto 진행 중' : isTest ? `테스트 진행 중${testLabel}` : '자동화 진행 중';
+            document.getElementById('progressTitle').textContent = title;
             document.getElementById('progressLabel').textContent =
                 data.current_task ? `${data.progress}/${data.total}: ${data.current_task}` : `${data.progress}/${data.total}`;
-            updateStatusIndicator(true, isTest ? `테스트 ${data.limit}건` : null);
+            const statusLabel = isFullAuto ? 'Full Auto' : isTest ? `테스트 ${data.limit}건` : null;
+            updateStatusIndicator(true, statusLabel);
         } else if (data.total > 0 && data.progress >= data.total) {
             // 완료
             progressDot.className = 'status-dot';

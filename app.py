@@ -40,6 +40,7 @@ automation_state = {
     "results": {"success": 0, "fail": 0, "skip": 0, "likes": 0},
     "test_mode": False,
     "limit": 0,
+    "full_auto": False,
 }
 automation_lock = threading.Lock()
 
@@ -113,9 +114,18 @@ def api_dashboard():
     # 프록시 상태
     proxy = ProxyManager()
 
+    # 댓글 대기 전체 개수
+    pending_count = 0
+    try:
+        notion = NotionManager()
+        pending_count = notion.count_pending_tasks()
+    except Exception:
+        pass
+
     return jsonify({
         "accounts": account_stats,
         "account_count": len(accounts),
+        "pending_count": pending_count,
         "smm_enabled": smm.enabled,
         "smm_balance": smm_balance,
         "proxy_status": proxy.get_status(),
@@ -259,17 +269,26 @@ def api_run():
     data = request.get_json(silent=True) or {}
     limit = data.get("limit", 0)  # 0 = 전체, 1~N = 테스트 건수
     selected_ids = data.get("selected_ids", [])  # 선택된 page_id 목록
+    full_auto = data.get("full_auto", False)  # Full Auto 모드
     test_mode = limit > 0
 
     automation_state["test_mode"] = test_mode
     automation_state["limit"] = limit
+    automation_state["full_auto"] = full_auto
 
-    thread = threading.Thread(
-        target=_run_automation, args=(limit, selected_ids), daemon=True
-    )
+    if full_auto:
+        thread = threading.Thread(
+            target=_run_full_auto, daemon=True
+        )
+    else:
+        thread = threading.Thread(
+            target=_run_automation, args=(limit, selected_ids), daemon=True
+        )
     thread.start()
 
-    if selected_ids:
+    if full_auto:
+        mode_text = "Full Auto (무한 반복)"
+    elif selected_ids:
         mode_text = f"선택 실행 ({len(selected_ids)}건)"
     elif test_mode:
         mode_text = f"테스트 모드 ({limit}건)"
@@ -947,7 +966,86 @@ def _run_automation(limit=0, selected_ids=None):
     except Exception as e:
         add_log(f"치명적 오류: {str(e)}", "error")
     finally:
+        # Full Auto 모드에서는 _run_full_auto가 running을 관리하므로 여기서 끄지 않음
+        if not automation_state.get("full_auto"):
+            automation_state["running"] = False
+            automation_state["current_task"] = None
+
+
+def _run_full_auto():
+    """Full Auto 모드: 대기 작업이 없을 때까지 반복 실행합니다."""
+    import time
+
+    round_num = 0
+    total_success = 0
+    total_fail = 0
+    total_skip = 0
+    total_likes = 0
+
+    try:
+        add_log("=== Full Auto 모드 시작 ===", "info")
+        add_log("대기 작업이 없을 때까지 계속 실행합니다. 중지 버튼으로 멈출 수 있습니다.", "info")
+
+        while automation_state["running"]:
+            round_num += 1
+            add_log(f"── 라운드 {round_num} 시작 ──", "info")
+
+            # 매 라운드마다 결과 리셋
+            automation_state["progress"] = 0
+            automation_state["results"] = {"success": 0, "fail": 0, "skip": 0, "likes": 0}
+
+            # 자동화 실행 (전체 모드)
+            _run_automation(limit=0)
+
+            # 라운드 결과 누적
+            r = automation_state["results"]
+            total_success += r["success"]
+            total_fail += r["fail"]
+            total_skip += r["skip"]
+            total_likes += r["likes"]
+
+            add_log(
+                f"── 라운드 {round_num} 완료: 성공 {r['success']}, 실패 {r['fail']}, "
+                f"건너뜀 {r['skip']}, 좋아요 {r['likes']} ──",
+                "success" if r["success"] > 0 else "warning",
+            )
+
+            if not automation_state["running"]:
+                break
+
+            # 다음 라운드 전 대기 작업 확인
+            automation_state["current_task"] = "[재수집 중] 노션 대기 작업 확인..."
+            try:
+                notion = NotionManager()
+                pending = notion.count_pending_tasks()
+                add_log(f"남은 대기 작업: {pending}건", "info")
+            except Exception as e:
+                add_log(f"대기 작업 확인 실패: {e}", "warning")
+                pending = 0
+
+            if pending == 0:
+                add_log("대기 작업이 없습니다. Full Auto 종료.", "success")
+                break
+
+            # 잠시 대기 후 다음 라운드
+            add_log(f"10초 후 라운드 {round_num + 1} 시작...", "info")
+            for _ in range(10):
+                if not automation_state["running"]:
+                    break
+                time.sleep(1)
+
+        add_log(
+            f"=== Full Auto 종료 (총 {round_num}라운드) ===\n"
+            f"총 성공: {total_success}, 실패: {total_fail}, "
+            f"건너뜀: {total_skip}, 좋아요: {total_likes}",
+            "success",
+        )
+
+    except Exception as e:
+        add_log(f"Full Auto 오류: {str(e)}", "error")
+    finally:
         automation_state["running"] = False
+        automation_state["full_auto"] = False
         automation_state["current_task"] = None
 
 
