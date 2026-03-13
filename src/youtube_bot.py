@@ -207,15 +207,30 @@ class YouTubeBot:
             console.print(f"[yellow]{timeout}초 내에 로그인을 완료해주세요...[/yellow]")
             for i in range(timeout // 3):
                 time.sleep(3)
-                current_url = self.page.url
-                if (
+                try:
+                    current_url = self.page.url
+                except Exception:
+                    continue
+                console.print(f"[dim]현재 URL: {current_url[:80]}[/dim]")
+
+                login_detected = (
                     "myaccount.google.com" in current_url
                     or ("youtube.com" in current_url and "signin" not in current_url)
-                ):
+                    or "accounts.google.com/SignOutOptions" in current_url
+                )
+
+                if login_detected:
                     console.print("[green]로그인 감지! 쿠키 저장 중...[/green]")
-                    # YouTube로 이동하여 YouTube 쿠키도 저장
-                    self.page.goto("https://www.youtube.com")
-                    time.sleep(3)
+                    # YouTube로 이동하여 YouTube 쿠키도 저장 (실패해도 OK)
+                    try:
+                        self.page.goto(
+                            "https://www.youtube.com",
+                            wait_until="domcontentloaded",
+                            timeout=15000,
+                        )
+                        time.sleep(3)
+                    except Exception as e:
+                        console.print(f"[yellow]YouTube 이동 실패 (무시): {e}[/yellow]")
                     self.save_cookies()
                     return True
 

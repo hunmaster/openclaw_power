@@ -159,8 +159,23 @@ def api_notion_debug():
                 "id": prop.get("id", ""),
             }
 
-        # 첫 3개 데이터 샘플 조회
-        response = client.databases.query(database_id=db_id, page_size=3)
+        # 댓글작업전 상태의 샘플 3개 조회
+        col_status = os.getenv("NOTION_COLUMN_STATUS", "상태")
+        try:
+            response = client.databases.query(
+                database_id=db_id,
+                page_size=3,
+                filter={"property": col_status, "select": {"equals": "댓글작업전"}},
+            )
+        except Exception:
+            try:
+                response = client.databases.query(
+                    database_id=db_id,
+                    page_size=3,
+                    filter={"property": col_status, "status": {"equals": "댓글작업전"}},
+                )
+            except Exception:
+                response = client.databases.query(database_id=db_id, page_size=3)
         sample_pages = []
         for page in response.get("results", []):
             page_data = {"id": page["id"]}
@@ -583,22 +598,29 @@ def api_manual_login():
             manual_login_bot = bot
 
             bot.start_browser()
+            print(f"[manual_login] 브라우저 시작됨, email={email}")
             login_ok = bot.manual_login(email=email, timeout=300)
+            print(f"[manual_login] 결과: {login_ok}")
 
             if login_ok:
                 manual_login_state["status"] = "success"
-                manual_login_state["message"] = f"로그인 성공! 쿠키가 저장되었습니다."
+                manual_login_state["message"] = "로그인 성공! 쿠키가 저장되었습니다."
             else:
                 manual_login_state["status"] = "failed"
                 manual_login_state["message"] = "로그인 시간 초과 또는 실패"
         except Exception as e:
+            print(f"[manual_login] 오류: {e}")
             manual_login_state["status"] = "failed"
             manual_login_state["message"] = f"오류: {str(e)}"
         finally:
-            if manual_login_bot:
-                manual_login_bot.close_browser()
-                manual_login_bot = None
+            try:
+                if manual_login_bot:
+                    manual_login_bot.close_browser()
+                    manual_login_bot = None
+            except Exception:
+                pass
             manual_login_state["active"] = False
+            print(f"[manual_login] 완료, status={manual_login_state['status']}")
 
     thread = threading.Thread(target=_do_manual_login, daemon=True)
     thread.start()
