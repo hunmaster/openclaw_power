@@ -241,8 +241,7 @@ def run():
     success_count = 0
     fail_count = 0
     skip_count = 0
-    like_order_count = 0
-    like_order_ids = []
+    successful_comment_urls = []  # 대량 좋아요 주문용 URL 수집
     prev_account_label = None
 
     for i, task in enumerate(tasks, 1):
@@ -288,20 +287,8 @@ def run():
             notion.update_task_result(task["page_id"], comment_url, status="완료")
             success_count += 1
             console.print(f"[green]작업 {i} 완료[/green]")
-
-            # === 댓글 좋아요 자동 구매 ===
-            if smm_client.enabled and comment_url:
-                like_result = smm_client.order_likes(comment_url)
-                if like_result["success"]:
-                    like_order_count += 1
-                    like_order_ids.append(like_result["order_id"])
-                    console.print(
-                        f"[green]좋아요 주문 완료 (주문 ID: {like_result['order_id']})[/green]"
-                    )
-                else:
-                    console.print(
-                        f"[yellow]좋아요 주문 실패: {like_result.get('error', '알 수 없음')}[/yellow]"
-                    )
+            if comment_url:
+                successful_comment_urls.append(comment_url)
         else:
             notion.update_task_error(task["page_id"], error_msg or "댓글 작성 실패")
             fail_count += 1
@@ -309,10 +296,19 @@ def run():
 
         prev_account_label = current_label
 
-    # 좋아요 주문 상태 일괄 확인
-    if like_order_ids:
-        console.print(f"\n[bold blue]━━━ 좋아요 주문 상태 확인 ━━━[/bold blue]")
-        smm_client.check_multiple_orders(like_order_ids)
+    # SMM 대량 좋아요 주문 (모든 댓글 완료 후 한 번에)
+    like_order_count = 0
+    if smm_client.enabled and successful_comment_urls:
+        console.print(f"\n[bold blue]━━━ SMM 대량 좋아요 주문 ({len(successful_comment_urls)}건) ━━━[/bold blue]")
+        mass_result = smm_client.order_mass_likes(successful_comment_urls)
+        if mass_result["success"]:
+            like_order_count = len(mass_result["order_ids"])
+            # 주문 상태 확인
+            if mass_result["order_ids"]:
+                smm_client.check_multiple_orders(mass_result["order_ids"])
+        if mass_result.get("errors"):
+            for err in mass_result["errors"]:
+                console.print(f"[yellow]좋아요 주문 오류: {err}[/yellow]")
 
     # 결과 요약
     summary_lines = [
@@ -323,7 +319,7 @@ def run():
         f"전체: {len(tasks)}건",
     ]
     if smm_client.enabled:
-        summary_lines.append(f"좋아요 주문: [blue]{like_order_count}[/blue]건")
+        summary_lines.append(f"좋아요 대량주문: [blue]{like_order_count}[/blue]건")
 
     console.print(Panel(
         "\n".join(summary_lines),

@@ -231,44 +231,50 @@ def api_get_accounts():
 @app.route("/api/accounts", methods=["POST"])
 def api_add_account():
     """계정을 추가합니다."""
-    data = request.get_json()
-    if not data or not data.get("email") or not data.get("password"):
-        return jsonify({"error": "이메일과 비밀번호는 필수입니다."}), 400
+    try:
+        data = request.get_json()
+        if not data or not data.get("email") or not data.get("password"):
+            return jsonify({"error": "이메일과 비밀번호는 필수입니다."}), 400
 
-    accounts = load_accounts()
-    new_account = {
-        "email": data["email"],
-        "password": data["password"],
-        "account_type": data.get("account_type", "sub"),
-        "label": data.get("label", data["email"].split("@")[0]),
-    }
+        accounts = load_accounts()
+        new_account = {
+            "email": data["email"],
+            "password": data["password"],
+            "account_type": data.get("account_type", "sub"),
+            "label": data.get("label", data["email"].split("@")[0]),
+        }
 
-    # 중복 확인
-    for acc in accounts:
-        if acc.get("email") == new_account["email"]:
-            return jsonify({"error": "이미 등록된 이메일입니다."}), 409
+        # 중복 확인
+        for acc in accounts:
+            if acc.get("email") == new_account["email"]:
+                return jsonify({"error": "이미 등록된 이메일입니다."}), 409
 
-    accounts.append(new_account)
-    _save_accounts(accounts)
-    return jsonify({"message": "계정이 추가되었습니다.", "account": {
-        "email": new_account["email"],
-        "label": new_account["label"],
-        "account_type": new_account["account_type"],
-    }})
+        accounts.append(new_account)
+        _save_accounts(accounts)
+        return jsonify({"message": "계정이 추가되었습니다.", "account": {
+            "email": new_account["email"],
+            "label": new_account["label"],
+            "account_type": new_account["account_type"],
+        }})
+    except Exception as e:
+        return jsonify({"error": f"계정 추가 중 오류: {str(e)}"}), 500
 
 
 @app.route("/api/accounts/<email>", methods=["DELETE"])
 def api_delete_account(email):
     """계정을 삭제합니다."""
-    accounts = load_accounts()
-    original_len = len(accounts)
-    accounts = [a for a in accounts if a.get("email") != email]
+    try:
+        accounts = load_accounts()
+        original_len = len(accounts)
+        accounts = [a for a in accounts if a.get("email") != email]
 
-    if len(accounts) == original_len:
-        return jsonify({"error": "해당 계정을 찾을 수 없습니다."}), 404
+        if len(accounts) == original_len:
+            return jsonify({"error": "해당 계정을 찾을 수 없습니다."}), 404
 
-    _save_accounts(accounts)
-    return jsonify({"message": f"계정 {email}이 삭제되었습니다."})
+        _save_accounts(accounts)
+        return jsonify({"message": f"계정 {email}이 삭제되었습니다."})
+    except Exception as e:
+        return jsonify({"error": f"계정 삭제 중 오류: {str(e)}"}), 500
 
 
 def _save_accounts(accounts):
@@ -313,6 +319,7 @@ def _run_automation():
         delay_ip_change = int(os.getenv("DELAY_AFTER_IP_CHANGE", "3"))
         comment_interval = int(os.getenv("COMMENT_INTERVAL_SEC", "180"))
         prev_account_label = None
+        successful_comment_urls = []  # 대량 좋아요 주문용 URL 수집
 
         for i, task in enumerate(tasks):
             if not automation_state["running"]:
@@ -383,15 +390,7 @@ def _run_automation():
                     safety_rules.record_comment(current_label, task["youtube_url"], task["comment_text"])
                     automation_state["results"]["success"] += 1
                     add_log(f"댓글 성공: {comment_url[:60]}", "success")
-
-                    # 좋아요 구매
-                    if smm_client.enabled and comment_url:
-                        like_result = smm_client.order_likes(comment_url)
-                        if like_result["success"]:
-                            automation_state["results"]["likes"] += 1
-                            add_log(f"좋아요 주문 (ID: {like_result['order_id']})", "success")
-                        else:
-                            add_log(f"좋아요 실패: {like_result.get('error', '')}", "warning")
+                    successful_comment_urls.append(comment_url)
                 else:
                     automation_state["results"]["fail"] += 1
                     notion.update_task_error(task["page_id"], "댓글 작성 실패")
@@ -403,6 +402,20 @@ def _run_automation():
             finally:
                 bot.close_browser()
                 prev_account_label = current_label
+
+        # SMM 대량 좋아요 주문 (모든 댓글 완료 후 한 번에)
+        if smm_client.enabled and successful_comment_urls:
+            add_log(f"SMM 대량 좋아요 주문 시작: {len(successful_comment_urls)}개 댓글", "info")
+            mass_result = smm_client.order_mass_likes(successful_comment_urls)
+            if mass_result["success"]:
+                automation_state["results"]["likes"] = len(mass_result["order_ids"])
+                add_log(
+                    f"대량 좋아요 주문 완료! 성공: {len(mass_result['order_ids'])}건",
+                    "success",
+                )
+            if mass_result.get("errors"):
+                for err in mass_result["errors"]:
+                    add_log(f"좋아요 주문 오류: {err}", "warning")
 
         add_log(
             f"완료! 성공: {automation_state['results']['success']}, "

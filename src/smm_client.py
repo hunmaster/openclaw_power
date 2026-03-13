@@ -139,6 +139,62 @@ class SMMClient:
         else:
             return {"success": False, "error": "알 수 없는 오류"}
 
+    def order_mass_likes(self, comment_urls, quantity=None):
+        """
+        대량 주문으로 여러 댓글에 좋아요를 한 번에 주문합니다.
+
+        Args:
+            comment_urls: 좋아요를 달 댓글 URL 리스트
+            quantity: 좋아요 수 (None이면 기본값 사용)
+
+        Returns:
+            dict: {"success": bool, "order_ids": list, "errors": list}
+        """
+        if not self.enabled:
+            return {"success": False, "order_ids": [], "errors": ["SMM 서비스 비활성화"]}
+
+        if not self.service_id:
+            return {"success": False, "order_ids": [], "errors": ["SMM_LIKE_SERVICE_ID 미설정"]}
+
+        if not comment_urls:
+            return {"success": False, "order_ids": [], "errors": ["주문할 URL이 없습니다"]}
+
+        qty = quantity or self.like_quantity
+
+        # 대량주문 형식: "서비스ID | 링크 | 수량" (한 줄에 하나씩)
+        orders_text = "\n".join(
+            f"{self.service_id} | {url} | {qty}" for url in comment_urls
+        )
+
+        console.print(
+            f"[blue]대량 좋아요 주문: {len(comment_urls)}개 댓글 | "
+            f"수량: 각 {qty}개[/blue]"
+        )
+
+        result = self._request({
+            "action": "mass",
+            "orders": orders_text,
+        })
+
+        if result and isinstance(result, list):
+            order_ids = []
+            errors = []
+            for item in result:
+                if "order" in item:
+                    order_ids.append(item["order"])
+                elif "error" in item:
+                    errors.append(item["error"])
+            console.print(
+                f"[green]대량 주문 완료! 성공: {len(order_ids)}건, "
+                f"실패: {len(errors)}건[/green]"
+            )
+            return {"success": len(order_ids) > 0, "order_ids": order_ids, "errors": errors}
+        elif result and "error" in result:
+            console.print(f"[red]대량 주문 실패: {result['error']}[/red]")
+            return {"success": False, "order_ids": [], "errors": [result["error"]]}
+        else:
+            return {"success": False, "order_ids": [], "errors": ["알 수 없는 오류"]}
+
     def check_order_status(self, order_id):
         """주문 상태를 확인합니다."""
         result = self._request({
