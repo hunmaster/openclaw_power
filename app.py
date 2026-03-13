@@ -785,7 +785,7 @@ def _run_automation(limit=0):
         delay_ip_change = int(os.getenv("DELAY_AFTER_IP_CHANGE", "3"))
         comment_interval = int(os.getenv("COMMENT_INTERVAL_SEC", "180"))
         prev_account_label = None
-        successful_comment_urls = []  # 대량 좋아요 주문용 URL 수집
+        successful_comments = []  # [{url, page_id}] 대량 좋아요 주문 + 노션 상태 업데이트용
 
         for i, task in enumerate(tasks):
             if not automation_state["running"]:
@@ -856,7 +856,7 @@ def _run_automation(limit=0):
                     safety_rules.record_comment(current_label, task["youtube_url"], task["comment_text"])
                     automation_state["results"]["success"] += 1
                     add_log(f"댓글 성공: {comment_url[:60]}", "success")
-                    successful_comment_urls.append(comment_url)
+                    successful_comments.append({"url": comment_url, "page_id": task["page_id"]})
                 else:
                     automation_state["results"]["fail"] += 1
                     notion.update_task_error(task["page_id"], "댓글 작성 실패")
@@ -870,15 +870,23 @@ def _run_automation(limit=0):
                 prev_account_label = current_label
 
         # SMM 대량 좋아요 주문 (모든 댓글 완료 후 한 번에)
-        if smm_client.enabled and successful_comment_urls:
-            add_log(f"SMM 대량 좋아요 주문 시작: {len(successful_comment_urls)}개 댓글", "info")
-            mass_result = smm_client.order_mass_likes(successful_comment_urls)
+        if smm_client.enabled and successful_comments:
+            comment_urls = [c["url"] for c in successful_comments]
+            add_log(f"SMM 대량 좋아요 주문 시작: {len(comment_urls)}개 댓글", "info")
+            mass_result = smm_client.order_mass_likes(comment_urls)
             if mass_result["success"]:
                 automation_state["results"]["likes"] = len(mass_result["order_ids"])
                 add_log(
                     f"대량 좋아요 주문 완료! 성공: {len(mass_result['order_ids'])}건",
                     "success",
                 )
+                # 좋아요 주문 성공한 작업의 노션 상태를 '좋아요작업완료'로 업데이트
+                for c in successful_comments:
+                    try:
+                        notion.update_task_status(c["page_id"], "좋아요작업완료")
+                    except Exception as e:
+                        add_log(f"노션 상태 업데이트 실패: {e}", "warning")
+                add_log(f"노션 상태 업데이트: {len(successful_comments)}건 → 좋아요작업완료", "success")
             if mass_result.get("errors"):
                 for err in mass_result["errors"]:
                     add_log(f"좋아요 주문 오류: {err}", "warning")

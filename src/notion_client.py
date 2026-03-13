@@ -300,3 +300,22 @@ class NotionManager:
     def update_task_error(self, page_id, error_message):
         """에러 상태를 Notion에 저장합니다."""
         self.update_task_result(page_id, comment_url="", status="에러")
+
+    def update_task_status(self, page_id, status):
+        """노션 작업의 상태만 업데이트합니다."""
+        try:
+            self.client.pages.update(
+                page_id=page_id,
+                properties={self.col_status: {"select": {"name": status}}},
+            )
+            console.print(f"[green]상태 업데이트: {status}[/green]")
+        except Exception:
+            try:
+                self.client.pages.update(
+                    page_id=page_id,
+                    properties={self.col_status: {"status": {"name": status}}},
+                )
+                console.print(f"[green]상태 업데이트: {status}[/green]")
+            except Exception as e:
+                console.print(f"[red]상태 업데이트 실패: {e}[/red]")
+                raise
