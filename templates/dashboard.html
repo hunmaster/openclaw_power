@@ -146,6 +146,8 @@
         .btn-secondary:hover { background: #3a3a4a; }
         .btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .btn-sm { padding: 6px 14px; font-size: 12px; }
+        .date-filter { background: var(--card); color: var(--text-dim); border: 1px solid var(--border); }
+        .date-filter.active { background: var(--accent); color: white; border-color: var(--accent); }
 
         /* ─── 뱃지 ─── */
         .badge {
@@ -374,6 +376,15 @@
             <button class="tab task-filter" data-status="좋아요작업완료" onclick="switchTaskFilter('좋아요작업완료', this)">좋아요 완료</button>
         </div>
 
+        <!-- 날짜 필터 -->
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px">
+            <span style="font-size:13px;color:var(--text-dim)">날짜:</span>
+            <button class="btn btn-sm date-filter active" onclick="setDateFilter(null, this)">전체</button>
+            <button class="btn btn-sm date-filter" onclick="setDateFilter('today', this)">오늘</button>
+            <button class="btn btn-sm date-filter" onclick="setDateFilter('yesterday', this)">어제</button>
+            <input type="date" id="taskDatePicker" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:13px" onchange="setDateFilter(this.value, null)">
+        </div>
+
         <div class="table-wrap">
             <div class="table-title">
                 <span id="taskTableTitle">노션 DB 작업 목록</span>
@@ -392,11 +403,12 @@
                         <th>댓글 원고</th>
                         <th>댓글 계정</th>
                         <th>브랜드</th>
+                        <th>편집일</th>
                         <th>상태</th>
                     </tr>
                 </thead>
                 <tbody id="taskTableBody">
-                    <tr><td colspan="7" style="text-align:center;color:var(--text-dim)">상태를 선택하고 불러오기를 클릭하세요</td></tr>
+                    <tr><td colspan="8" style="text-align:center;color:var(--text-dim)">상태를 선택하고 불러오기를 클릭하세요</td></tr>
                 </tbody>
             </table>
         </div>
@@ -681,15 +693,38 @@
         `).join('');
     }
 
-    // ─── 현재 선택된 상태 필터 ───
+    // ─── 현재 선택된 상태/날짜 필터 ───
     let currentTaskStatus = '댓글작업전';
+    let currentDateFilter = null; // null=전체, 'YYYY-MM-DD'=특정 날짜
+
+    function setDateFilter(value, btn) {
+        const picker = document.getElementById('taskDatePicker');
+        if (value === 'today') {
+            currentDateFilter = new Date().toISOString().split('T')[0];
+            picker.value = currentDateFilter;
+        } else if (value === 'yesterday') {
+            const d = new Date(); d.setDate(d.getDate() - 1);
+            currentDateFilter = d.toISOString().split('T')[0];
+            picker.value = currentDateFilter;
+        } else if (value === null) {
+            currentDateFilter = null;
+            picker.value = '';
+        } else {
+            currentDateFilter = value;
+        }
+        // 날짜 버튼 active 토글
+        document.querySelectorAll('.date-filter').forEach(b => b.classList.remove('active'));
+        if (btn) btn.classList.add('active');
+        else if (value === null) document.querySelector('.date-filter').classList.add('active');
+        fetchNotionTasks();
+    }
 
     // ─── 작업 목록 로드 ───
     async function fetchNotionTasks() {
         const msgEl = document.getElementById('taskFetchMsg');
         const tbody = document.getElementById('taskTableBody');
         msgEl.textContent = '노션에서 불러오는 중...';
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-dim)">노션 DB 조회 중...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-dim)">노션 DB 조회 중...</td></tr>';
         await loadTasks(currentTaskStatus);
         msgEl.textContent = '';
     }
@@ -787,22 +822,28 @@
 
     async function loadTasks(status) {
         const statusParam = status || currentTaskStatus;
-        const data = await api(`/api/tasks?status=${encodeURIComponent(statusParam)}`);
+        let url = `/api/tasks?status=${encodeURIComponent(statusParam)}`;
+        if (currentDateFilter) url += `&date=${currentDateFilter}`;
+        const data = await api(url);
         const tbody = document.getElementById('taskTableBody');
         const msgEl = document.getElementById('taskFetchMsg');
 
         if (!data || data.error) {
-            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--red)">${data?.error || '작업 목록 조회 실패'}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--red)">${data?.error || '작업 목록 조회 실패'}</td></tr>`;
             if (msgEl) msgEl.innerHTML = `<span style="color:var(--red)">${data?.error || '조회 실패'}</span>`;
             return;
         }
 
-        // 대시보드 카운터 업데이트
-        if (statusParam === '댓글작업전') document.getElementById('pendingCount').textContent = data.count;
-        if (msgEl && data.count >= 0) msgEl.innerHTML = `<span style="color:var(--green)">${data.count}개 작업 로드됨</span>`;
+        // 대시보드 카운터 업데이트 (날짜 필터 없을 때만)
+        if (statusParam === '댓글작업전' && !currentDateFilter) document.getElementById('pendingCount').textContent = data.count;
+        const dateLabel = currentDateFilter ? ` (${currentDateFilter})` : '';
+        if (msgEl && data.count >= 0) msgEl.innerHTML = `<span style="color:var(--green)">${data.count}개 작업 로드됨${dateLabel}</span>`;
 
         if (data.tasks.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-dim)">'${statusParam}' 상태의 작업이 없습니다</td></tr>`;
+            const emptyMsg = currentDateFilter
+                ? `'${statusParam}' 상태의 ${currentDateFilter} 작업이 없습니다`
+                : `'${statusParam}' 상태의 작업이 없습니다`;
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-dim)">${emptyMsg}</td></tr>`;
             return;
         }
 
@@ -813,8 +854,14 @@
         const badgeClass = statusColors[statusParam] || 'badge-yellow';
 
         tbody.innerHTML = data.tasks.map((task, i) => {
-            const url = task.youtube_url || '';
-            const urlDisplay = url ? `<a href="${url}" target="_blank" style="color:var(--blue);text-decoration:none">${url.substring(0, 40)}...</a>` : '-';
+            const taskUrl = task.youtube_url || '';
+            const urlDisplay = taskUrl ? `<a href="${taskUrl}" target="_blank" style="color:var(--blue);text-decoration:none">${taskUrl.substring(0, 40)}...</a>` : '-';
+            // 편집일 포맷
+            let editDate = '-';
+            if (task.last_edited) {
+                const d = new Date(task.last_edited);
+                editDate = `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+            }
             return `
             <tr>
                 <td>${i + 1}</td>
@@ -823,6 +870,7 @@
                 <td>${task.comment_text ? task.comment_text.substring(0, 30) + (task.comment_text.length > 30 ? '...' : '') : '-'}</td>
                 <td>${task.account || '-'}</td>
                 <td>${task.brand || '-'}</td>
+                <td style="font-size:12px;color:var(--text-dim);white-space:nowrap">${editDate}</td>
                 <td><span class="badge ${badgeClass}">${task.status || statusParam}</span></td>
             </tr>`;
         }).join('');

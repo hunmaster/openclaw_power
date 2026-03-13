@@ -130,12 +130,13 @@ def api_dashboard():
 
 @app.route("/api/tasks")
 def api_tasks():
-    """노션 DB에서 작업 목록을 가져옵니다. ?status= 파라미터로 상태 필터링."""
+    """노션 DB에서 작업 목록을 가져옵니다. ?status=&date=YYYY-MM-DD 파라미터 지원."""
     try:
         notion = NotionManager()
         status_filter = request.args.get("status", "댓글작업전")
-        tasks = notion.get_tasks_by_status(status_filter)
-        return jsonify({"tasks": tasks, "count": len(tasks), "status": status_filter})
+        date_filter = request.args.get("date", None)  # YYYY-MM-DD 또는 None(전체)
+        tasks = notion.get_tasks_by_status(status_filter, date_filter=date_filter)
+        return jsonify({"tasks": tasks, "count": len(tasks), "status": status_filter, "date": date_filter})
     except Exception as e:
         return jsonify({"error": str(e), "tasks": [], "count": 0}), 500
 

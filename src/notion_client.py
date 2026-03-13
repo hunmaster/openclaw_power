@@ -38,29 +38,57 @@ class NotionManager:
         """상태가 '댓글작업전'인 작업 목록만 가져옵니다."""
         return self.get_tasks_by_status("댓글작업전")
 
-    def get_tasks_by_status(self, status_value):
-        """지정된 상태의 작업 목록을 가져옵니다."""
-        console.print(f"[blue]노션 DB 조회 (상태: '{status_value}', 컬럼: {self.col_status})[/blue]")
+    def get_tasks_by_status(self, status_value, date_filter=None):
+        """지정된 상태의 작업 목록을 가져옵니다. date_filter: 'YYYY-MM-DD' 형식 날짜."""
+        console.print(f"[blue]노션 DB 조회 (상태: '{status_value}', 날짜: {date_filter or '전체'})[/blue]")
+
+        # 상태 필터 구성
+        status_filter = {"property": self.col_status, "select": {"equals": status_value}}
+
+        # 날짜 필터가 있으면 AND 조건으로 결합
+        if date_filter:
+            query_filter = {
+                "and": [
+                    status_filter,
+                    {
+                        "timestamp": "last_edited_time",
+                        "last_edited_time": {"on_or_after": f"{date_filter}T00:00:00+09:00"},
+                    },
+                    {
+                        "timestamp": "last_edited_time",
+                        "last_edited_time": {"before": f"{date_filter}T23:59:59+09:00"},
+                    },
+                ]
+            }
+        else:
+            query_filter = status_filter
+
         try:
             response = self.client.databases.query(
                 database_id=self.database_id,
                 page_size=100,
-                filter={
-                    "property": self.col_status,
-                    "select": {"equals": status_value},
-                },
+                filter=query_filter,
             )
             console.print(f"[green]select 필터 성공: {len(response.get('results', []))}건[/green]")
         except Exception as e1:
             console.print(f"[yellow]select 필터 실패: {e1}[/yellow]")
+            # status 타입으로 재시도
+            if date_filter:
+                status_filter = {"property": self.col_status, "status": {"equals": status_value}}
+                query_filter = {
+                    "and": [
+                        status_filter,
+                        {"timestamp": "last_edited_time", "last_edited_time": {"on_or_after": f"{date_filter}T00:00:00+09:00"}},
+                        {"timestamp": "last_edited_time", "last_edited_time": {"before": f"{date_filter}T23:59:59+09:00"}},
+                    ]
+                }
+            else:
+                query_filter = {"property": self.col_status, "status": {"equals": status_value}}
             try:
                 response = self.client.databases.query(
                     database_id=self.database_id,
                     page_size=100,
-                    filter={
-                        "property": self.col_status,
-                        "status": {"equals": status_value},
-                    },
+                    filter=query_filter,
                 )
                 console.print(f"[green]status 필터 성공: {len(response.get('results', []))}건[/green]")
             except Exception as e2:
@@ -150,6 +178,9 @@ class NotionManager:
         # 브랜드 추출
         brand_prop = props.get("브랜드", {})
         task["brand"] = self._extract_text(brand_prop)
+
+        # 최종 편집 일시 추출
+        task["last_edited"] = page.get("last_edited_time", "")
 
         return task
 
