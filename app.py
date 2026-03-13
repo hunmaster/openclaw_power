@@ -815,9 +815,10 @@ def _run_automation(limit=0):
                 add_log(f"같은 계정 연속 - {comment_interval}초 대기", "info")
                 time.sleep(comment_interval)
 
-            # 안전 규칙 검사
+            # 안전 규칙 검사 (테스트 모드에서는 시간 간격 규칙 건너뜀)
             passed, reason = safety_rules.check_all_rules(
-                current_label, task["youtube_url"], task["comment_text"]
+                current_label, task["youtube_url"], task["comment_text"],
+                skip_interval=test_mode,
             )
             if not passed:
                 add_log(f"[건너뜀] {reason}", "warning")

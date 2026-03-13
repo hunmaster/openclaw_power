@@ -19,7 +19,7 @@ console = Console()
 
 # 기본 제한값
 DEFAULT_MAX_COMMENTS_PER_DAY = 20  # 1일 1계정당 최대 댓글 수 (시간 간격을 두고 작업)
-DEFAULT_SAME_VIDEO_INTERVAL_MIN = 30  # 같은 영상 다른 계정 간격 (분)
+DEFAULT_SAME_VIDEO_INTERVAL_MIN = 10  # 같은 영상 다른 계정 간격 (분)
 DEFAULT_COMMENT_INTERVAL_SEC = 180  # 연속 댓글 사이 최소 간격 (초) - 3분
 
 
@@ -54,9 +54,12 @@ class SafetyRules:
         with open(self.history_file, "w") as f:
             json.dump(self.history, f, indent=2, ensure_ascii=False)
 
-    def check_all_rules(self, account_label, video_url, comment_text):
+    def check_all_rules(self, account_label, video_url, comment_text, skip_interval=False):
         """
         모든 안전 규칙을 검사합니다.
+
+        Args:
+            skip_interval: True이면 시간 간격 규칙을 건너뜁니다 (테스트 모드용)
 
         Returns:
             (bool, str): (통과 여부, 실패 시 사유)
@@ -66,20 +69,22 @@ class SafetyRules:
         if not passed:
             return False, reason
 
-        # 규칙 2: 1일 댓글 수 제한
+        # 규칙 2: 1일 댓글 수 제한 (테스트 모드에서도 유지)
         passed, reason = self._check_daily_limit(account_label)
         if not passed:
             return False, reason
 
-        # 규칙 3: 같은 영상 시간 간격
-        passed, reason = self._check_same_video_interval(video_url)
-        if not passed:
-            return False, reason
+        # 규칙 3: 같은 영상 시간 간격 (테스트 모드에서는 건너뜀)
+        if not skip_interval:
+            passed, reason = self._check_same_video_interval(video_url)
+            if not passed:
+                return False, reason
 
-        # 규칙 4: 동일/유사 문구 검사
-        passed, reason = self._check_duplicate_text(comment_text)
-        if not passed:
-            return False, reason
+        # 규칙 4: 동일/유사 문구 검사 (테스트 모드에서는 건너뜀)
+        if not skip_interval:
+            passed, reason = self._check_duplicate_text(comment_text)
+            if not passed:
+                return False, reason
 
         return True, "OK"
 
