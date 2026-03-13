@@ -64,17 +64,19 @@ class NotionManager:
 
         results = response.get("results", [])
         console.print(f"[blue]조회된 결과: {len(results)}건[/blue]")
+        console.print(f"[dim]  사용 중인 컬럼명: youtube_url='{self.col_youtube_url}', comment='{self.col_comment_text}', account='{self.col_account}', result_url='{self.col_result_url}'[/dim]")
 
         tasks = []
         for idx, page in enumerate(results):
-            task = self._parse_page(page)
+            task = self._parse_page(page, debug=(idx == 0))
             console.print(
                 f"[dim]  [{idx}] youtube_url={bool(task.get('youtube_url'))}, "
                 f"comment_text={bool(task.get('comment_text'))}, "
                 f"status={task.get('status')}, "
                 f"url={str(task.get('youtube_url', ''))[:50]}[/dim]"
             )
-            if task and task.get("youtube_url") and task.get("comment_text"):
+            # 댓글 원고가 있는 작업만 (youtube_url은 없어도 목록에 표시)
+            if task and task.get("comment_text"):
                 # 이미 완료된 항목 제외
                 if task.get("status") not in ("댓글완료", "대댓글완료", "에러"):
                     tasks.append(task)
@@ -82,14 +84,26 @@ class NotionManager:
         console.print(f"[green]대기 중인 작업: {len(tasks)}개[/green]")
         return tasks
 
-    def _parse_page(self, page):
+    def _parse_page(self, page, debug=False):
         """Notion 페이지에서 필요한 데이터를 추출합니다."""
         props = page.get("properties", {})
         task = {"page_id": page["id"]}
 
-        # 유튜브 링크 추출
+        if debug:
+            prop_names = {name: prop.get("type", "?") for name, prop in props.items()}
+            console.print(f"[dim]  실제 property 이름: {prop_names}[/dim]")
+
+        # 유튜브 링크 추출 - 지정된 컬럼명으로 먼저 시도, 없으면 url 타입 자동 탐색
         youtube_prop = props.get(self.col_youtube_url, {})
         task["youtube_url"] = self._extract_url(youtube_prop)
+        if not task["youtube_url"]:
+            # url 타입 컬럼을 자동으로 찾기
+            for name, prop in props.items():
+                if prop.get("type") == "url" and prop.get("url"):
+                    task["youtube_url"] = prop.get("url", "")
+                    if debug:
+                        console.print(f"[yellow]  URL 자동 탐색: '{name}' → {task['youtube_url'][:50]}[/yellow]")
+                    break
 
         # 댓글 원고 추출
         comment_prop = props.get(self.col_comment_text, {})
@@ -99,7 +113,7 @@ class NotionManager:
         status_prop = props.get(self.col_status, {})
         task["status"] = self._extract_status(status_prop)
 
-        # 계정 추출
+        # 계정 추출 - 지정된 컬럼명으로 먼저, 없으면 select 타입에서 탐색
         account_prop = props.get(self.col_account, {})
         task["account"] = self._extract_text(account_prop)
 
