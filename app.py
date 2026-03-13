@@ -492,6 +492,48 @@ def api_delete_account(email):
         return jsonify({"error": f"계정 삭제 중 오류: {str(e)}"}), 500
 
 
+@app.route("/api/accounts/test-login", methods=["POST"])
+def api_test_login():
+    """계정의 YouTube 로그인을 테스트합니다."""
+    import time as _time
+    from src.youtube_bot import YouTubeBot
+
+    data = request.get_json()
+    if not data or not data.get("email"):
+        return jsonify({"error": "이메일이 필요합니다."}), 400
+
+    email = data["email"]
+    accounts = load_accounts()
+    account = None
+    for acc in accounts:
+        if acc.get("email") == email:
+            account = acc
+            break
+
+    if not account:
+        return jsonify({"error": "해당 계정을 찾을 수 없습니다."}), 404
+
+    start_time = _time.time()
+    bot = YouTubeBot()
+    # 테스트는 headless로 강제
+    bot.headless = True
+
+    try:
+        bot.start_browser()
+        login_ok = bot.login_youtube(account["email"], account["password"])
+        elapsed = round(_time.time() - start_time, 1)
+
+        if login_ok:
+            return jsonify({"success": True, "message": f"로그인 성공 ({elapsed}초)", "elapsed": elapsed})
+        else:
+            return jsonify({"success": False, "message": f"로그인 실패 ({elapsed}초)", "elapsed": elapsed})
+    except Exception as e:
+        elapsed = round(_time.time() - start_time, 1)
+        return jsonify({"success": False, "message": f"오류: {str(e)} ({elapsed}초)", "elapsed": elapsed})
+    finally:
+        bot.close_browser()
+
+
 def _save_accounts(accounts):
     """계정 목록을 파일에 저장합니다."""
     accounts_file = os.getenv("ACCOUNTS_FILE", "config/accounts.json")
@@ -601,7 +643,7 @@ def _run_automation():
                 comment_url = bot.post_comment(task["youtube_url"], task["comment_text"])
 
                 if comment_url:
-                    notion.update_task_result(task["page_id"], comment_url, status="완료")
+                    notion.update_task_result(task["page_id"], comment_url, status="댓글완료")
                     safety_rules.record_comment(current_label, task["youtube_url"], task["comment_text"])
                     automation_state["results"]["success"] += 1
                     add_log(f"댓글 성공: {comment_url[:60]}", "success")

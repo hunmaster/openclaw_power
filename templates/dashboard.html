@@ -361,14 +361,16 @@
                 <thead>
                     <tr>
                         <th>#</th>
-                        <th>유튜브 URL</th>
+                        <th>영상 제목</th>
+                        <th>영상 링크</th>
                         <th>댓글 원고</th>
-                        <th>계정</th>
+                        <th>댓글 계정</th>
+                        <th>브랜드</th>
                         <th>상태</th>
                     </tr>
                 </thead>
                 <tbody id="taskTableBody">
-                    <tr><td colspan="5" style="text-align:center;color:var(--text-dim)">로딩 중...</td></tr>
+                    <tr><td colspan="7" style="text-align:center;color:var(--text-dim)">로딩 중...</td></tr>
                 </tbody>
             </table>
         </div>
@@ -447,6 +449,25 @@
             <div class="card">
                 <div class="card-label">댓글당 좋아요</div>
                 <div id="smmQuantity" class="card-value blue">-</div>
+            </div>
+        </div>
+
+        <!-- SMM 주문 설정 -->
+        <div class="card" style="margin-bottom:20px">
+            <h3 style="margin-bottom:16px;font-size:15px">주문 설정</h3>
+            <div class="settings-grid">
+                <div class="form-group">
+                    <label>SMM 서비스 ID (서비스 조회에서 확인)</label>
+                    <input type="text" id="setSmmServiceId" placeholder="서비스 ID (숫자)">
+                </div>
+                <div class="form-group">
+                    <label>댓글당 좋아요 수</label>
+                    <input type="number" id="setSmmQuantity" value="10">
+                </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px">
+                <button class="btn btn-primary btn-sm" onclick="saveSmmOrderSettings()">주문 설정 저장</button>
+                <span id="saveSmmMsg" style="font-size:13px"></span>
             </div>
         </div>
 
@@ -534,15 +555,7 @@
                     </div>
                 </div>
                 <div>
-                    <h3 style="margin-bottom:16px;font-size:15px">SMM Kings 주문</h3>
-                    <div class="form-group">
-                        <label>SMM 서비스 ID</label>
-                        <input type="text" id="setSmmServiceId" placeholder="서비스 ID (숫자)">
-                    </div>
-                    <div class="form-group">
-                        <label>댓글당 좋아요 수</label>
-                        <input type="number" id="setSmmQuantity" value="10">
-                    </div>
+                    <h3 style="margin-bottom:16px;font-size:15px">브라우저</h3>
                     <div class="form-group">
                         <label>브라우저 모드</label>
                         <select id="setHeadless">
@@ -636,7 +649,7 @@
         const msgEl = document.getElementById('taskFetchMsg');
         const tbody = document.getElementById('taskTableBody');
         msgEl.textContent = '노션에서 불러오는 중...';
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-dim)">노션 DB 조회 중...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-dim)">노션 DB 조회 중...</td></tr>';
         await loadTasks();
         msgEl.textContent = '';
     }
@@ -706,7 +719,7 @@
         const msgEl = document.getElementById('taskFetchMsg');
 
         if (!data || data.error) {
-            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--red)">${data?.error || '작업 목록 조회 실패'}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--red)">${data?.error || '작업 목록 조회 실패'}</td></tr>`;
             if (msgEl) msgEl.innerHTML = `<span style="color:var(--red)">${data?.error || '조회 실패'}</span>`;
             return;
         }
@@ -715,16 +728,18 @@
         if (msgEl && data.count >= 0) msgEl.innerHTML = `<span style="color:var(--green)">${data.count}개 작업 로드됨</span>`;
 
         if (data.tasks.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-dim)">대기 중인 작업이 없습니다</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-dim)">대기 중인 작업이 없습니다</td></tr>';
             return;
         }
         tbody.innerHTML = data.tasks.map((task, i) => `
             <tr>
                 <td>${i + 1}</td>
-                <td><a href="${task.youtube_url}" target="_blank" style="color:var(--blue);text-decoration:none">${task.youtube_url.substring(0, 55)}...</a></td>
-                <td>${task.comment_text.substring(0, 40)}${task.comment_text.length > 40 ? '...' : ''}</td>
+                <td>${task.video_title ? task.video_title.substring(0, 30) + (task.video_title.length > 30 ? '...' : '') : '-'}</td>
+                <td><a href="${task.youtube_url}" target="_blank" style="color:var(--blue);text-decoration:none">${task.youtube_url.substring(0, 40)}...</a></td>
+                <td>${task.comment_text.substring(0, 30)}${task.comment_text.length > 30 ? '...' : ''}</td>
                 <td>${task.account || '-'}</td>
-                <td><span class="badge badge-yellow">대기</span></td>
+                <td>${task.brand || '-'}</td>
+                <td><span class="badge badge-yellow">${task.status || '댓글작업전'}</span></td>
             </tr>
         `).join('');
     }
@@ -744,7 +759,11 @@
                 <td><strong>${acc.label}</strong></td>
                 <td>${acc.email}</td>
                 <td><span class="badge ${acc.account_type === 'sub' ? 'badge-yellow' : 'badge-blue'}">${acc.account_type === 'sub' ? '부계정' : '찐계정'}</span></td>
-                <td><button class="btn btn-sm btn-danger" onclick="deleteAccount('${acc.email}')">삭제</button></td>
+                <td style="display:flex;gap:6px;align-items:center">
+                    <button class="btn btn-sm btn-secondary" id="testBtn-${acc.email.replace(/[^a-zA-Z0-9]/g,'_')}" onclick="testLogin('${acc.email}')">로그인 테스트</button>
+                    <span id="testResult-${acc.email.replace(/[^a-zA-Z0-9]/g,'_')}" style="font-size:12px"></span>
+                    <button class="btn btn-sm btn-danger" onclick="deleteAccount('${acc.email}')">삭제</button>
+                </td>
             </tr>
         `).join('');
     }
@@ -793,6 +812,32 @@
         }
     }
 
+    // ─── 계정 로그인 테스트 ───
+    async function testLogin(email) {
+        const safeId = email.replace(/[^a-zA-Z0-9]/g, '_');
+        const btn = document.getElementById('testBtn-' + safeId);
+        const result = document.getElementById('testResult-' + safeId);
+
+        btn.disabled = true;
+        btn.textContent = '테스트 중...';
+        result.innerHTML = '<span style="color:var(--text-dim)">로그인 확인 중...</span>';
+
+        const data = await api('/api/accounts/test-login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email }),
+        });
+
+        btn.disabled = false;
+        btn.textContent = '로그인 테스트';
+
+        if (data && data.success) {
+            result.innerHTML = `<span class="badge badge-green">${data.message}</span>`;
+        } else {
+            result.innerHTML = `<span class="badge badge-red">${data?.message || data?.error || '테스트 실패'}</span>`;
+        }
+    }
+
     // ─── SMM 정보 ───
     async function loadSMMInfo() {
         const data = await api('/api/dashboard');
@@ -803,6 +848,36 @@
         document.getElementById('smmBalanceDetail').textContent =
             data.smm_balance !== null ? '$' + parseFloat(data.smm_balance).toFixed(2) : 'N/A';
         document.getElementById('smmQuantity').textContent = data.settings.smm_like_quantity;
+
+        // 주문 설정 필드 채우기
+        const settings = await api('/api/settings');
+        if (settings) {
+            document.getElementById('setSmmServiceId').value = settings.SMM_LIKE_SERVICE_ID || '';
+            document.getElementById('setSmmQuantity').value = settings.SMM_LIKE_QUANTITY || '10';
+        }
+    }
+
+    async function saveSmmOrderSettings() {
+        const msgEl = document.getElementById('saveSmmMsg');
+        msgEl.innerHTML = '<span style="color:var(--text-dim)">저장 중...</span>';
+
+        const payload = {
+            SMM_LIKE_SERVICE_ID: document.getElementById('setSmmServiceId').value,
+            SMM_LIKE_QUANTITY: document.getElementById('setSmmQuantity').value,
+        };
+
+        const res = await api('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+
+        if (res && !res.error) {
+            msgEl.innerHTML = '<span style="color:var(--green)">저장 완료!</span>';
+            setTimeout(() => { msgEl.textContent = ''; }, 3000);
+        } else {
+            msgEl.innerHTML = `<span style="color:var(--red)">${res?.error || '저장 실패'}</span>`;
+        }
     }
 
     async function loadSMMServices() {
@@ -847,8 +922,6 @@
         document.getElementById('setMaxComments').value = data.MAX_COMMENTS_PER_DAY;
         document.getElementById('setCommentInterval').value = data.COMMENT_INTERVAL_SEC;
         document.getElementById('setSameVideoInterval').value = data.SAME_VIDEO_INTERVAL_MIN;
-        document.getElementById('setSmmServiceId').value = data.SMM_LIKE_SERVICE_ID;
-        document.getElementById('setSmmQuantity').value = data.SMM_LIKE_QUANTITY;
         document.getElementById('setHeadless').value = data.HEADLESS;
     }
 
@@ -862,8 +935,6 @@
             NOTION_DATABASE_ID: document.getElementById('setNotionDbId').value,
             SMM_API_KEY: document.getElementById('setSmmApiKey').value,
             SMM_ENABLED: document.getElementById('setSmmEnabled').value,
-            SMM_LIKE_SERVICE_ID: document.getElementById('setSmmServiceId').value,
-            SMM_LIKE_QUANTITY: document.getElementById('setSmmQuantity').value,
             MAX_COMMENTS_PER_DAY: document.getElementById('setMaxComments').value,
             COMMENT_INTERVAL_SEC: document.getElementById('setCommentInterval').value,
             SAME_VIDEO_INTERVAL_MIN: document.getElementById('setSameVideoInterval').value,

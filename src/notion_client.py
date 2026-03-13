@@ -29,37 +29,40 @@ class NotionManager:
         self.col_account = os.getenv("NOTION_COLUMN_ACCOUNT", "계정")
 
     def get_pending_tasks(self):
-        """상태가 '대기' 또는 비어있는 작업 목록을 가져옵니다."""
+        """상태가 '댓글작업전' 또는 비어있는 작업 목록을 가져옵니다."""
         try:
+            # select 타입 먼저 시도 (실제 DB가 select 타입)
             response = self.client.databases.query(
                 database_id=self.database_id,
+                page_size=100,
                 filter={
                     "or": [
                         {
                             "property": self.col_status,
-                            "status": {"equals": "대기"},
+                            "select": {"equals": "댓글작업전"},
                         },
                         {
                             "property": self.col_status,
-                            "status": {"is_empty": True},
+                            "select": {"is_empty": True},
                         },
                     ]
                 },
             )
         except Exception:
-            # status 타입이 아닐 수 있으므로 select로 재시도
+            # status 타입으로 재시도
             try:
                 response = self.client.databases.query(
                     database_id=self.database_id,
+                    page_size=100,
                     filter={
                         "or": [
                             {
                                 "property": self.col_status,
-                                "select": {"equals": "대기"},
+                                "status": {"equals": "댓글작업전"},
                             },
                             {
                                 "property": self.col_status,
-                                "select": {"is_empty": True},
+                                "status": {"is_empty": True},
                             },
                         ]
                     },
@@ -67,14 +70,14 @@ class NotionManager:
             except Exception:
                 # 필터 없이 전체 조회 후 코드에서 필터링
                 console.print("[yellow]상태 필터링 실패, 전체 데이터를 가져옵니다.[/yellow]")
-                response = self.client.databases.query(database_id=self.database_id)
+                response = self.client.databases.query(database_id=self.database_id, page_size=100)
 
         tasks = []
         for page in response.get("results", []):
             task = self._parse_page(page)
             if task and task.get("youtube_url") and task.get("comment_text"):
                 # 이미 완료된 항목 제외
-                if task.get("status") not in ("완료", "에러"):
+                if task.get("status") not in ("댓글완료", "대댓글완료", "에러"):
                     tasks.append(task)
 
         console.print(f"[green]대기 중인 작업: {len(tasks)}개[/green]")
@@ -104,6 +107,18 @@ class NotionManager:
         # 기존 댓글 URL 확인
         result_prop = props.get(self.col_result_url, {})
         task["result_url"] = self._extract_url(result_prop)
+
+        # 영상 제목 추출 (title 타입 컬럼)
+        for name, prop in props.items():
+            if prop.get("type") == "title":
+                task["video_title"] = self._extract_text(prop)
+                break
+        if "video_title" not in task:
+            task["video_title"] = ""
+
+        # 브랜드 추출
+        brand_prop = props.get("브랜드", {})
+        task["brand"] = self._extract_text(brand_prop)
 
         return task
 
@@ -175,7 +190,7 @@ class NotionManager:
             ]
         }
 
-    def update_task_result(self, page_id, comment_url, status="완료"):
+    def update_task_result(self, page_id, comment_url, status="댓글완료"):
         """댓글 작성 결과를 Notion에 저장합니다."""
         properties = {}
 

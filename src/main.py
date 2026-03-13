@@ -284,7 +284,7 @@ def run():
             skip_count += 1
         elif result:
             comment_url = result if isinstance(result, str) else ""
-            notion.update_task_result(task["page_id"], comment_url, status="완료")
+            notion.update_task_result(task["page_id"], comment_url, status="댓글완료")
             success_count += 1
             console.print(f"[green]작업 {i} 완료[/green]")
             if comment_url:
