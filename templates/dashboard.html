@@ -351,8 +351,9 @@
         <div class="table-wrap">
             <div class="table-title">
                 <span>노션 DB 대기 작업</span>
-                <div style="display:flex;gap:8px">
+                <div style="display:flex;gap:8px;align-items:center">
                     <button class="btn btn-sm btn-primary" onclick="fetchNotionTasks()">노션에서 불러오기</button>
+                    <button class="btn btn-sm btn-secondary" onclick="debugNotionDB()">DB 구조 확인</button>
                     <span id="taskFetchMsg" style="font-size:12px;line-height:28px;color:var(--text-dim)"></span>
                 </div>
             </div>
@@ -370,6 +371,14 @@
                     <tr><td colspan="5" style="text-align:center;color:var(--text-dim)">로딩 중...</td></tr>
                 </tbody>
             </table>
+        </div>
+
+        <!-- DB 구조 디버그 결과 -->
+        <div id="notionDebugPanel" style="display:none;margin-top:16px">
+            <div class="card">
+                <h3 style="margin-bottom:12px;font-size:15px">노션 DB 구조 분석</h3>
+                <div id="notionDebugContent"></div>
+            </div>
         </div>
     </div>
 
@@ -630,6 +639,65 @@
         tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-dim)">노션 DB 조회 중...</td></tr>';
         await loadTasks();
         msgEl.textContent = '';
+    }
+
+    // ─── 노션 DB 구조 디버그 ───
+    async function debugNotionDB() {
+        const panel = document.getElementById('notionDebugPanel');
+        const content = document.getElementById('notionDebugContent');
+        panel.style.display = 'block';
+        content.innerHTML = '<p style="color:var(--text-dim)">노션 DB 구조 분석 중...</p>';
+
+        const data = await api('/api/notion/debug');
+        if (!data || data.error) {
+            content.innerHTML = `<p style="color:var(--red)">${data?.error || 'DB 구조 확인 실패'}</p>`;
+            return;
+        }
+
+        let html = '';
+
+        // DB 이름
+        html += `<p style="margin-bottom:12px"><strong>DB 이름:</strong> ${data.db_title} (총 ${data.total_pages}개 행 샘플)</p>`;
+
+        // 컬럼 매칭 상태
+        html += '<h4 style="margin:12px 0 8px;font-size:13px;color:var(--accent-light)">컬럼 매칭 상태</h4>';
+        html += '<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">';
+        for (const [label, info] of Object.entries(data.expected_columns)) {
+            const ok = info.found;
+            const icon = ok ? '&#10004;' : '&#10008;';
+            const color = ok ? 'var(--green)' : 'var(--red)';
+            html += `<div style="display:flex;align-items:center;gap:8px;font-size:13px">`;
+            html += `<span style="color:${color}">${icon}</span>`;
+            html += `<span><strong>${label}</strong>: "${info.expected}" → ${ok ? '매칭됨' : '<span style=color:var(--red)>없음!</span>'}</span>`;
+            html += '</div>';
+        }
+        html += '</div>';
+
+        // 실제 DB 컬럼 목록
+        html += '<h4 style="margin:12px 0 8px;font-size:13px;color:var(--accent-light)">실제 DB 컬럼 목록</h4>';
+        html += '<table style="width:100%;margin-bottom:16px"><thead><tr><th>컬럼명</th><th>타입</th></tr></thead><tbody>';
+        for (const [name, info] of Object.entries(data.properties)) {
+            html += `<tr><td><strong>${name}</strong></td><td><span class="badge badge-blue">${info.type}</span></td></tr>`;
+        }
+        html += '</tbody></table>';
+
+        // 샘플 데이터
+        if (data.sample_pages.length > 0) {
+            html += '<h4 style="margin:12px 0 8px;font-size:13px;color:var(--accent-light)">샘플 데이터 (최대 3개)</h4>';
+            for (let i = 0; i < data.sample_pages.length; i++) {
+                const page = data.sample_pages[i];
+                html += `<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;font-size:12px">`;
+                html += `<strong>행 ${i+1}</strong><br>`;
+                for (const [key, val] of Object.entries(page)) {
+                    if (key === 'id') continue;
+                    const display = val ? String(val).substring(0, 80) : '<span style="color:var(--text-dim)">(빈값)</span>';
+                    html += `<span style="color:var(--text-dim)">${key}:</span> ${display}<br>`;
+                }
+                html += '</div>';
+            }
+        }
+
+        content.innerHTML = html;
     }
 
     async function loadTasks() {

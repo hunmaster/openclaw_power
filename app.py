@@ -137,6 +137,82 @@ def api_tasks():
         return jsonify({"error": str(e), "tasks": [], "count": 0}), 500
 
 
+@app.route("/api/notion/debug")
+def api_notion_debug():
+    """노션 DB 구조를 확인합니다 (디버깅용)."""
+    try:
+        from notion_client import Client
+        token = os.getenv("NOTION_API_TOKEN", "")
+        db_id = os.getenv("NOTION_DATABASE_ID", "")
+
+        if not token or not db_id:
+            return jsonify({"error": "NOTION_API_TOKEN 또는 NOTION_DATABASE_ID 미설정"}), 400
+
+        client = Client(auth=token)
+
+        # DB 메타데이터 조회 (컬럼 구조)
+        db_info = client.databases.retrieve(database_id=db_id)
+        properties = {}
+        for name, prop in db_info.get("properties", {}).items():
+            properties[name] = {
+                "type": prop.get("type", "unknown"),
+                "id": prop.get("id", ""),
+            }
+
+        # 첫 3개 데이터 샘플 조회
+        response = client.databases.query(database_id=db_id, page_size=3)
+        sample_pages = []
+        for page in response.get("results", []):
+            page_data = {"id": page["id"]}
+            for name, prop in page.get("properties", {}).items():
+                prop_type = prop.get("type", "")
+                if prop_type == "title":
+                    titles = prop.get("title", [])
+                    page_data[name] = "".join(t.get("plain_text", "") for t in titles)
+                elif prop_type == "rich_text":
+                    texts = prop.get("rich_text", [])
+                    page_data[name] = "".join(t.get("plain_text", "") for t in texts)
+                elif prop_type == "url":
+                    page_data[name] = prop.get("url", "")
+                elif prop_type == "status":
+                    status = prop.get("status")
+                    page_data[name] = status.get("name", "") if status else ""
+                elif prop_type == "select":
+                    select = prop.get("select")
+                    page_data[name] = select.get("name", "") if select else ""
+                else:
+                    page_data[name] = f"[{prop_type}]"
+            sample_pages.append(page_data)
+
+        # 현재 코드에서 기대하는 컬럼명
+        expected = {
+            "유튜브 링크": os.getenv("NOTION_COLUMN_YOUTUBE_URL", "유튜브 링크"),
+            "댓글 원고": os.getenv("NOTION_COLUMN_COMMENT_TEXT", "댓글 원고"),
+            "상태": os.getenv("NOTION_COLUMN_STATUS", "상태"),
+            "계정": os.getenv("NOTION_COLUMN_ACCOUNT", "계정"),
+            "댓글 URL": os.getenv("NOTION_COLUMN_COMMENT_RESULT_URL", "댓글 URL"),
+        }
+
+        # 매칭 확인
+        actual_names = set(properties.keys())
+        matching = {}
+        for label, col_name in expected.items():
+            matching[label] = {
+                "expected": col_name,
+                "found": col_name in actual_names,
+            }
+
+        return jsonify({
+            "db_title": db_info.get("title", [{}])[0].get("plain_text", "Untitled") if db_info.get("title") else "Untitled",
+            "properties": properties,
+            "expected_columns": matching,
+            "total_pages": len(response.get("results", [])),
+            "sample_pages": sample_pages,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/run", methods=["POST"])
 def api_run():
     """자동화를 백그라운드에서 시작합니다."""
