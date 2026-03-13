@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube 댓글 자동화 대시보드</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg: #0f0f13;
+            --card: #1a1a24;
+            --card-hover: #22222e;
+            --border: #2a2a3a;
+            --text: #e4e4ed;
+            --text-dim: #8888a0;
+            --accent: #6c5ce7;
+            --accent-light: #a29bfe;
+            --green: #00b894;
+            --red: #ff6b6b;
+            --yellow: #ffd93d;
+            --blue: #74b9ff;
+        }
+
+        body {
+            font-family: 'Segoe UI', -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        /* ─── 헤더 ─── */
+        .header {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 32px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header h1 {
+            font-size: 20px;
+            font-weight: 600;
+        }
+        .header h1 span { color: var(--accent-light); }
+        .header-actions { display: flex; gap: 12px; align-items: center; }
+
+        /* ─── 메인 ─── */
+        .main { padding: 24px 32px; max-width: 1400px; margin: 0 auto; }
+
+        /* ─── 탭 네비게이션 ─── */
+        .tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 24px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0;
+        }
+        .tab {
+            padding: 10px 20px;
+            background: none;
+            border: none;
+            color: var(--text-dim);
+            cursor: pointer;
+            font-size: 14px;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .tab:hover { color: var(--text); }
+        .tab.active {
+            color: var(--accent-light);
+            border-bottom-color: var(--accent);
+        }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        /* ─── 카드 ─── */
+        .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+        }
+        .card-label { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+        .card-value { font-size: 28px; font-weight: 700; }
+        .card-value.green { color: var(--green); }
+        .card-value.red { color: var(--red); }
+        .card-value.blue { color: var(--blue); }
+        .card-value.yellow { color: var(--yellow); }
+        .card-value.accent { color: var(--accent-light); }
+
+        /* ─── 테이블 ─── */
+        .table-wrap {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 24px;
+        }
+        .table-title {
+            padding: 16px 20px;
+            font-size: 14px;
+            font-weight: 600;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        table { width: 100%; border-collapse: collapse; }
+        th {
+            text-align: left;
+            padding: 12px 16px;
+            font-size: 11px;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--border);
+        }
+        td {
+            padding: 12px 16px;
+            font-size: 13px;
+            border-bottom: 1px solid var(--border);
+        }
+        tr:last-child td { border-bottom: none; }
+        tr:hover { background: var(--card-hover); }
+
+        /* ─── 버튼 ─── */
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn-primary { background: var(--accent); color: white; }
+        .btn-primary:hover { background: #5b4bd5; }
+        .btn-danger { background: var(--red); color: white; }
+        .btn-danger:hover { background: #e05555; }
+        .btn-secondary { background: var(--border); color: var(--text); }
+        .btn-secondary:hover { background: #3a3a4a; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-sm { padding: 6px 14px; font-size: 12px; }
+
+        /* ─── 뱃지 ─── */
+        .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .badge-green { background: rgba(0,184,148,0.15); color: var(--green); }
+        .badge-red { background: rgba(255,107,107,0.15); color: var(--red); }
+        .badge-yellow { background: rgba(255,217,61,0.15); color: var(--yellow); }
+        .badge-blue { background: rgba(116,185,255,0.15); color: var(--blue); }
+
+        /* ─── 프로그레스 ─── */
+        .progress-wrap { margin-bottom: 24px; }
+        .progress-bar {
+            height: 6px;
+            background: var(--border);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), var(--accent-light));
+            border-radius: 3px;
+            transition: width 0.5s ease;
+        }
+        .progress-text {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+
+        /* ─── 로그 ─── */
+        .log-container {
+            background: #12121a;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            height: 300px;
+            overflow-y: auto;
+            padding: 12px;
+            font-family: 'Cascadia Code', 'Fira Code', monospace;
+            font-size: 12px;
+        }
+        .log-entry { padding: 4px 0; display: flex; gap: 10px; }
+        .log-time { color: var(--text-dim); min-width: 60px; }
+        .log-msg { color: var(--text); }
+        .log-msg.success { color: var(--green); }
+        .log-msg.error { color: var(--red); }
+        .log-msg.warning { color: var(--yellow); }
+
+        /* ─── 설정 폼 ─── */
+        .settings-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        .form-group { margin-bottom: 16px; }
+        .form-group label {
+            display: block;
+            font-size: 12px;
+            color: var(--text-dim);
+            margin-bottom: 6px;
+        }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 10px 14px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            font-size: 13px;
+        }
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        /* ─── 상태 표시기 ─── */
+        .status-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+        }
+        .status-dot.running {
+            background: var(--green);
+            animation: pulse 1.5s infinite;
+        }
+        .status-dot.stopped { background: var(--text-dim); }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* ─── SMM 서비스 ─── */
+        .service-list { max-height: 400px; overflow-y: auto; }
+
+        /* ─── 반응형 ─── */
+        @media (max-width: 768px) {
+            .header { padding: 12px 16px; }
+            .main { padding: 16px; }
+            .cards { grid-template-columns: repeat(2, 1fr); }
+            .settings-grid { grid-template-columns: 1fr; }
+            .tabs { overflow-x: auto; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1><span>YT</span> 댓글 자동화</h1>
+    <div class="header-actions">
+        <span id="statusIndicator">
+            <span class="status-dot stopped"></span>
+            <span style="font-size:13px;color:var(--text-dim)">대기 중</span>
+        </span>
+        <button class="btn btn-primary" id="btnStart" onclick="startAutomation()">실행</button>
+        <button class="btn btn-danger" id="btnStop" onclick="stopAutomation()" disabled>중지</button>
+    </div>
+</div>
+
+<div class="main">
+    <!-- 탭 -->
+    <div class="tabs">
+        <button class="tab active" onclick="switchTab('dashboard')">대시보드</button>
+        <button class="tab" onclick="switchTab('tasks')">작업 목록</button>
+        <button class="tab" onclick="switchTab('accounts')">계정 관리</button>
+        <button class="tab" onclick="switchTab('smm')">SMM 좋아요</button>
+        <button class="tab" onclick="switchTab('settings')">설정</button>
+        <button class="tab" onclick="switchTab('logs')">실행 로그</button>
+    </div>
+
+    <!-- ━━━ 대시보드 탭 ━━━ -->
+    <div class="tab-content active" id="tab-dashboard">
+        <div class="cards">
+            <div class="card">
+                <div class="card-label">대기 작업</div>
+                <div class="card-value accent" id="pendingCount">-</div>
+            </div>
+            <div class="card">
+                <div class="card-label">오늘 성공</div>
+                <div class="card-value green" id="successCount">0</div>
+            </div>
+            <div class="card">
+                <div class="card-label">실패</div>
+                <div class="card-value red" id="failCount">0</div>
+            </div>
+            <div class="card">
+                <div class="card-label">좋아요 주문</div>
+                <div class="card-value blue" id="likeCount">0</div>
+            </div>
+            <div class="card">
+                <div class="card-label">활성 계정</div>
+                <div class="card-value" id="accountCount">-</div>
+            </div>
+            <div class="card">
+                <div class="card-label">SMM 잔액</div>
+                <div class="card-value yellow" id="smmBalance">-</div>
+            </div>
+        </div>
+
+        <!-- 진행 상태 -->
+        <div class="progress-wrap" id="progressWrap" style="display:none">
+            <div class="progress-text">
+                <span id="progressLabel">진행 중...</span>
+                <span id="progressPercent">0%</span>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill" style="width:0%"></div>
+            </div>
+        </div>
+
+        <!-- 계정 현황 -->
+        <div class="table-wrap">
+            <div class="table-title">
+                <span>계정별 오늘 댓글 현황</span>
+                <button class="btn btn-sm btn-secondary" onclick="loadDashboard()">새로고침</button>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>계정</th>
+                        <th>이메일</th>
+                        <th>유형</th>
+                        <th>오늘 사용</th>
+                        <th>남은 횟수</th>
+                        <th>상태</th>
+                    </tr>
+                </thead>
+                <tbody id="accountTableBody">
+                    <tr><td colspan="6" style="text-align:center;color:var(--text-dim)">로딩 중...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ━━━ 작업 목록 탭 ━━━ -->
+    <div class="tab-content" id="tab-tasks">
+        <div class="table-wrap">
+            <div class="table-title">
+                <span>노션 DB 대기 작업</span>
+                <button class="btn btn-sm btn-secondary" onclick="loadTasks()">새로고침</button>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>유튜브 URL</th>
+                        <th>댓글 원고</th>
+                        <th>계정</th>
+                        <th>상태</th>
+                    </tr>
+                </thead>
+                <tbody id="taskTableBody">
+                    <tr><td colspan="5" style="text-align:center;color:var(--text-dim)">로딩 중...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ━━━ 계정 관리 탭 ━━━ -->
+    <div class="tab-content" id="tab-accounts">
+        <div class="table-wrap">
+            <div class="table-title">
+                <span>등록된 계정</span>
+            </div>
+            <table>
+                <thead>
+                    <tr><th>라벨</th><th>이메일</th><th>유형</th></tr>
+                </thead>
+                <tbody id="accountListBody">
+                    <tr><td colspan="3" style="text-align:center;color:var(--text-dim)">로딩 중...</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="card" style="margin-top:16px">
+            <p style="font-size:13px;color:var(--text-dim)">
+                계정 추가/수정은 <code style="background:var(--bg);padding:2px 6px;border-radius:4px">config/accounts.json</code> 파일을 직접 편집하세요.
+            </p>
+        </div>
+    </div>
+
+    <!-- ━━━ SMM 좋아요 탭 ━━━ -->
+    <div class="tab-content" id="tab-smm">
+        <div class="cards" style="grid-template-columns:repeat(3,1fr)">
+            <div class="card">
+                <div class="card-label">SMM 상태</div>
+                <div id="smmStatus" class="card-value" style="font-size:18px">-</div>
+            </div>
+            <div class="card">
+                <div class="card-label">잔액</div>
+                <div id="smmBalanceDetail" class="card-value yellow">-</div>
+            </div>
+            <div class="card">
+                <div class="card-label">댓글당 좋아요</div>
+                <div id="smmQuantity" class="card-value blue">-</div>
+            </div>
+        </div>
+
+        <div class="table-wrap">
+            <div class="table-title">
+                <span>YouTube 관련 서비스 목록</span>
+                <button class="btn btn-sm btn-secondary" onclick="loadSMMServices()">서비스 조회</button>
+            </div>
+            <div class="service-list">
+                <table>
+                    <thead>
+                        <tr><th>ID</th><th>서비스명</th><th>카테고리</th><th>가격 ($/1000)</th><th>최소</th><th>최대</th></tr>
+                    </thead>
+                    <tbody id="smmServiceBody">
+                        <tr><td colspan="6" style="text-align:center;color:var(--text-dim)">
+                            "서비스 조회" 버튼을 클릭하세요
+                        </td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ━━━ 설정 탭 ━━━ -->
+    <div class="tab-content" id="tab-settings">
+        <div class="card">
+            <div class="settings-grid">
+                <div>
+                    <h3 style="margin-bottom:16px;font-size:15px">안전 규칙</h3>
+                    <div class="form-group">
+                        <label>1일 1계정 최대 댓글 수</label>
+                        <input type="number" id="setMaxComments" value="20">
+                    </div>
+                    <div class="form-group">
+                        <label>연속 댓글 간격 (초)</label>
+                        <input type="number" id="setCommentInterval" value="180">
+                    </div>
+                    <div class="form-group">
+                        <label>같은 영상 간격 (분)</label>
+                        <input type="number" id="setSameVideoInterval" value="30">
+                    </div>
+                </div>
+                <div>
+                    <h3 style="margin-bottom:16px;font-size:15px">SMM Kings</h3>
+                    <div class="form-group">
+                        <label>SMM 서비스 ID</label>
+                        <input type="text" id="setSmmServiceId" placeholder="서비스 ID (숫자)">
+                    </div>
+                    <div class="form-group">
+                        <label>댓글당 좋아요 수</label>
+                        <input type="number" id="setSmmQuantity" value="10">
+                    </div>
+                    <div class="form-group">
+                        <label>브라우저 모드</label>
+                        <select id="setHeadless">
+                            <option value="false">화면 보이기</option>
+                            <option value="true">백그라운드</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <p style="margin-top:16px;font-size:12px;color:var(--text-dim)">
+                설정 변경은 <code style="background:var(--bg);padding:2px 6px;border-radius:4px">.env</code> 파일을 직접 수정하세요.
+                이 화면은 현재 설정값을 확인하는 용도입니다.
+            </p>
+        </div>
+    </div>
+
+    <!-- ━━━ 로그 탭 ━━━ -->
+    <div class="tab-content" id="tab-logs">
+        <div class="table-title" style="background:var(--card);border:1px solid var(--border);border-radius:12px 12px 0 0;margin-bottom:0">
+            <span>실행 로그</span>
+            <button class="btn btn-sm btn-secondary" onclick="automation_state_logs=[];document.getElementById('logContainer').innerHTML=''">지우기</button>
+        </div>
+        <div class="log-container" id="logContainer" style="border-radius:0 0 12px 12px">
+            <div class="log-entry">
+                <span class="log-time">--:--:--</span>
+                <span class="log-msg">자동화를 시작하면 로그가 여기에 표시됩니다.</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ─── 탭 전환 ───
+    function switchTab(tabName) {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+
+        event.target.classList.add('active');
+        document.getElementById('tab-' + tabName).classList.add('active');
+
+        if (tabName === 'tasks') loadTasks();
+        if (tabName === 'accounts') loadAccountList();
+        if (tabName === 'settings') loadSettings();
+        if (tabName === 'smm') loadSMMInfo();
+    }
+
+    // ─── API 호출 ───
+    async function api(url, options = {}) {
+        try {
+            const res = await fetch(url, options);
+            return await res.json();
+        } catch (e) {
+            console.error('API error:', e);
+            return null;
+        }
+    }
+
+    // ─── 대시보드 로드 ───
+    async function loadDashboard() {
+        const data = await api('/api/dashboard');
+        if (!data) return;
+
+        document.getElementById('accountCount').textContent = data.account_count;
+        document.getElementById('smmBalance').textContent =
+            data.smm_balance !== null ? '$' + parseFloat(data.smm_balance).toFixed(2) : 'N/A';
+
+        // 계정 테이블
+        const tbody = document.getElementById('accountTableBody');
+        if (data.accounts.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-dim)">등록된 계정이 없습니다</td></tr>';
+            return;
+        }
+        tbody.innerHTML = data.accounts.map(acc => `
+            <tr>
+                <td><strong>${acc.label}</strong></td>
+                <td style="color:var(--text-dim)">${acc.email.substring(0,5)}***</td>
+                <td><span class="badge ${acc.type === 'sub' ? 'badge-yellow' : 'badge-blue'}">${acc.type === 'sub' ? '부계정' : '찐계정'}</span></td>
+                <td>${acc.today_count} / ${acc.max_count}</td>
+                <td>${acc.remaining}</td>
+                <td>${acc.remaining > 0 ? '<span class="badge badge-green">사용가능</span>' : '<span class="badge badge-red">한도초과</span>'}</td>
+            </tr>
+        `).join('');
+    }
+
+    // ─── 작업 목록 로드 ───
+    async function loadTasks() {
+        const data = await api('/api/tasks');
+        if (!data) return;
+
+        document.getElementById('pendingCount').textContent = data.count;
+
+        const tbody = document.getElementById('taskTableBody');
+        if (data.tasks.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-dim)">대기 중인 작업이 없습니다</td></tr>';
+            return;
+        }
+        tbody.innerHTML = data.tasks.map((task, i) => `
+            <tr>
+                <td>${i + 1}</td>
+                <td><a href="${task.youtube_url}" target="_blank" style="color:var(--blue);text-decoration:none">${task.youtube_url.substring(0, 55)}...</a></td>
+                <td>${task.comment_text.substring(0, 40)}${task.comment_text.length > 40 ? '...' : ''}</td>
+                <td>${task.account || '-'}</td>
+                <td><span class="badge badge-yellow">대기</span></td>
+            </tr>
+        `).join('');
+    }
+
+    // ─── 계정 목록 ───
+    async function loadAccountList() {
+        const data = await api('/api/accounts');
+        if (!data) return;
+
+        const tbody = document.getElementById('accountListBody');
+        if (data.accounts.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text-dim)">등록된 계정이 없습니다</td></tr>';
+            return;
+        }
+        tbody.innerHTML = data.accounts.map(acc => `
+            <tr>
+                <td><strong>${acc.label}</strong></td>
+                <td>${acc.email}</td>
+                <td><span class="badge ${acc.account_type === 'sub' ? 'badge-yellow' : 'badge-blue'}">${acc.account_type === 'sub' ? '부계정' : '찐계정'}</span></td>
+            </tr>
+        `).join('');
+    }
+
+    // ─── SMM 정보 ───
+    async function loadSMMInfo() {
+        const data = await api('/api/dashboard');
+        if (!data) return;
+
+        document.getElementById('smmStatus').textContent = data.smm_enabled ? '활성' : '비활성';
+        document.getElementById('smmStatus').style.color = data.smm_enabled ? 'var(--green)' : 'var(--red)';
+        document.getElementById('smmBalanceDetail').textContent =
+            data.smm_balance !== null ? '$' + parseFloat(data.smm_balance).toFixed(2) : 'N/A';
+        document.getElementById('smmQuantity').textContent = data.settings.smm_like_quantity;
+    }
+
+    async function loadSMMServices() {
+        const tbody = document.getElementById('smmServiceBody');
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-dim)">조회 중...</td></tr>';
+
+        const data = await api('/api/smm/services');
+        if (!data || !data.services) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--red)">조회 실패</td></tr>';
+            return;
+        }
+        if (data.services.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-dim)">YouTube 관련 서비스가 없습니다</td></tr>';
+            return;
+        }
+        tbody.innerHTML = data.services.map(svc => `
+            <tr>
+                <td><strong>${svc.service}</strong></td>
+                <td>${svc.name}</td>
+                <td style="color:var(--text-dim)">${svc.category || '-'}</td>
+                <td>$${svc.rate}</td>
+                <td>${svc.min}</td>
+                <td>${svc.max}</td>
+            </tr>
+        `).join('');
+    }
+
+    // ─── 설정 로드 ───
+    async function loadSettings() {
+        const data = await api('/api/settings');
+        if (!data) return;
+
+        document.getElementById('setMaxComments').value = data.MAX_COMMENTS_PER_DAY;
+        document.getElementById('setCommentInterval').value = data.COMMENT_INTERVAL_SEC;
+        document.getElementById('setSameVideoInterval').value = data.SAME_VIDEO_INTERVAL_MIN;
+        document.getElementById('setSmmServiceId').value = data.SMM_LIKE_SERVICE_ID;
+        document.getElementById('setSmmQuantity').value = data.SMM_LIKE_QUANTITY;
+        document.getElementById('setHeadless').value = data.HEADLESS;
+    }
+
+    // ─── 자동화 실행/중지 ───
+    async function startAutomation() {
+        const res = await api('/api/run', { method: 'POST' });
+        if (res && !res.error) {
+            document.getElementById('btnStart').disabled = true;
+            document.getElementById('btnStop').disabled = false;
+            document.getElementById('progressWrap').style.display = 'block';
+            updateStatusIndicator(true);
+        } else {
+            alert(res?.error || '실행 실패');
+        }
+    }
+
+    async function stopAutomation() {
+        await api('/api/stop', { method: 'POST' });
+        document.getElementById('btnStart').disabled = false;
+        document.getElementById('btnStop').disabled = true;
+        updateStatusIndicator(false);
+    }
+
+    function updateStatusIndicator(running) {
+        const el = document.getElementById('statusIndicator');
+        if (running) {
+            el.innerHTML = '<span class="status-dot running"></span><span style="font-size:13px;color:var(--green)">실행 중</span>';
+        } else {
+            el.innerHTML = '<span class="status-dot stopped"></span><span style="font-size:13px;color:var(--text-dim)">대기 중</span>';
+        }
+    }
+
+    // ─── 상태 폴링 ───
+    async function pollStatus() {
+        const data = await api('/api/status');
+        if (!data) return;
+
+        // 버튼 상태
+        document.getElementById('btnStart').disabled = data.running;
+        document.getElementById('btnStop').disabled = !data.running;
+        updateStatusIndicator(data.running);
+
+        // 진행률
+        if (data.total > 0) {
+            document.getElementById('progressWrap').style.display = 'block';
+            const pct = Math.round((data.progress / data.total) * 100);
+            document.getElementById('progressFill').style.width = pct + '%';
+            document.getElementById('progressPercent').textContent = pct + '%';
+            document.getElementById('progressLabel').textContent =
+                data.current_task ? `${data.progress}/${data.total}: ${data.current_task}` : `${data.progress}/${data.total}`;
+        }
+
+        // 결과 카드
+        document.getElementById('successCount').textContent = data.results.success;
+        document.getElementById('failCount').textContent = data.results.fail;
+        document.getElementById('likeCount').textContent = data.results.likes;
+
+        // 로그
+        if (data.logs.length > 0) {
+            const container = document.getElementById('logContainer');
+            container.innerHTML = data.logs.map(log => `
+                <div class="log-entry">
+                    <span class="log-time">${log.time}</span>
+                    <span class="log-msg ${log.level}">${log.message}</span>
+                </div>
+            `).join('');
+            container.scrollTop = container.scrollHeight;
+        }
+    }
+
+    // ─── 초기화 ───
+    loadDashboard();
+    loadTasks();
+    setInterval(pollStatus, 2000);
+</script>
+</body>
+</html>
