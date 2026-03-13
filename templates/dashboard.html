@@ -268,9 +268,6 @@
             <span class="status-dot stopped"></span>
             <span style="font-size:13px;color:var(--text-dim)">대기 중</span>
         </span>
-        <select id="accountSelect" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:13px">
-            <option value="">계정: 자동 (노션 지정)</option>
-        </select>
         <select id="testLimit" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:13px">
             <option value="1">테스트 1건</option>
             <option value="2">테스트 2건</option>
@@ -1253,7 +1250,7 @@
         const res = await api('/api/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ limit: selectedIds.length, selected_ids: selectedIds, account_email: document.getElementById('accountSelect').value })
+            body: JSON.stringify({ limit: selectedIds.length, selected_ids: selectedIds })
         });
         if (res && !res.error) {
             document.getElementById('btnStart').disabled = true;
@@ -1277,7 +1274,7 @@
         const res = await api('/api/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ limit, account_email: document.getElementById('accountSelect').value })
+            body: JSON.stringify({ limit })
         });
         if (res && !res.error) {
             document.getElementById('btnStart').disabled = true;
@@ -1384,24 +1381,9 @@
         }
     }
 
-    // ─── 계정 드롭다운 로드 ───
-    async function loadAccountSelect() {
-        const data = await api('/api/accounts');
-        if (!data || !data.accounts) return;
-        const sel = document.getElementById('accountSelect');
-        // 기존 옵션 유지 (첫 번째 "자동" 옵션)
-        sel.innerHTML = '<option value="">계정: 자동 (노션 지정)</option>';
-        data.accounts.forEach(acc => {
-            const label = acc.label || acc.email;
-            const typeBadge = acc.account_type === 'main' ? '찐' : '부';
-            sel.innerHTML += `<option value="${acc.email}">${label} (${typeBadge})</option>`;
-        });
-    }
-
     // ─── 초기화 ───
     loadDashboard();
     loadTasks();
-    loadAccountSelect();
     setInterval(pollStatus, 1500);
 </script>
 </body>

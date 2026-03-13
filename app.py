@@ -259,14 +259,13 @@ def api_run():
     data = request.get_json(silent=True) or {}
     limit = data.get("limit", 0)  # 0 = 전체, 1~N = 테스트 건수
     selected_ids = data.get("selected_ids", [])  # 선택된 page_id 목록
-    account_email = data.get("account_email", "")  # 사용자가 선택한 계정
     test_mode = limit > 0
 
     automation_state["test_mode"] = test_mode
     automation_state["limit"] = limit
 
     thread = threading.Thread(
-        target=_run_automation, args=(limit, selected_ids, account_email), daemon=True
+        target=_run_automation, args=(limit, selected_ids), daemon=True
     )
     thread.start()
 
@@ -754,7 +753,7 @@ def _save_accounts(accounts):
 
 # ──────────────────────────── 자동화 실행 ────────────────────────────
 
-def _run_automation(limit=0, selected_ids=None, account_email=""):
+def _run_automation(limit=0, selected_ids=None):
     """백그라운드에서 자동화를 실행합니다. limit>0이면 해당 건수만 테스트 실행."""
     import time
     from src.youtube_bot import YouTubeBot
@@ -782,14 +781,6 @@ def _run_automation(limit=0, selected_ids=None, account_email=""):
             add_log("계정이 없습니다. config/accounts.json을 확인하세요.", "error")
             automation_state["running"] = False
             return
-
-        if account_email:
-            matched = [a for a in accounts if a.get("email") == account_email]
-            if matched:
-                add_log(f"선택 계정: {matched[0].get('label', account_email)}", "info")
-            else:
-                add_log(f"선택 계정 '{account_email}'을 찾을 수 없음 → 자동 결정", "warning")
-                account_email = ""
 
         tasks = notion.get_pending_tasks()
         if not tasks:
@@ -827,21 +818,13 @@ def _run_automation(limit=0, selected_ids=None, account_email=""):
             task_url_short = task.get("youtube_url", "")[:50]
             automation_state["current_task"] = task_url_short
 
-            # 계정 결정: 사용자 선택 > 노션 지정 > 첫 번째 계정
+            # 계정 결정
             account = None
-            if account_email:
-                # 사용자가 대시보드에서 선택한 계정 우선
-                for acc in accounts:
-                    if acc.get("email") == account_email:
-                        account = acc
-                        break
-            if not account:
-                # 노션에서 지정된 계정
-                account_label = task.get("account", "")
-                for acc in accounts:
-                    if acc.get("label") == account_label or acc.get("email", "").startswith(account_label):
-                        account = acc
-                        break
+            account_label = task.get("account", "")
+            for acc in accounts:
+                if acc.get("label") == account_label or acc.get("email", "").startswith(account_label):
+                    account = acc
+                    break
             if not account:
                 account = accounts[0]
 
