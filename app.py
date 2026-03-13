@@ -58,7 +58,7 @@ def load_accounts():
     """계정 파일 로드."""
     accounts_file = os.getenv("ACCOUNTS_FILE", "config/accounts.json")
     if os.path.exists(accounts_file):
-        with open(accounts_file, "r") as f:
+        with open(accounts_file, "r", encoding="utf-8") as f:
             return json.load(f)
     return []
 
