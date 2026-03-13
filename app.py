@@ -38,6 +38,8 @@ automation_state = {
     "total": 0,
     "logs": [],
     "results": {"success": 0, "fail": 0, "skip": 0, "likes": 0},
+    "test_mode": False,
+    "limit": 0,
 }
 automation_lock = threading.Lock()
 
@@ -243,7 +245,7 @@ def api_notion_debug():
 
 @app.route("/api/run", methods=["POST"])
 def api_run():
-    """자동화를 백그라운드에서 시작합니다."""
+    """자동화를 백그라운드에서 시작합니다. limit 파라미터로 테스트 실행 가능."""
     with automation_lock:
         if automation_state["running"]:
             return jsonify({"error": "이미 실행 중입니다."}), 409
@@ -253,10 +255,18 @@ def api_run():
         automation_state["logs"] = []
         automation_state["results"] = {"success": 0, "fail": 0, "skip": 0, "likes": 0}
 
-    thread = threading.Thread(target=_run_automation, daemon=True)
+    data = request.get_json(silent=True) or {}
+    limit = data.get("limit", 0)  # 0 = 전체, 1~N = 테스트 건수
+    test_mode = limit > 0
+
+    automation_state["test_mode"] = test_mode
+    automation_state["limit"] = limit
+
+    thread = threading.Thread(target=_run_automation, args=(limit,), daemon=True)
     thread.start()
 
-    return jsonify({"message": "자동화가 시작되었습니다."})
+    mode_text = f"테스트 모드 ({limit}건)" if test_mode else "전체 실행"
+    return jsonify({"message": f"자동화가 시작되었습니다. [{mode_text}]"})
 
 
 @app.route("/api/stop", methods=["POST"])
@@ -734,13 +744,16 @@ def _save_accounts(accounts):
 
 # ──────────────────────────── 자동화 실행 ────────────────────────────
 
-def _run_automation():
-    """백그라운드에서 자동화를 실행합니다."""
+def _run_automation(limit=0):
+    """백그라운드에서 자동화를 실행합니다. limit>0이면 해당 건수만 테스트 실행."""
     import time
     from src.youtube_bot import YouTubeBot
 
+    test_mode = limit > 0
+
     try:
-        add_log("자동화 시작", "info")
+        mode_label = f"[테스트 {limit}건]" if test_mode else "[전체 실행]"
+        add_log(f"자동화 시작 {mode_label}", "info")
 
         notion = NotionManager()
         proxy_manager = ProxyManager()
@@ -760,8 +773,13 @@ def _run_automation():
             automation_state["running"] = False
             return
 
+        # 테스트 모드: 지정 건수만 처리
+        if test_mode and len(tasks) > limit:
+            add_log(f"테스트 모드: 전체 {len(tasks)}건 중 {limit}건만 실행", "warning")
+            tasks = tasks[:limit]
+
         automation_state["total"] = len(tasks)
-        add_log(f"총 {len(tasks)}개 작업 발견", "info")
+        add_log(f"총 {len(tasks)}개 작업 {'(테스트)' if test_mode else ''} 발견", "info")
 
         delay_ip_change = int(os.getenv("DELAY_AFTER_IP_CHANGE", "3"))
         comment_interval = int(os.getenv("COMMENT_INTERVAL_SEC", "180"))
@@ -864,12 +882,13 @@ def _run_automation():
                 for err in mass_result["errors"]:
                     add_log(f"좋아요 주문 오류: {err}", "warning")
 
+        summary_prefix = "[테스트 완료]" if test_mode else "[전체 완료]"
         add_log(
-            f"완료! 성공: {automation_state['results']['success']}, "
+            f"{summary_prefix} 성공: {automation_state['results']['success']}, "
             f"실패: {automation_state['results']['fail']}, "
             f"건너뜀: {automation_state['results']['skip']}, "
             f"좋아요: {automation_state['results']['likes']}",
-            "info",
+            "success" if automation_state['results']['success'] > 0 else "warning",
         )
 
     except Exception as e:

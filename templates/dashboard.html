@@ -266,6 +266,13 @@
             <span class="status-dot stopped"></span>
             <span style="font-size:13px;color:var(--text-dim)">대기 중</span>
         </span>
+        <select id="testLimit" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:13px">
+            <option value="1">테스트 1건</option>
+            <option value="2">테스트 2건</option>
+            <option value="3">테스트 3건</option>
+            <option value="5">테스트 5건</option>
+            <option value="0">전체 실행</option>
+        </select>
         <button class="btn btn-primary" id="btnStart" onclick="startAutomation()">실행</button>
         <button class="btn btn-danger" id="btnStop" onclick="stopAutomation()" disabled>중지</button>
     </div>
@@ -1152,12 +1159,21 @@
 
     // ─── 자동화 실행/중지 ───
     async function startAutomation() {
-        const res = await api('/api/run', { method: 'POST' });
+        const limit = parseInt(document.getElementById('testLimit').value) || 0;
+        const isTest = limit > 0;
+
+        if (!isTest && !confirm(`전체 작업을 실행합니다. 계속하시겠습니까?`)) return;
+
+        const res = await api('/api/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ limit })
+        });
         if (res && !res.error) {
             document.getElementById('btnStart').disabled = true;
             document.getElementById('btnStop').disabled = false;
             document.getElementById('progressWrap').style.display = 'block';
-            updateStatusIndicator(true);
+            updateStatusIndicator(true, isTest ? `테스트 ${limit}건` : null);
         } else {
             alert(res?.error || '실행 실패');
         }
@@ -1170,10 +1186,11 @@
         updateStatusIndicator(false);
     }
 
-    function updateStatusIndicator(running) {
+    function updateStatusIndicator(running, label) {
         const el = document.getElementById('statusIndicator');
         if (running) {
-            el.innerHTML = '<span class="status-dot running"></span><span style="font-size:13px;color:var(--green)">실행 중</span>';
+            const text = label || '실행 중';
+            el.innerHTML = `<span class="status-dot running"></span><span style="font-size:13px;color:var(--green)">${text}</span>`;
         } else {
             el.innerHTML = '<span class="status-dot stopped"></span><span style="font-size:13px;color:var(--text-dim)">대기 중</span>';
         }
@@ -1202,15 +1219,21 @@
         document.getElementById('progressFail').textContent = `실패 ${data.results.fail}`;
         document.getElementById('progressSkip').textContent = `건너뜀 ${data.results.skip}`;
 
+        const isTest = data.test_mode;
+        const testLabel = isTest ? ` [테스트 ${data.limit || ''}건]` : '';
+
         if (data.running) {
             // 실행 중
             progressDot.className = 'status-dot running';
-            progressWrap.style.borderColor = 'rgba(108,92,231,0.4)';
-            progressPercent.style.color = 'var(--accent-light)';
-            progressFill.style.background = 'linear-gradient(90deg, var(--accent), var(--accent-light))';
-            document.getElementById('progressTitle').textContent = '자동화 진행 중';
+            progressWrap.style.borderColor = isTest ? 'rgba(255,217,61,0.4)' : 'rgba(108,92,231,0.4)';
+            progressPercent.style.color = isTest ? 'var(--yellow)' : 'var(--accent-light)';
+            progressFill.style.background = isTest
+                ? 'linear-gradient(90deg, var(--yellow), #ffe066)'
+                : 'linear-gradient(90deg, var(--accent), var(--accent-light))';
+            document.getElementById('progressTitle').textContent = isTest ? `테스트 진행 중${testLabel}` : '자동화 진행 중';
             document.getElementById('progressLabel').textContent =
                 data.current_task ? `${data.progress}/${data.total}: ${data.current_task}` : `${data.progress}/${data.total}`;
+            updateStatusIndicator(true, isTest ? `테스트 ${data.limit}건` : null);
         } else if (data.total > 0 && data.progress >= data.total) {
             // 완료
             progressDot.className = 'status-dot';
@@ -1218,9 +1241,9 @@
             progressWrap.style.borderColor = 'rgba(0,184,148,0.4)';
             progressPercent.style.color = 'var(--green)';
             progressFill.style.background = 'linear-gradient(90deg, var(--green), #00d2a0)';
-            document.getElementById('progressTitle').textContent = '자동화 완료';
+            document.getElementById('progressTitle').textContent = isTest ? `테스트 완료${testLabel}` : '자동화 완료';
             document.getElementById('progressLabel').textContent =
-                `전체 ${data.total}건 처리 완료`;
+                `${isTest ? '테스트' : '전체'} ${data.total}건 처리 완료`;
         } else {
             // 대기 중
             progressDot.className = 'status-dot stopped';
@@ -1233,10 +1256,9 @@
             }
         }
 
-        // 결과 카드
-        document.getElementById('successCount').textContent = data.results.success;
-        document.getElementById('failCount').textContent = data.results.fail;
-        document.getElementById('likeCount').textContent = data.results.likes;
+        // 결과 카드 (존재하는 요소만 업데이트)
+        const el_success = document.getElementById('successCount');
+        if (el_success) el_success.textContent = data.results.success;
 
         // 로그
         if (data.logs.length > 0) {
