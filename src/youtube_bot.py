@@ -1,14 +1,16 @@
 """
 YouTube 브라우저 자동화 모듈
 - 시크릿 모드로 브라우저 실행
+- 안티디텍트 브라우저 지문 적용
 - YouTube 로그인
 - 댓글 작성
 - 댓글 URL 추출
 
-IP 가이드라인 반영:
+IP 가이드라인 + 유튜브 바이럴 가이드라인 반영:
 - 시크릿 모드 필수 사용
 - 계정 전환 시 브라우저 완전 종료 후 재시작
 - 프록시를 통한 IP 분리
+- 안티디텍트 브라우저 지문으로 계정 간 연결 차단
 """
 
 import os
@@ -21,18 +23,20 @@ console = Console()
 
 
 class YouTubeBot:
-    def __init__(self, proxy_config=None):
+    def __init__(self, proxy_config=None, fingerprint_manager=None, account_label=None):
         self.headless = os.getenv("HEADLESS", "false").lower() == "true"
         self.page_timeout = int(os.getenv("PAGE_LOAD_TIMEOUT", "30")) * 1000
         self.delay_after_comment = int(os.getenv("DELAY_AFTER_COMMENT", "5"))
         self.proxy_config = proxy_config
+        self.fingerprint_manager = fingerprint_manager
+        self.account_label = account_label
         self.playwright = None
         self.browser = None
         self.context = None
         self.page = None
 
     def start_browser(self):
-        """시크릿 모드로 브라우저를 시작합니다."""
+        """안티디텍트 지문이 적용된 시크릿 모드 브라우저를 시작합니다."""
         self.playwright = sync_playwright().start()
 
         launch_args = {
@@ -41,6 +45,8 @@ class YouTubeBot:
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
+                "--disable-infobars",
+                "--disable-extensions",
             ],
         }
 
@@ -51,21 +57,35 @@ class YouTubeBot:
 
         self.browser = self.playwright.chromium.launch(**launch_args)
 
-        # 시크릿 모드 컨텍스트 생성 (IP 가이드라인: 시크릿 모드 필수)
-        context_args = {
-            "locale": "ko-KR",
-            "timezone_id": "Asia/Seoul",
-            "viewport": {"width": 1280, "height": 800},
-            "user_agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
-        }
+        # 안티디텍트 지문 기반 컨텍스트 설정
+        if self.fingerprint_manager and self.account_label:
+            context_args = self.fingerprint_manager.get_playwright_context_args(
+                self.account_label
+            )
+        else:
+            context_args = {
+                "locale": "ko-KR",
+                "timezone_id": "Asia/Seoul",
+                "viewport": {"width": 1280, "height": 800},
+                "user_agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/130.0.0.0 Safari/537.36"
+                ),
+            }
+
         self.context = self.browser.new_context(**context_args)
         self.context.set_default_timeout(self.page_timeout)
-        self.page = self.context.new_page()
 
+        # 안티디텍트 스크립트 주입 (모든 페이지에 적용)
+        if self.fingerprint_manager and self.account_label:
+            antidetect_script = self.fingerprint_manager.get_antidetect_scripts(
+                self.account_label
+            )
+            self.context.add_init_script(antidetect_script)
+            console.print(f"[green]안티디텍트 지문 적용됨: {self.account_label}[/green]")
+
+        self.page = self.context.new_page()
         console.print("[green]시크릿 모드 브라우저 시작됨[/green]")
 
     def close_browser(self):
@@ -128,7 +148,6 @@ class YouTubeBot:
                     "[yellow]추가 인증이 필요합니다. "
                     "브라우저에서 직접 완료해주세요.[/yellow]"
                 )
-                # headless가 아닌 경우 수동 완료 대기 (최대 120초)
                 if not self.headless:
                     console.print("[yellow]120초 내에 인증을 완료해주세요...[/yellow]")
                     for i in range(24):
@@ -163,6 +182,19 @@ class YouTubeBot:
             self.page.goto(youtube_url)
             time.sleep(3)
 
+            # 쿠키 동의 팝업 처리
+            try:
+                accept_btn = self.page.query_selector(
+                    'button[aria-label*="Accept"], '
+                    'button[aria-label*="동의"], '
+                    'tp-yt-paper-button:has-text("동의")'
+                )
+                if accept_btn:
+                    accept_btn.click()
+                    time.sleep(1)
+            except Exception:
+                pass
+
             # 페이지 아래로 스크롤하여 댓글 섹션 로드
             self.page.evaluate("window.scrollTo(0, 500)")
             time.sleep(3)
@@ -175,14 +207,16 @@ class YouTubeBot:
             comment_placeholder.click()
             time.sleep(1)
 
-            # 댓글 텍스트 입력
+            # 댓글 텍스트 입력 - type()으로 사람처럼 입력
             comment_input = self.page.wait_for_selector(
                 "#contenteditable-root, "
                 "ytd-comment-simplebox-renderer #contenteditable-textarea, "
                 'div[contenteditable="true"]',
                 timeout=10000,
             )
-            comment_input.fill(comment_text)
+            # 사람처럼 타이핑 (봇 탐지 우회)
+            comment_input.click()
+            self.page.keyboard.type(comment_text, delay=50)
             time.sleep(1)
 
             # 댓글 게시 버튼 클릭
@@ -205,7 +239,6 @@ class YouTubeBot:
                 console.print(f"[green]댓글 URL: {comment_url}[/green]")
             else:
                 console.print("[yellow]댓글은 작성되었으나 URL을 추출하지 못했습니다.[/yellow]")
-                # 영상 URL에 기본 댓글 파라미터 추가
                 comment_url = self._build_fallback_url(youtube_url)
 
             return comment_url
@@ -225,8 +258,6 @@ class YouTubeBot:
         https://www.youtube.com/watch?v=VIDEO_ID&lc=COMMENT_ID
         """
         try:
-            # 최근 작성된 댓글에서 ID 추출 시도
-            # 방법 1: 페이지의 댓글 섹션에서 자신의 댓글 찾기
             self.page.evaluate("window.scrollTo(0, 500)")
             time.sleep(2)
 
@@ -235,15 +266,13 @@ class YouTubeBot:
                 "ytd-comment-thread-renderer a.yt-simple-endpoint"
             )
 
-            for link in comment_links[:5]:  # 상위 5개만 확인
+            for link in comment_links[:5]:
                 href = link.get_attribute("href")
                 if href and "&lc=" in href:
                     if href.startswith("/"):
                         return f"https://www.youtube.com{href}"
                     return href
 
-            # 방법 2: 네트워크 응답에서 댓글 ID 추출은 복잡하므로
-            # 영상 URL 기반 fallback
             return None
 
         except Exception as e:
@@ -252,7 +281,6 @@ class YouTubeBot:
 
     def _build_fallback_url(self, video_url):
         """영상 URL을 기반으로 fallback URL을 생성합니다."""
-        # video ID 추출
         video_id_match = re.search(
             r"(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})", video_url
         )
