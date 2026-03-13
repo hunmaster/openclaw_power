@@ -198,20 +198,93 @@ def api_smm_balance():
         return jsonify({"error": str(e)}), 500
 
 
+def _mask_key(value, visible=4):
+    """API 키를 마스킹합니다. 앞 4자만 보여줌."""
+    if not value or len(value) <= visible:
+        return value
+    return value[:visible] + "*" * (len(value) - visible)
+
+
 @app.route("/api/settings", methods=["GET"])
 def api_get_settings():
     """현재 설정값을 반환합니다."""
     return jsonify({
+        "NOTION_API_TOKEN": _mask_key(os.getenv("NOTION_API_TOKEN", "")),
         "NOTION_DATABASE_ID": os.getenv("NOTION_DATABASE_ID", ""),
+        "SMM_API_KEY": _mask_key(os.getenv("SMM_API_KEY", "")),
+        "SMM_ENABLED": os.getenv("SMM_ENABLED", "false"),
+        "SMM_LIKE_SERVICE_ID": os.getenv("SMM_LIKE_SERVICE_ID", ""),
+        "SMM_LIKE_QUANTITY": os.getenv("SMM_LIKE_QUANTITY", "10"),
         "MAX_COMMENTS_PER_DAY": os.getenv("MAX_COMMENTS_PER_DAY", "20"),
         "COMMENT_INTERVAL_SEC": os.getenv("COMMENT_INTERVAL_SEC", "180"),
         "SAME_VIDEO_INTERVAL_MIN": os.getenv("SAME_VIDEO_INTERVAL_MIN", "30"),
         "HEADLESS": os.getenv("HEADLESS", "false"),
         "USE_PROXY": os.getenv("USE_PROXY", "false"),
-        "SMM_ENABLED": os.getenv("SMM_ENABLED", "false"),
-        "SMM_LIKE_QUANTITY": os.getenv("SMM_LIKE_QUANTITY", "10"),
-        "SMM_LIKE_SERVICE_ID": os.getenv("SMM_LIKE_SERVICE_ID", ""),
     })
+
+
+@app.route("/api/settings", methods=["POST"])
+def api_save_settings():
+    """설정을 .env 파일에 저장합니다."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "데이터가 없습니다."}), 400
+
+        # 저장 가능한 키 목록
+        allowed_keys = {
+            "NOTION_API_TOKEN", "NOTION_DATABASE_ID",
+            "SMM_API_KEY", "SMM_ENABLED", "SMM_LIKE_SERVICE_ID", "SMM_LIKE_QUANTITY",
+            "MAX_COMMENTS_PER_DAY", "COMMENT_INTERVAL_SEC", "SAME_VIDEO_INTERVAL_MIN",
+            "HEADLESS", "USE_PROXY",
+        }
+
+        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+
+        # 기존 .env 파일 읽기
+        env_lines = []
+        if os.path.exists(env_path):
+            with open(env_path, "r", encoding="utf-8") as f:
+                env_lines = f.readlines()
+
+        # 업데이트할 키-값 수집 (마스킹된 값은 건너뜀)
+        updates = {}
+        for key, value in data.items():
+            if key not in allowed_keys:
+                continue
+            # 마스킹된 값(***포함)은 기존 값 유지
+            if "*" in str(value):
+                continue
+            updates[key] = str(value)
+
+        # .env 파일 업데이트
+        updated_keys = set()
+        new_lines = []
+        for line in env_lines:
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#") and "=" in stripped:
+                key = stripped.split("=", 1)[0].strip()
+                if key in updates:
+                    new_lines.append(f"{key}={updates[key]}\n")
+                    updated_keys.add(key)
+                    # os.environ도 갱신
+                    os.environ[key] = updates[key]
+                    continue
+            new_lines.append(line)
+
+        # 새로운 키 추가 (기존에 없던 키)
+        for key, value in updates.items():
+            if key not in updated_keys:
+                new_lines.append(f"{key}={value}\n")
+                os.environ[key] = value
+
+        # .env 파일 저장
+        with open(env_path, "w", encoding="utf-8") as f:
+            f.writelines(new_lines)
+
+        return jsonify({"message": "설정이 저장되었습니다."})
+    except Exception as e:
+        return jsonify({"error": f"설정 저장 중 오류: {str(e)}"}), 500
 
 
 @app.route("/api/check-connections", methods=["GET"])

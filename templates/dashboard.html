@@ -474,7 +474,39 @@
             </div>
         </div>
 
-        <!-- 설정값 -->
+        <!-- 외부 API 설정 -->
+        <div class="card" style="margin-bottom:20px">
+            <h3 style="margin-bottom:16px;font-size:15px">외부 API 설정</h3>
+            <div class="settings-grid">
+                <div>
+                    <h4 style="margin-bottom:12px;font-size:13px;color:var(--accent-light)">Notion API</h4>
+                    <div class="form-group">
+                        <label>API 토큰</label>
+                        <input type="password" id="setNotionToken" placeholder="ntn_xxxx...">
+                    </div>
+                    <div class="form-group">
+                        <label>데이터베이스 ID</label>
+                        <input type="text" id="setNotionDbId" placeholder="30d35cfd83d3...">
+                    </div>
+                </div>
+                <div>
+                    <h4 style="margin-bottom:12px;font-size:13px;color:var(--accent-light)">SMM Kings API</h4>
+                    <div class="form-group">
+                        <label>API 키</label>
+                        <input type="password" id="setSmmApiKey" placeholder="ba7a0a564d...">
+                    </div>
+                    <div class="form-group">
+                        <label>SMM 활성화</label>
+                        <select id="setSmmEnabled">
+                            <option value="false">비활성</option>
+                            <option value="true">활성</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 운영 설정 -->
         <div class="card">
             <div class="settings-grid">
                 <div>
@@ -493,7 +525,7 @@
                     </div>
                 </div>
                 <div>
-                    <h3 style="margin-bottom:16px;font-size:15px">SMM Kings</h3>
+                    <h3 style="margin-bottom:16px;font-size:15px">SMM Kings 주문</h3>
                     <div class="form-group">
                         <label>SMM 서비스 ID</label>
                         <input type="text" id="setSmmServiceId" placeholder="서비스 ID (숫자)">
@@ -511,10 +543,10 @@
                     </div>
                 </div>
             </div>
-            <p style="margin-top:16px;font-size:12px;color:var(--text-dim)">
-                설정 변경은 <code style="background:var(--bg);padding:2px 6px;border-radius:4px">.env</code> 파일을 직접 수정하세요.
-                이 화면은 현재 설정값을 확인하는 용도입니다.
-            </p>
+            <div style="margin-top:20px;display:flex;align-items:center;gap:12px">
+                <button class="btn btn-primary" onclick="saveSettings()">설정 저장</button>
+                <span id="saveSettingsMsg" style="font-size:13px"></span>
+            </div>
         </div>
     </div>
 
@@ -735,12 +767,53 @@
         const data = await api('/api/settings');
         if (!data) return;
 
+        // 외부 API
+        document.getElementById('setNotionToken').value = data.NOTION_API_TOKEN || '';
+        document.getElementById('setNotionToken').placeholder = data.NOTION_API_TOKEN ? '현재 값 유지 (변경 시 새로 입력)' : 'ntn_xxxx...';
+        document.getElementById('setNotionDbId').value = data.NOTION_DATABASE_ID || '';
+        document.getElementById('setSmmApiKey').value = data.SMM_API_KEY || '';
+        document.getElementById('setSmmApiKey').placeholder = data.SMM_API_KEY ? '현재 값 유지 (변경 시 새로 입력)' : 'API 키 입력';
+        document.getElementById('setSmmEnabled').value = data.SMM_ENABLED || 'false';
+
+        // 운영 설정
         document.getElementById('setMaxComments').value = data.MAX_COMMENTS_PER_DAY;
         document.getElementById('setCommentInterval').value = data.COMMENT_INTERVAL_SEC;
         document.getElementById('setSameVideoInterval').value = data.SAME_VIDEO_INTERVAL_MIN;
         document.getElementById('setSmmServiceId').value = data.SMM_LIKE_SERVICE_ID;
         document.getElementById('setSmmQuantity').value = data.SMM_LIKE_QUANTITY;
         document.getElementById('setHeadless').value = data.HEADLESS;
+    }
+
+    // ─── 설정 저장 ───
+    async function saveSettings() {
+        const msgEl = document.getElementById('saveSettingsMsg');
+        msgEl.innerHTML = '<span style="color:var(--text-dim)">저장 중...</span>';
+
+        const payload = {
+            NOTION_API_TOKEN: document.getElementById('setNotionToken').value,
+            NOTION_DATABASE_ID: document.getElementById('setNotionDbId').value,
+            SMM_API_KEY: document.getElementById('setSmmApiKey').value,
+            SMM_ENABLED: document.getElementById('setSmmEnabled').value,
+            SMM_LIKE_SERVICE_ID: document.getElementById('setSmmServiceId').value,
+            SMM_LIKE_QUANTITY: document.getElementById('setSmmQuantity').value,
+            MAX_COMMENTS_PER_DAY: document.getElementById('setMaxComments').value,
+            COMMENT_INTERVAL_SEC: document.getElementById('setCommentInterval').value,
+            SAME_VIDEO_INTERVAL_MIN: document.getElementById('setSameVideoInterval').value,
+            HEADLESS: document.getElementById('setHeadless').value,
+        };
+
+        const res = await api('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+
+        if (res && !res.error) {
+            msgEl.innerHTML = '<span style="color:var(--green)">설정이 저장되었습니다!</span>';
+            setTimeout(() => { msgEl.textContent = ''; }, 3000);
+        } else {
+            msgEl.innerHTML = `<span style="color:var(--red)">${res?.error || '저장 실패'}</span>`;
+        }
     }
 
     // ─── API 연동 테스트 ───
