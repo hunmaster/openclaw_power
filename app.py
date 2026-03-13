@@ -201,11 +201,11 @@ def api_notion_debug():
 
         # 현재 코드에서 기대하는 컬럼명
         expected = {
-            "유튜브 링크": os.getenv("NOTION_COLUMN_YOUTUBE_URL", "유튜브 링크"),
+            "영상 링크": os.getenv("NOTION_COLUMN_YOUTUBE_URL", "영상 링크"),
             "댓글 원고": os.getenv("NOTION_COLUMN_COMMENT_TEXT", "댓글 원고"),
             "상태": os.getenv("NOTION_COLUMN_STATUS", "상태"),
-            "계정": os.getenv("NOTION_COLUMN_ACCOUNT", "계정"),
-            "댓글 URL": os.getenv("NOTION_COLUMN_COMMENT_RESULT_URL", "댓글 URL"),
+            "댓글 계정": os.getenv("NOTION_COLUMN_ACCOUNT", "댓글 계정"),
+            "댓글 url": os.getenv("NOTION_COLUMN_COMMENT_RESULT_URL", "댓글 url"),
         }
 
         # 매칭 확인

@@ -22,11 +22,11 @@ class NotionManager:
         self.client = Client(auth=self.token)
 
         # 컬럼명 설정
-        self.col_youtube_url = os.getenv("NOTION_COLUMN_YOUTUBE_URL", "유튜브 링크")
+        self.col_youtube_url = os.getenv("NOTION_COLUMN_YOUTUBE_URL", "영상 링크")
         self.col_comment_text = os.getenv("NOTION_COLUMN_COMMENT_TEXT", "댓글 원고")
-        self.col_result_url = os.getenv("NOTION_COLUMN_COMMENT_RESULT_URL", "댓글 URL")
+        self.col_result_url = os.getenv("NOTION_COLUMN_COMMENT_RESULT_URL", "댓글 url")
         self.col_status = os.getenv("NOTION_COLUMN_STATUS", "상태")
-        self.col_account = os.getenv("NOTION_COLUMN_ACCOUNT", "계정")
+        self.col_account = os.getenv("NOTION_COLUMN_ACCOUNT", "댓글 계정")
 
     def get_pending_tasks(self):
         """상태가 '댓글작업전'인 작업 목록만 가져옵니다."""
@@ -168,9 +168,12 @@ class NotionManager:
         return ""
 
     def _build_result_url_property(self, comment_url):
-        """댓글 URL 속성을 DB 컬럼 타입에 맞게 생성합니다."""
-        # url 타입 시도, 실패하면 rich_text로 폴백
-        return {"url": comment_url}
+        """댓글 URL 속성을 DB 컬럼 타입에 맞게 생성합니다 (rich_text 타입)."""
+        return {
+            "rich_text": [
+                {"type": "text", "text": {"content": comment_url, "link": {"url": comment_url}}}
+            ]
+        }
 
     def _build_result_url_rich_text(self, comment_url):
         """댓글 URL을 rich_text 형식으로 생성합니다."""
