@@ -752,7 +752,7 @@ def _calculate_dynamic_likes(top_likes, default_qty):
     전략:
     - 상위 3~5개 댓글의 좋아요 중간값을 기준으로 설정
     - 최소: 기본 수량 (SMM_LIKE_QUANTITY)
-    - 자동 상한: SMM_LIKE_AUTO_MAX (기본 1000)
+    - 자동 상한: SMM_LIKE_AUTO_MAX (기본 500)
     - 1000 초과 시: 관리자 컨펌 필요
 
     Args:
@@ -794,7 +794,7 @@ def api_get_settings():
         "SMM_ENABLED": os.getenv("SMM_ENABLED", "false"),
         "SMM_LIKE_SERVICE_ID": os.getenv("SMM_LIKE_SERVICE_ID", "4001"),
         "SMM_LIKE_QUANTITY": os.getenv("SMM_LIKE_QUANTITY", "20"),
-        "SMM_LIKE_AUTO_MAX": os.getenv("SMM_LIKE_AUTO_MAX", "1000"),
+        "SMM_LIKE_AUTO_MAX": os.getenv("SMM_LIKE_AUTO_MAX", "500"),
         "MAX_COMMENTS_PER_DAY": os.getenv("MAX_COMMENTS_PER_DAY", "20"),
         "COMMENT_INTERVAL_SEC": os.getenv("COMMENT_INTERVAL_SEC", "180"),
         "SAME_VIDEO_INTERVAL_MIN": os.getenv("SAME_VIDEO_INTERVAL_MIN", "30"),
@@ -1550,7 +1550,7 @@ def _run_automation(limit=0, selected_ids=None):
                     # ── 3단계: 동적 좋아요 주문 ──
                     if smm_client.enabled:
                         automation_state["current_task"] = f"[3/3 좋아요 분석] {task_url_short}"
-                        like_auto_max = int(os.getenv("SMM_LIKE_AUTO_MAX", "1000"))
+                        like_auto_max = int(os.getenv("SMM_LIKE_AUTO_MAX", "500"))
                         default_qty = int(os.getenv("SMM_LIKE_QUANTITY", "20"))
 
                         # 상위 댓글 좋아요 스크래핑
