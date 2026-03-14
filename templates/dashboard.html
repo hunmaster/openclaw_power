@@ -687,7 +687,6 @@
                 <h3 style="margin:0;font-size:15px">등록된 댓글</h3>
                 <div style="display:flex;gap:8px;align-items:center">
                     <span id="trackSelectedCount" style="font-size:12px;color:var(--accent-light);display:none"></span>
-                    <span id="repostStatus" style="font-size:12px;color:var(--text-dim)"></span>
                     <span id="repostHint" style="font-size:11px;color:var(--text-dim);margin-right:4px">숨김 댓글 발견 시 리포스팅 버튼이 여기에 표시됩니다</span>
                     <button class="btn" id="btnRepostHidden" onclick="repostHiddenComments()"
                         style="background:var(--error);color:#fff;font-size:12px;display:none">
@@ -715,7 +714,6 @@
                         <th style="text-align:center;padding:8px;color:var(--text-dim)">상태</th>
                         <th style="text-align:center;padding:8px;color:var(--text-dim)">노출순위</th>
                         <th style="text-align:center;padding:8px;color:var(--text-dim)">최고순위</th>
-                        <th style="text-align:center;padding:8px;color:var(--text-dim)">좋아요</th>
                         <th style="text-align:center;padding:8px;color:var(--text-dim)">마지막 확인</th>
                         <th style="text-align:center;padding:8px;color:var(--text-dim)">작업</th>
                     </tr>
@@ -726,6 +724,22 @@
                     </td></tr>
                 </tbody>
             </table>
+        </div>
+
+        <!-- 리포스팅 진행 상태 패널 -->
+        <div id="repostProgressPanel" style="display:none;margin-top:12px;padding:16px;background:rgba(108,92,231,0.08);border:1px solid rgba(108,92,231,0.25);border-radius:10px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                <span style="font-weight:600;font-size:14px;color:var(--accent-light)">리포스팅 진행 중</span>
+                <button class="btn" onclick="stopRepost()" style="font-size:11px;padding:3px 10px;background:var(--error);color:#fff;border:none;border-radius:4px">중지</button>
+            </div>
+            <div style="background:rgba(255,255,255,0.06);border-radius:6px;height:8px;overflow:hidden;margin-bottom:8px">
+                <div id="repostProgressBar" style="height:100%;background:var(--accent-light);border-radius:6px;transition:width 0.4s ease;width:0%"></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-dim)">
+                <span id="repostProgressText">준비 중...</span>
+                <span id="repostResultText"></span>
+            </div>
+            <div id="repostCurrentTask" style="margin-top:6px;font-size:11px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
         </div>
     </div>
 
@@ -2834,7 +2848,6 @@
                 <td style="padding:8px;text-align:center">${statusBadge}</td>
                 <td style="padding:8px;text-align:center">${posText}</td>
                 <td style="padding:8px;text-align:center">${bestText}</td>
-                <td style="padding:8px;text-align:center">${c.likes || 0}</td>
                 <td style="padding:8px;text-align:center;font-size:11px;color:var(--text-dim)">${lastChecked}</td>
                 <td style="padding:8px;text-align:center;white-space:nowrap">
                     ${repostBtnHtml}
@@ -3030,9 +3043,21 @@
 
     async function startRepost(commentIds) {
         const btn = document.getElementById('btnRepostHidden');
+        const panel = document.getElementById('repostProgressPanel');
+        const progressBar = document.getElementById('repostProgressBar');
+        const progressText = document.getElementById('repostProgressText');
+        const resultText = document.getElementById('repostResultText');
+        const currentTask = document.getElementById('repostCurrentTask');
+
         btn.disabled = true;
         btn.textContent = '리포스팅 중...';
-        document.getElementById('repostStatus').textContent = '진행 중...';
+
+        // 진행 상태 패널 표시
+        panel.style.display = '';
+        progressBar.style.width = '0%';
+        progressText.textContent = '준비 중...';
+        resultText.textContent = '';
+        currentTask.textContent = '';
 
         const data = await api('/api/repost', {
             method: 'POST',
@@ -3041,31 +3066,58 @@
         });
 
         if (data && data.ok) {
-            switchTab('dashboard');
-            // 폴링으로 완료 대기
+            // 폴링으로 완료 대기 (트래킹 탭에서 바로 표시)
             const pollRepost = setInterval(async () => {
                 const st = await api('/api/repost/status');
                 if (st) {
                     const s = st.results?.success || 0;
                     const f = st.results?.fail || 0;
-                    document.getElementById('repostStatus').textContent =
-                        st.running ? `${st.progress}/${st.total} (성공:${s} 실패:${f})` : '';
+                    const total = st.total || 1;
+                    const progress = st.progress || 0;
+                    const pct = Math.round((progress / total) * 100);
+
+                    progressBar.style.width = pct + '%';
+                    progressText.textContent = st.running
+                        ? `${progress} / ${total} 처리 중... (${pct}%)`
+                        : `완료 (${total}개 처리됨)`;
+                    resultText.textContent = `성공: ${s}  실패: ${f}`;
+                    currentTask.textContent = st.current_task || '';
 
                     if (!st.running) {
                         clearInterval(pollRepost);
                         btn.disabled = false;
+                        btn.textContent = '블라인드 리포스팅';
+                        progressBar.style.width = '100%';
+                        progressBar.style.background = s > 0 ? '#00b894' : 'var(--error)';
+                        progressText.textContent = `완료! 성공: ${s}개, 실패: ${f}개`;
+                        currentTask.textContent = '';
                         loadTrackingSummary();
-                        if (s > 0) {
-                            alert(`리포스팅 완료!\n성공: ${s}개, 실패: ${f}개`);
-                        }
+
+                        // 3초 후 패널 서서히 숨김
+                        setTimeout(() => {
+                            panel.style.opacity = '0';
+                            panel.style.transition = 'opacity 0.5s ease';
+                            setTimeout(() => {
+                                panel.style.display = 'none';
+                                panel.style.opacity = '1';
+                                panel.style.transition = '';
+                                progressBar.style.background = 'var(--accent-light)';
+                            }, 500);
+                        }, 5000);
                     }
                 }
-            }, 3000);
+            }, 2000);
         } else {
             btn.disabled = false;
-            document.getElementById('repostStatus').textContent = '';
+            btn.textContent = '블라인드 리포스팅';
+            panel.style.display = 'none';
             alert(data?.error || '리포스팅 시작 실패');
         }
+    }
+
+    async function stopRepost() {
+        if (!confirm('리포스팅을 중지하시겠습니까?')) return;
+        await api('/api/repost/stop', { method: 'POST' });
     }
 </script>
 

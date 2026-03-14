@@ -12,7 +12,7 @@
 기능:
 - 댓글 생존 확인 (삭제/숨김 감지)
 - 하이라이트 위치 추적 (몇 번째 댓글인지)
-- 좋아요 수 모니터링
+- 댓글 위치 모니터링
 - 트래킹 히스토리 저장
 """
 
@@ -201,7 +201,6 @@ class CommentTracker:
             "status": "active",
             "best_position": None,
             "last_position": None,
-            "last_likes": 0,
         }
 
         self._save_history()
@@ -231,7 +230,7 @@ class CommentTracker:
             reuse_browser: True이면 브라우저를 닫지 않음 (check_all에서 사용)
 
         Returns:
-            dict: {alive, position, likes, is_highlighted, status}
+            dict: {alive, position, is_highlighted, status}
         """
         comment_data = self.history["comments"].get(comment_id)
         if not comment_data:
@@ -255,12 +254,11 @@ class CommentTracker:
             time.sleep(3)
 
             alive = False
-            likes = 0
             found_text = ""
             position = -1
             is_highlighted = False
 
-            # lc= URL 페이지에서 댓글 생존 + 위치 + 좋아요를 한 번에 확인
+            # lc= URL 페이지에서 댓글 생존 + 위치를 확인
             # (headless에서 일반 영상 URL은 댓글 렌더링 안 되므로 lc= 페이지 활용)
 
             highlighted_selectors = [
@@ -293,79 +291,10 @@ class CommentTracker:
                             if not comment_text and found_text:
                                 comment_data["comment_text"] = found_text[:200]
 
-                            # 좋아요 수 추출 (JavaScript로 직접 추출)
-                            try:
-                                parent = el.evaluate_handle(
-                                    "el => el.closest('ytd-comment-renderer')"
-                                )
-                                parent_el = parent.as_element()
-
-                                # 방법1: aria-label에서 좋아요 수 추출
-                                like_btn = parent_el.query_selector(
-                                    "#like-button button, "
-                                    "#like-button ytd-toggle-button-renderer, "
-                                    "#like-button yt-button-shape button"
-                                )
-                                if like_btn:
-                                    aria = like_btn.get_attribute("aria-label") or ""
-                                    self._log(f"좋아요 버튼 aria-label: '{aria}'", "debug")
-                                    import re as _re
-                                    num_match = _re.search(r'(\d[\d,\.]*)', aria)
-                                    if num_match:
-                                        likes = self._parse_like_count(num_match.group(1))
-                                        self._log(f"좋아요 aria-label에서 추출: {likes}", "debug")
-
-                                # 방법2: #vote-count-middle 등 텍스트 셀렉터
-                                if likes == 0:
-                                    like_selectors = [
-                                        "#vote-count-middle",
-                                        "span#vote-count-middle",
-                                        "#toolbar yt-formatted-string.count-text",
-                                        "#toolbar span[aria-label*='좋아요']",
-                                        "#toolbar span[aria-label*='like']",
-                                    ]
-                                    for like_sel in like_selectors:
-                                        like_el = parent_el.query_selector(like_sel)
-                                        if like_el:
-                                            like_text = like_el.inner_text().strip()
-                                            self._log(f"좋아요 셀렉터 '{like_sel}' → text='{like_text}'", "debug")
-                                            if like_text:
-                                                likes = self._parse_like_count(like_text)
-                                                if likes > 0:
-                                                    break
-
-                                # 방법3: JavaScript로 좋아요 수 직접 탐색
-                                if likes == 0:
-                                    js_likes = parent_el.evaluate("""
-                                        el => {
-                                            // aria-label 에서 숫자 추출
-                                            const btns = el.querySelectorAll('button[aria-label], yt-button-shape button[aria-label]');
-                                            for (const btn of btns) {
-                                                const label = btn.getAttribute('aria-label') || '';
-                                                if (label.includes('좋아요') || label.toLowerCase().includes('like')) {
-                                                    const m = label.match(/(\\d[\\d,\\.]*)/);
-                                                    if (m) return m[1];
-                                                }
-                                            }
-                                            // vote-count 에서 텍스트 추출
-                                            const vote = el.querySelector('#vote-count-middle');
-                                            if (vote && vote.textContent.trim()) return vote.textContent.trim();
-                                            // 모든 aria-label 수집 (디버그)
-                                            const allLabels = Array.from(el.querySelectorAll('[aria-label]'))
-                                                .map(e => e.getAttribute('aria-label')).filter(Boolean);
-                                            return 'NO_LIKES_FOUND|labels:' + allLabels.join('|');
-                                        }
-                                    """)
-                                    self._log(f"좋아요 JS 탐색 결과: '{js_likes}'", "debug")
-                                    if js_likes and not js_likes.startswith("NO_LIKES"):
-                                        likes = self._parse_like_count(str(js_likes))
-
-                            except Exception as e:
-                                self._log(f"좋아요 추출 오류: {e}", "warning")
                             break
 
                     if alive:
-                        self._log(f"1단계 결과: 텍스트 매칭 성공, 좋아요={likes}, found_text={found_text[:60]}", "info")
+                        self._log(f"1단계 결과: 텍스트 매칭 성공, found_text={found_text[:60]}", "info")
                     else:
                         sample = elements[0].inner_text().strip()[:60] if elements else "없음"
                         self._log(
@@ -424,33 +353,6 @@ class CommentTracker:
                             is_highlighted = position <= 3
                             found_in_regular = True
                             self._log(f"2단계 인기순 목록에서 발견: {position}위", "info")
-
-                            # 좋아요 재확인
-                            try:
-                                parent = el.evaluate_handle(
-                                    "el => el.closest('ytd-comment-renderer')"
-                                )
-                                js_likes = parent.as_element().evaluate("""
-                                    el => {
-                                        const btns = el.querySelectorAll('button[aria-label], yt-button-shape button[aria-label]');
-                                        for (const btn of btns) {
-                                            const label = btn.getAttribute('aria-label') || '';
-                                            if (label.includes('좋아요') || label.toLowerCase().includes('like')) {
-                                                const m = label.match(/(\\d[\\d,\\.]*)/);
-                                                if (m) return m[1];
-                                            }
-                                        }
-                                        const vote = el.querySelector('#vote-count-middle');
-                                        if (vote && vote.textContent.trim()) return vote.textContent.trim();
-                                        return '';
-                                    }
-                                """)
-                                if js_likes:
-                                    parsed = self._parse_like_count(str(js_likes))
-                                    if parsed > likes:
-                                        likes = parsed
-                            except Exception:
-                                pass
                             break
 
                     if not found_in_regular:
@@ -460,14 +362,13 @@ class CommentTracker:
                         is_highlighted = True
                         self._log("2단계: 인기순 목록에서 미발견 → 하이라이트 위치(1위)로 설정", "debug")
 
-                self._log(f"2단계 최종 결과: 위치={position}, 좋아요={likes}", "info")
+                self._log(f"2단계 최종 결과: 위치={position}", "info")
 
             # ── 결과 기록 ──
             check_result = {
                 "checked_at": datetime.now().isoformat(),
                 "alive": alive,
                 "position": position if alive else -1,
-                "likes": likes,
                 "is_highlighted": is_highlighted,
             }
 
@@ -475,12 +376,11 @@ class CommentTracker:
 
             if alive:
                 comment_data["status"] = "active"
-                comment_data["last_likes"] = likes
                 if position > 0:
                     comment_data["last_position"] = position
                     if comment_data["best_position"] is None or position < comment_data["best_position"]:
                         comment_data["best_position"] = position
-                self._log(f"✓ 정상노출 확인 (좋아요:{likes}, 위치:{position})", "info")
+                self._log(f"✓ 정상노출 확인 (위치:{position})", "info")
             else:
                 comment_data["status"] = "hidden"
                 self._log(f"✗ 숨김/블라인드 판정: {comment_text[:40]}...", "warning")
@@ -490,7 +390,6 @@ class CommentTracker:
             return {
                 "alive": alive,
                 "position": position,
-                "likes": likes,
                 "is_highlighted": is_highlighted,
                 "status": comment_data["status"],
                 "total_checks": len(comment_data["checks"]),
@@ -636,7 +535,6 @@ class CommentTracker:
                 "status": data["status"],
                 "position": data.get("last_position"),
                 "best_position": data.get("best_position"),
-                "likes": data.get("last_likes", 0),
                 "registered_at": data["registered_at"],
                 "last_checked": last_check["checked_at"] if last_check else None,
                 "total_checks": len(data["checks"]),
@@ -660,21 +558,3 @@ class CommentTracker:
         match = re.search(r"(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})", url)
         return match.group(1) if match else None
 
-    def _parse_like_count(self, text):
-        """좋아요 텍스트를 숫자로 변환 (예: '1.2천' → 1200)"""
-        if not text or text.strip() == "":
-            return 0
-        text = text.strip()
-        try:
-            if "천" in text:
-                return int(float(text.replace("천", "").strip()) * 1000)
-            elif "만" in text:
-                return int(float(text.replace("만", "").strip()) * 10000)
-            elif "K" in text.upper():
-                return int(float(text.upper().replace("K", "").strip()) * 1000)
-            elif "M" in text.upper():
-                return int(float(text.upper().replace("M", "").strip()) * 1000000)
-            else:
-                return int(text.replace(",", ""))
-        except (ValueError, AttributeError):
-            return 0
