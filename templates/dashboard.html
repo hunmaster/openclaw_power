@@ -281,6 +281,10 @@
 <div class="header">
     <h1><span>YT</span> 댓글 자동화</h1>
     <div class="header-actions">
+        <span id="licenseBadge" style="display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:12px;font-size:12px;font-weight:600;background:#3b82f620;color:#60a5fa;cursor:pointer;" onclick="location.href='/setup'" title="라이선스 정보">
+            <span id="licensePlanText">-</span>
+            <span id="licenseTokenText" style="color:#888;font-weight:400;"></span>
+        </span>
         <span id="statusIndicator">
             <span class="status-dot stopped"></span>
             <span style="font-size:13px;color:var(--text-dim)">대기 중</span>
@@ -1181,6 +1185,46 @@
             return { error: '서버에 연결할 수 없습니다.' };
         }
     }
+
+    // ─── 라이선스 상태 ───
+    async function loadLicenseStatus() {
+        try {
+            const data = await api('/api/license/status');
+            if (!data) return;
+
+            const badge = document.getElementById('licenseBadge');
+            const planText = document.getElementById('licensePlanText');
+            const tokenText = document.getElementById('licenseTokenText');
+
+            if (data.owner_mode) {
+                planText.textContent = 'Owner';
+                badge.style.background = '#22c55e20';
+                badge.style.color = '#4ade80';
+                tokenText.textContent = '';
+            } else if (data.active) {
+                planText.textContent = data.plan || 'Active';
+                tokenText.textContent = data.token_balance ? ` | ${data.token_balance.toLocaleString()} 토큰` : '';
+                const colors = {
+                    'Starter': {bg:'#3b82f620', fg:'#60a5fa'},
+                    'Business': {bg:'#8b5cf620', fg:'#a78bfa'},
+                    'Agency': {bg:'#f59e0b20', fg:'#fbbf24'},
+                    'Enterprise': {bg:'#22c55e20', fg:'#4ade80'},
+                    'Owner': {bg:'#22c55e20', fg:'#4ade80'},
+                };
+                const c = colors[data.plan] || colors['Starter'];
+                badge.style.background = c.bg;
+                badge.style.color = c.fg;
+            } else {
+                planText.textContent = '미인증';
+                badge.style.background = '#ef444420';
+                badge.style.color = '#f87171';
+                tokenText.textContent = '';
+            }
+        } catch(e) {}
+    }
+
+    loadLicenseStatus();
+    setInterval(loadLicenseStatus, 60000);
 
     // ─── 대시보드 로드 ───
     async function loadDashboard() {

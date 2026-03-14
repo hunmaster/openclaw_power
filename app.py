@@ -33,6 +33,7 @@ from src.safety_rules import SafetyRules
 from src.smm_client import SMMClient
 from src.adb_ip_changer import ADBIPChanger
 from src.comment_tracker import CommentTracker
+from src.license_client import license_client, is_owner_mode, LIKE_TIERS
 
 app = Flask(__name__)
 
@@ -2523,6 +2524,273 @@ def _start_scheduler():
     t = threading.Thread(target=scheduler_loop, daemon=True)
     t.start()
     add_log("[스케줄] 매일 오전 8시 자동 트래킹 스케줄러 시작됨", "info")
+
+
+# ──────────────────────────── 라이선스 & 셋업 ────────────────────────────
+
+@app.route("/setup")
+def setup_page():
+    """셋업 위자드 페이지."""
+    return render_template("setup.html")
+
+
+@app.route("/api/license/status")
+def api_license_status():
+    """현재 라이선스 상태 반환."""
+    return jsonify({
+        "active": license_client.is_active(),
+        "owner_mode": license_client.owner_mode,
+        "plan": license_client.get_plan_name(),
+        "max_accounts": license_client.get_max_accounts(),
+        "token_balance": license_client.token_balance,
+        "license_key": (license_client.license_key or "")[:8] + "..." if license_client.license_key else None,
+    })
+
+
+@app.route("/api/license/activate", methods=["POST"])
+def api_license_activate():
+    """라이선스 키 활성화."""
+    data = request.get_json() or {}
+    key = data.get("license_key", "").strip()
+    if not key:
+        return jsonify({"error": "라이선스 키를 입력해주세요."}), 400
+
+    result = license_client.activate(key)
+    return jsonify(result)
+
+
+@app.route("/api/license/features")
+def api_license_features():
+    """현재 플랜에서 사용 가능한 기능 목록."""
+    features = {
+        "comment_post": {"name": "댓글 작성", "available": license_client.can_use_feature("comment_post")},
+        "exposure_check_manual": {"name": "수동 노출 확인", "available": license_client.can_use_feature("exposure_check_manual")},
+        "notion_sync": {"name": "노션 연동", "available": license_client.can_use_feature("notion_sync")},
+        "auto_repost": {"name": "자동 리포스팅", "available": license_client.can_use_feature("auto_repost"), "min_plan": "Business"},
+        "rank_check": {"name": "순위 체크", "available": license_client.can_use_feature("rank_check"), "min_plan": "Business"},
+        "duplicate_scan": {"name": "중복 스캔", "available": license_client.can_use_feature("duplicate_scan"), "min_plan": "Business"},
+        "like_boost": {"name": "좋아요 부스팅", "available": license_client.can_use_feature("like_boost"), "min_plan": "Business"},
+        "auto_exposure_schedule": {"name": "자동 노출 체크 스케줄", "available": license_client.can_use_feature("auto_exposure_schedule"), "min_plan": "Agency"},
+        "multi_account_parallel": {"name": "다중 계정 동시 작업", "available": license_client.can_use_feature("multi_account_parallel"), "min_plan": "Agency"},
+        "task_scheduling": {"name": "작업 예약", "available": license_client.can_use_feature("task_scheduling"), "min_plan": "Agency"},
+        "api_access": {"name": "API 접근", "available": license_client.can_use_feature("api_access"), "min_plan": "Enterprise"},
+    }
+    return jsonify(features)
+
+
+@app.route("/api/like-boost/tiers")
+def api_like_boost_tiers():
+    """좋아요 부스팅 티어 정보."""
+    return jsonify(LIKE_TIERS)
+
+
+@app.route("/api/like-boost/order", methods=["POST"])
+def api_like_boost_order():
+    """좋아요 부스팅 주문."""
+    if not license_client.can_use_feature("like_boost"):
+        return jsonify({"error": "좋아요 부스팅은 Business 플랜부터 사용 가능합니다."}), 403
+
+    data = request.get_json() or {}
+    comment_url = data.get("comment_url", "").strip()
+    quantity = int(data.get("quantity", 10))
+    tier = data.get("tier", "standard")
+
+    if not comment_url:
+        return jsonify({"error": "댓글 URL을 입력해주세요."}), 400
+    if quantity < 10:
+        return jsonify({"error": "최소 10개부터 주문 가능합니다."}), 400
+
+    # 비용 계산 (원)
+    cost = license_client.get_like_cost(quantity, tier)
+    tier_info = LIKE_TIERS.get(tier, {})
+
+    # SMM 주문 실행
+    smm = SMMClient()
+    result = smm.order_likes(comment_url, quantity, tier=tier)
+
+    if result.get("success"):
+        return jsonify({
+            "success": True,
+            "order_id": result.get("order_id"),
+            "cost": cost,
+            "tier": tier_info.get("name", tier),
+            "quantity": quantity,
+        })
+    else:
+        return jsonify({"error": result.get("error", "주문 실패")}), 500
+
+
+@app.route("/api/setup/check")
+def api_setup_check():
+    """셋업 완료 상태 확인."""
+    load_dotenv(override=True)
+
+    license_ok = license_client.is_active()
+    notion_token = os.getenv("NOTION_API_TOKEN", "")
+    notion_db = os.getenv("NOTION_DATABASE_ID", "")
+    notion_ok = bool(notion_token and notion_db)
+
+    # 노션 연결 실제 테스트
+    notion_verified = False
+    if notion_ok:
+        try:
+            from notion_client import Client
+            client = Client(auth=notion_token)
+            client.databases.retrieve(database_id=notion_db)
+            notion_verified = True
+        except Exception:
+            pass
+
+    # 계정 등록 확인
+    accounts = json.loads(os.getenv("YOUTUBE_ACCOUNTS", "[]"))
+    accounts_ok = len(accounts) > 0
+
+    return jsonify({
+        "license": {"ok": license_ok, "plan": license_client.get_plan_name()},
+        "notion": {"ok": notion_ok, "verified": notion_verified, "has_token": bool(notion_token), "has_db": bool(notion_db)},
+        "accounts": {"ok": accounts_ok, "count": len(accounts)},
+        "all_done": license_ok and notion_verified and accounts_ok,
+    })
+
+
+@app.route("/api/setup/notion/save", methods=["POST"])
+def api_setup_notion_save():
+    """노션 API 키 및 DB ID 저장."""
+    data = request.get_json() or {}
+    token = data.get("notion_token", "").strip()
+    db_id = data.get("database_id", "").strip()
+
+    if not token:
+        return jsonify({"error": "노션 API 토큰을 입력해주세요."}), 400
+
+    # 연결 테스트
+    try:
+        from notion_client import Client
+        client = Client(auth=token)
+        user_info = client.users.me()
+    except Exception as e:
+        return jsonify({"error": f"노션 연결 실패: {str(e)}"}), 400
+
+    # .env 파일 업데이트
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    _update_env_var(env_path, "NOTION_API_TOKEN", token)
+    if db_id:
+        _update_env_var(env_path, "NOTION_DATABASE_ID", db_id)
+
+    return jsonify({"success": True, "user": user_info.get("name", "연결됨")})
+
+
+@app.route("/api/setup/notion/create-template", methods=["POST"])
+def api_setup_notion_create_template():
+    """노션 DB 템플릿을 자동 생성합니다."""
+    data = request.get_json() or {}
+    token = data.get("notion_token", "").strip()
+    parent_page_id = data.get("parent_page_id", "").strip()
+
+    if not token:
+        return jsonify({"error": "노션 API 토큰이 필요합니다."}), 400
+    if not parent_page_id:
+        return jsonify({"error": "상위 페이지 ID가 필요합니다."}), 400
+
+    try:
+        from notion_client import Client
+        client = Client(auth=token)
+
+        # 댓글 작업용 DB 생성
+        new_db = client.databases.create(
+            parent={"type": "page_id", "page_id": parent_page_id},
+            title=[{"type": "text", "text": {"content": "YouTube 댓글 자동화"}}],
+            properties={
+                "작업명": {"title": {}},
+                "영상 링크": {"url": {}},
+                "댓글 원고": {"rich_text": {}},
+                "대댓글 원고": {"rich_text": {}},
+                "댓글 url": {"url": {}},
+                "상태": {
+                    "select": {
+                        "options": [
+                            {"name": "댓글작업전", "color": "gray"},
+                            {"name": "댓글완료", "color": "green"},
+                            {"name": "대댓글완료", "color": "blue"},
+                            {"name": "좋아요완료", "color": "purple"},
+                            {"name": "작업실패", "color": "red"},
+                        ]
+                    }
+                },
+                "댓글 계정": {"rich_text": {}},
+                "댓글 완료": {"checkbox": {}},
+                "대댓글 완료": {"checkbox": {}},
+                "좋아요 완료": {"checkbox": {}},
+            },
+        )
+
+        db_id = new_db["id"]
+
+        # .env에 자동 저장
+        env_path = os.path.join(os.path.dirname(__file__), ".env")
+        _update_env_var(env_path, "NOTION_API_TOKEN", token)
+        _update_env_var(env_path, "NOTION_DATABASE_ID", db_id)
+
+        # 샘플 데이터 1건 추가
+        try:
+            client.pages.create(
+                parent={"database_id": db_id},
+                properties={
+                    "작업명": {"title": [{"text": {"content": "[샘플] 테스트 영상 댓글"}}]},
+                    "영상 링크": {"url": "https://www.youtube.com/watch?v=SAMPLE"},
+                    "댓글 원고": {"rich_text": [{"text": {"content": "이것은 샘플 댓글입니다. 수정 후 사용하세요."}}]},
+                    "상태": {"select": {"name": "댓글작업전"}},
+                },
+            )
+        except Exception:
+            pass
+
+        return jsonify({
+            "success": True,
+            "database_id": db_id,
+            "url": new_db.get("url", ""),
+            "message": "DB 템플릿이 생성되었습니다!",
+        })
+
+    except Exception as e:
+        return jsonify({"error": f"DB 생성 실패: {str(e)}"}), 500
+
+
+def _update_env_var(env_path, key, value):
+    """env 파일에서 특정 변수를 업데이트하거나 추가합니다."""
+    lines = []
+    found = False
+    if os.path.exists(env_path):
+        with open(env_path, "r") as f:
+            lines = f.readlines()
+
+    new_lines = []
+    for line in lines:
+        if line.strip().startswith(f"{key}="):
+            new_lines.append(f"{key}={value}\n")
+            found = True
+        else:
+            new_lines.append(line)
+
+    if not found:
+        new_lines.append(f"{key}={value}\n")
+
+    with open(env_path, "w") as f:
+        f.writelines(new_lines)
+
+    # 환경변수도 즉시 반영
+    os.environ[key] = value
+
+
+# 시작 시 라이선스 자동 검증
+if not is_owner_mode():
+    _lic_result = license_client.auto_verify()
+    if _lic_result.get("valid"):
+        print(f"[License] 라이선스 검증 성공: {license_client.get_plan_name()}")
+    else:
+        print(f"[License] 라이선스 미인증 (셋업 필요): {_lic_result.get('error', '')}")
+else:
+    print("[License] Owner 모드 - 라이선스 검증 스킵")
 
 
 if __name__ == "__main__":
