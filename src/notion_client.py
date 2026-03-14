@@ -506,6 +506,89 @@ class NotionManager:
         except Exception:
             console.print(f"[dim]체크박스 '{checkbox_name}' 업데이트 실패 (무시)[/dim]")
 
+    def get_completed_video_urls(self):
+        """댓글 완료 체크박스가 True인 작업들의 영상 URL 세트를 반환합니다.
+        중복 영상 체크에 사용됩니다."""
+        completed_urls = set()
+        checkbox_name = getattr(self, "col_checkbox", "댓글 완료")
+        if not checkbox_name:
+            return completed_urls
+
+        has_more = True
+        start_cursor = None
+        query_filter = {"property": checkbox_name, "checkbox": {"equals": True}}
+
+        while has_more:
+            try:
+                kwargs = {
+                    "database_id": self.database_id,
+                    "page_size": 100,
+                    "filter": query_filter,
+                }
+                if start_cursor:
+                    kwargs["start_cursor"] = start_cursor
+                response = self.client.databases.query(**kwargs)
+
+                for page in response.get("results", []):
+                    props = page.get("properties", {})
+                    # 영상 URL 추출
+                    url_prop = props.get(self.col_youtube_url, {})
+                    url = self._extract_url(url_prop) or self._extract_text(url_prop)
+                    if url:
+                        # 쿼리 파라미터 차이 무시를 위해 video ID만 추출
+                        vid = self._extract_video_id(url)
+                        if vid:
+                            completed_urls.add(vid)
+
+                has_more = response.get("has_more", False)
+                start_cursor = response.get("next_cursor")
+            except Exception as e:
+                console.print(f"[yellow]완료 목록 조회 오류: {e}[/yellow]")
+                break
+
+        console.print(f"[dim]댓글 완료된 영상: {len(completed_urls)}개[/dim]")
+        return completed_urls
+
+    @staticmethod
+    def _extract_video_id(url):
+        """YouTube URL에서 video ID를 추출합니다."""
+        if not url:
+            return None
+        # https://www.youtube.com/watch?v=XXXXX 또는 https://youtu.be/XXXXX
+        import re
+        match = re.search(r'(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})', url)
+        return match.group(1) if match else url  # ID 추출 실패 시 URL 자체 반환
+
+    def check_duplicates(self, tasks):
+        """작업 목록에서 이미 댓글 완료된 영상을 찾아 중복 표시합니다.
+        Returns:
+            (clean_tasks, duplicate_tasks): 중복이 아닌 작업 / 중복 작업 리스트
+        """
+        completed_ids = self.get_completed_video_urls()
+        if not completed_ids:
+            return tasks, []
+
+        clean_tasks = []
+        duplicate_tasks = []
+
+        for task in tasks:
+            vid = self._extract_video_id(task.get("youtube_url", ""))
+            if vid and vid in completed_ids:
+                duplicate_tasks.append(task)
+                # 노션 상태를 '중복'으로 변경
+                try:
+                    self.update_task_status(task["page_id"], "중복")
+                    console.print(f"[yellow]중복 감지 → 상태 변경: {task['youtube_url'][:50]}[/yellow]")
+                except Exception as e:
+                    console.print(f"[red]중복 상태 변경 실패: {e}[/red]")
+            else:
+                clean_tasks.append(task)
+
+        if duplicate_tasks:
+            console.print(f"[yellow]중복 영상 {len(duplicate_tasks)}건 발견 → 상태를 '중복'으로 변경[/yellow]")
+
+        return clean_tasks, duplicate_tasks
+
     def update_task_error(self, page_id, error_message):
         """에러 상태를 Notion에 저장합니다."""
         self.update_task_result(page_id, comment_url="", status="에러")

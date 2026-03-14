@@ -37,7 +37,7 @@ automation_state = {
     "progress": 0,
     "total": 0,
     "logs": [],
-    "results": {"success": 0, "fail": 0, "skip": 0, "likes": 0},
+    "results": {"success": 0, "fail": 0, "skip": 0, "likes": 0, "duplicate": 0},
     "test_mode": False,
     "limit": 0,
     "full_auto": False,
@@ -264,7 +264,7 @@ def api_run():
         automation_state["running"] = True
         automation_state["progress"] = 0
         automation_state["logs"] = []
-        automation_state["results"] = {"success": 0, "fail": 0, "skip": 0, "likes": 0}
+        automation_state["results"] = {"success": 0, "fail": 0, "skip": 0, "likes": 0, "duplicate": 0}
 
     data = request.get_json(silent=True) or {}
     limit = data.get("limit", 0)  # 0 = 전체, 1~N = 테스트 건수
@@ -807,6 +807,18 @@ def _run_automation(limit=0, selected_ids=None):
             automation_state["running"] = False
             return
 
+        # 중복 영상 체크 (이미 댓글 완료된 영상 필터링)
+        add_log("중복 영상 체크 중...", "info")
+        tasks, duplicate_tasks = notion.check_duplicates(tasks)
+        if duplicate_tasks:
+            dup_count = len(duplicate_tasks)
+            add_log(f"중복 영상 {dup_count}건 발견 → '중복' 상태로 변경됨", "warning")
+            automation_state["results"]["duplicate"] = dup_count
+        if not tasks:
+            add_log("중복 제외 후 대기 작업이 없습니다.", "warning")
+            automation_state["running"] = False
+            return
+
         # 선택 실행: 선택된 page_id만 필터링
         if selected_ids:
             selected_set = set(selected_ids)
@@ -955,11 +967,13 @@ def _run_automation(limit=0, selected_ids=None):
                 prev_account_label = current_label
 
         summary_prefix = "[테스트 완료]" if test_mode else "[전체 완료]"
+        dup = automation_state['results'].get('duplicate', 0)
+        dup_text = f", 중복: {dup}" if dup > 0 else ""
         add_log(
             f"{summary_prefix} 성공: {automation_state['results']['success']}, "
             f"실패: {automation_state['results']['fail']}, "
             f"건너뜀: {automation_state['results']['skip']}, "
-            f"좋아요: {automation_state['results']['likes']}",
+            f"좋아요: {automation_state['results']['likes']}{dup_text}",
             "success" if automation_state['results']['success'] > 0 else "warning",
         )
 
@@ -992,7 +1006,7 @@ def _run_full_auto():
 
             # 매 라운드마다 결과 리셋
             automation_state["progress"] = 0
-            automation_state["results"] = {"success": 0, "fail": 0, "skip": 0, "likes": 0}
+            automation_state["results"] = {"success": 0, "fail": 0, "skip": 0, "likes": 0, "duplicate": 0}
 
             # 자동화 실행 (전체 모드)
             _run_automation(limit=0)

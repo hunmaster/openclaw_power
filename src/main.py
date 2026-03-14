@@ -232,6 +232,15 @@ def run():
         console.print("[yellow]대기 중인 작업이 없습니다.[/yellow]")
         return
 
+    # 중복 영상 체크
+    console.print("[blue]중복 영상 체크 중...[/blue]")
+    tasks, duplicate_tasks = notion.check_duplicates(tasks)
+    if duplicate_tasks:
+        console.print(f"[yellow]중복 영상 {len(duplicate_tasks)}건 → '중복' 상태로 변경됨[/yellow]")
+    if not tasks:
+        console.print("[yellow]중복 제외 후 대기 작업이 없습니다.[/yellow]")
+        return
+
     # 현황 표시
     display_status(tasks, proxy_manager, safety_rules, accounts, smm_client)
 
