@@ -40,38 +40,68 @@ class NotionManager:
                       f"result='{self.col_result_url}', status='{self.col_status}', account='{self.col_account}'[/dim]")
 
     def _resolve_column_names(self):
-        """DB 스키마를 조회하여 실제 속성명과 매칭합니다."""
+        """DB 스키마를 조회하여 실제 속성명과 매칭합니다 (대소문자 무시)."""
         try:
             db_info = self.client.databases.retrieve(database_id=self.database_id)
             self._db_properties = db_info.get("properties", {})
-            prop_names = set(self._db_properties.keys())
+            prop_names = list(self._db_properties.keys())
 
-            # 설정된 컬럼명이 DB에 없으면 자동 탐색
-            if self.col_result_url not in prop_names:
-                original = self.col_result_url
+            # 대소문자 무시 비교 헬퍼
+            def find_exact_or_icase(configured_name, prop_names):
+                """설정된 이름이 DB에 정확히 있으면 그대로, 없으면 대소문자 무시로 찾기"""
+                if configured_name in prop_names:
+                    return configured_name
+                configured_lower = configured_name.lower()
+                for name in prop_names:
+                    if name.lower() == configured_lower:
+                        return name
+                return None
+
+            # 댓글 URL 컬럼 매칭
+            matched = find_exact_or_icase(self.col_result_url, prop_names)
+            if matched:
+                if matched != self.col_result_url:
+                    console.print(f"[yellow]댓글 URL 컬럼 매칭: '{self.col_result_url}' → '{matched}'[/yellow]")
+                self.col_result_url = matched
+            else:
+                # 키워드 기반 자동 탐색 (댓글 + url)
                 found = None
                 for name in prop_names:
-                    name_lower = name.lower().replace(" ", "")
+                    name_lower = name.lower()
                     if "댓글" in name and "url" in name_lower:
                         found = name
                         break
                 if found:
+                    console.print(f"[yellow]댓글 URL 컬럼 자동 탐색: '{self.col_result_url}' → '{found}'[/yellow]")
                     self.col_result_url = found
-                    console.print(f"[yellow]댓글 URL 컬럼 자동 매칭: '{original}' → '{found}'[/yellow]")
                 else:
-                    console.print(f"[yellow]⚠ 댓글 URL 컬럼 '{original}'이 DB에 없습니다. URL 저장이 생략됩니다.[/yellow]")
+                    console.print(f"[yellow]⚠ 댓글 URL 컬럼 '{self.col_result_url}'이 DB에 없습니다. URL 저장이 생략됩니다.[/yellow]")
                     self.col_result_url = None
 
-            if self.col_status not in prop_names:
-                original = self.col_status
+            # 상태 컬럼 매칭
+            matched = find_exact_or_icase(self.col_status, prop_names)
+            if matched:
+                self.col_status = matched
+            else:
                 for name in prop_names:
                     if "상태" in name or "status" in name.lower():
+                        console.print(f"[yellow]상태 컬럼 자동 매칭: '{self.col_status}' → '{name}'[/yellow]")
                         self.col_status = name
-                        console.print(f"[yellow]상태 컬럼 자동 매칭: '{original}' → '{name}'[/yellow]")
                         break
+
+            # 체크박스 컬럼 자동 탐색 (댓글 + 완료 키워드)
+            self.col_checkbox = None
+            for name, prop_info in self._db_properties.items():
+                if prop_info.get("type") == "checkbox" and "댓글" in name and "완료" in name:
+                    self.col_checkbox = name
+                    console.print(f"[dim]체크박스 컬럼 발견: '{name}'[/dim]")
+                    break
+
+            console.print(f"[dim]DB 속성 목록: {', '.join(prop_names)}[/dim]")
 
         except Exception as e:
             console.print(f"[yellow]DB 스키마 조회 실패 (기본 컬럼명 사용): {e}[/yellow]")
+            self.col_checkbox = "댓글 완료"  # 기본값
 
     def get_pending_tasks(self):
         """상태가 '댓글작업전'인 작업을 전부 가져옵니다 (페이지네이션)."""
@@ -378,87 +408,95 @@ class NotionManager:
 
     def update_task_result(self, page_id, comment_url, status="댓글완료"):
         """댓글 작성 결과를 Notion에 저장합니다.
+        상태 + 댓글 URL + 체크박스를 한번에 업데이트합니다.
         Returns:
             (True, "") on success
             (False, "에러 메시지") on failure
         """
         self.last_error = ""
-        properties = {}
 
-        # 댓글 URL 저장 (col_result_url이 None이면 DB에 해당 속성 없음 → 건너뜀)
-        save_url = comment_url and self.col_result_url
-        if save_url:
-            properties[self.col_result_url] = self._build_result_url_property(comment_url)
+        # 공통 속성 구성
+        save_url = bool(comment_url and self.col_result_url)
+        checkbox_name = getattr(self, "col_checkbox", None)
+        set_checkbox = (status == "댓글완료" and checkbox_name)
 
-        # 1단계: select 타입 + rich_text(link) URL
-        try:
-            properties[self.col_status] = {"select": {"name": status}}
-            self.client.pages.update(page_id=page_id, properties=properties)
-            console.print(f"[green]Notion 업데이트 완료 (select): {status}[/green]")
-            self._try_update_checkbox(page_id, status)
-            return (True, "")
-        except Exception as e1:
-            err1 = str(e1)[:120]
-            console.print(f"[yellow]1단계(select) 실패: {err1}[/yellow]")
-            # URL 속성이 문제인 경우 URL 빼고 재시도
-            if save_url and "is not a property" in str(e1):
-                console.print(f"[yellow]댓글 URL 속성이 DB에 없음 → URL 제외하고 재시도[/yellow]")
-                self.col_result_url = None
-                return self.update_task_result(page_id, comment_url="", status=status)
+        def build_props(status_type, include_url=True, include_checkbox=True):
+            """status_type: 'select' 또는 'status'"""
+            props = {}
+            if status_type == "select":
+                props[self.col_status] = {"select": {"name": status}}
+            else:
+                props[self.col_status] = {"status": {"name": status}}
+            if include_url and save_url:
+                props[self.col_result_url] = self._build_result_url_property(comment_url)
+            if include_checkbox and set_checkbox:
+                props[checkbox_name] = {"checkbox": True}
+            return props
 
-        # 2단계: select + URL을 plain rich_text로 재시도
-        if save_url:
-            properties[self.col_result_url] = self._build_result_url_rich_text(comment_url)
-        try:
-            self.client.pages.update(page_id=page_id, properties=properties)
-            console.print(f"[green]Notion 업데이트 완료 (select+plain): {status}[/green]")
-            self._try_update_checkbox(page_id, status)
-            return (True, "")
-        except Exception as e2:
-            err2 = str(e2)[:120]
-            console.print(f"[yellow]2단계(select+plain) 실패: {err2}[/yellow]")
+        # 시도 순서: (status_type, include_url, include_checkbox, 설명)
+        attempts = [
+            ("select", True, True, "select+url+checkbox"),
+            ("select", True, False, "select+url"),
+            ("select", False, True, "select+checkbox"),
+            ("status", True, True, "status+url+checkbox"),
+            ("status", False, True, "status+checkbox"),
+            ("select", False, False, "select만"),
+            ("status", False, False, "status만"),
+        ]
 
-        # 3단계: status 타입으로 시도 (URL 없이)
-        try:
-            status_only = {self.col_status: {"status": {"name": status}}}
-            self.client.pages.update(page_id=page_id, properties=status_only)
-            console.print(f"[green]Notion 업데이트 완료 (status): {status}[/green]")
-            if save_url:
-                console.print(f"[yellow]상태는 업데이트됨, URL 저장은 실패[/yellow]")
-            self._try_update_checkbox(page_id, status)
-            return (True, "")
-        except Exception as e3:
-            err3 = str(e3)[:120]
-            console.print(f"[yellow]3단계(status) 실패: {err3}[/yellow]")
+        last_err = ""
+        for status_type, inc_url, inc_cb, desc in attempts:
+            props = build_props(status_type, inc_url, inc_cb)
+            try:
+                self.client.pages.update(page_id=page_id, properties=props)
+                console.print(f"[green]Notion 업데이트 완료 ({desc}): {status}[/green]")
+                # 성공했지만 일부 포함 못 한 항목이 있으면 별도 시도
+                if save_url and not inc_url:
+                    self._try_update_url_only(page_id, comment_url)
+                if set_checkbox and not inc_cb:
+                    self._try_update_checkbox_only(page_id)
+                return (True, "")
+            except Exception as e:
+                err = str(e)[:150]
+                last_err = err
+                console.print(f"[yellow]시도({desc}) 실패: {err}[/yellow]")
+                # URL 속성이 DB에 없는 경우 → URL 포함 시도 모두 건너뜀
+                if "is not a property" in str(e) and inc_url and save_url:
+                    console.print(f"[yellow]'{self.col_result_url}' 속성이 DB에 없음 → URL 저장 비활성화[/yellow]")
+                    self.col_result_url = None
+                    save_url = False
+                    continue
 
-        # 4단계: select 타입으로 상태만 저장
-        try:
-            status_only = {self.col_status: {"select": {"name": status}}}
-            self.client.pages.update(page_id=page_id, properties=status_only)
-            console.print(f"[green]Notion 상태만 업데이트 완료 (select): {status}[/green]")
-            if save_url:
-                console.print(f"[yellow]URL 저장은 실패 (속성 문제)[/yellow]")
-            self._try_update_checkbox(page_id, status)
-            return (True, "")
-        except Exception as e4:
-            err4 = str(e4)[:120]
-            console.print(f"[yellow]4단계(select only) 실패: {err4}[/yellow]")
-
-        self.last_error = f"상태 변경 실패: {err1}"
+        self.last_error = f"노션 업데이트 완전 실패: {last_err}"
+        console.print(f"[red]{self.last_error}[/red]")
         return (False, self.last_error)
 
-    def _try_update_checkbox(self, page_id, status):
-        """댓글 완료 체크박스를 별도로 업데이트 시도합니다 (실패해도 무시)."""
-        if status != "댓글완료":
+    def _try_update_url_only(self, page_id, comment_url):
+        """댓글 URL만 별도 업데이트 시도 (실패해도 무시)."""
+        if not self.col_result_url or not comment_url:
             return
         try:
             self.client.pages.update(
                 page_id=page_id,
-                properties={"댓글 완료": {"checkbox": True}},
+                properties={self.col_result_url: self._build_result_url_property(comment_url)},
             )
-            console.print("[dim]체크박스 '댓글 완료' 업데이트됨[/dim]")
+            console.print(f"[dim]댓글 URL 별도 저장 완료[/dim]")
         except Exception:
-            console.print("[dim]체크박스 '댓글 완료' 컬럼 없음 (무시)[/dim]")
+            console.print(f"[yellow]댓글 URL 별도 저장 실패 (무시)[/yellow]")
+
+    def _try_update_checkbox_only(self, page_id):
+        """체크박스만 별도 업데이트 시도 (실패해도 무시)."""
+        checkbox_name = getattr(self, "col_checkbox", None)
+        if not checkbox_name:
+            return
+        try:
+            self.client.pages.update(
+                page_id=page_id,
+                properties={checkbox_name: {"checkbox": True}},
+            )
+            console.print(f"[dim]체크박스 '{checkbox_name}' 업데이트됨[/dim]")
+        except Exception:
+            console.print(f"[dim]체크박스 '{checkbox_name}' 업데이트 실패 (무시)[/dim]")
 
     def update_task_error(self, page_id, error_message):
         """에러 상태를 Notion에 저장합니다."""
