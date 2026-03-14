@@ -356,6 +356,40 @@
             </div>
         </div>
 
+        <!-- 대댓글 자동화 패널 -->
+        <div class="card" id="replyPanel" style="margin-bottom:24px;border:1px solid var(--border)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <div style="display:flex;align-items:center;gap:10px">
+                    <span class="status-dot stopped" id="replyDot"></span>
+                    <span style="font-size:15px;font-weight:600">대댓글 자동화</span>
+                    <span style="font-size:12px;color:var(--text-dim)" id="replyStatusText">대기 중</span>
+                </div>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <select id="replyLimit" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:12px">
+                        <option value="1">테스트 1건</option>
+                        <option value="2">테스트 2건</option>
+                        <option value="3">테스트 3건</option>
+                        <option value="0">전체 실행</option>
+                    </select>
+                    <button class="btn btn-sm btn-secondary" id="btnReplyPreview" onclick="previewReplyTasks()">미리보기</button>
+                    <button class="btn btn-sm btn-primary" id="btnReplyStart" onclick="startReplyAutomation()">실행</button>
+                    <button class="btn btn-sm btn-danger" id="btnReplyStop" onclick="stopReplyAutomation()" disabled>중지</button>
+                </div>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <span style="font-size:13px;color:var(--text-dim)" id="replyProgressLabel">댓글완료 상태의 작업 중 대댓글 원고가 있는 항목을 실행합니다.</span>
+                <div style="display:flex;gap:16px;font-size:12px">
+                    <span style="color:var(--green)" id="replySuccess">성공 0</span>
+                    <span style="color:var(--red)" id="replyFail">실패 0</span>
+                </div>
+            </div>
+            <div style="height:6px;background:var(--border);border-radius:4px;overflow:hidden">
+                <div id="replyProgressFill" style="height:100%;border-radius:4px;background:var(--accent);transition:width 0.5s ease;width:0%"></div>
+            </div>
+            <!-- 대댓글 미리보기 영역 -->
+            <div id="replyPreviewBody" style="display:none;margin-top:12px;max-height:200px;overflow-y:auto"></div>
+        </div>
+
         <!-- 계정 현황 -->
         <div class="table-wrap">
             <div class="table-title">
@@ -1645,6 +1679,106 @@
         updateStatusIndicator(false);
     }
 
+    // ─── 대댓글 자동화 ───
+    async function previewReplyTasks() {
+        const body = document.getElementById('replyPreviewBody');
+        body.style.display = 'block';
+        body.innerHTML = '<div style="color:var(--text-dim);padding:8px;font-size:13px">조회 중...</div>';
+        try {
+            const data = await api('/api/reply/preview');
+            if (!data || data.error) {
+                body.innerHTML = `<div style="color:var(--red);padding:8px">${data?.error || '조회 실패'}</div>`;
+                return;
+            }
+            if (data.count === 0) {
+                body.innerHTML = '<div style="color:var(--yellow);padding:8px;font-size:13px">대댓글 대기 작업이 없습니다. (댓글완료 + 대댓글 원고 필요)</div>';
+                return;
+            }
+            let html = `<div style="font-size:12px;color:var(--text-dim);margin-bottom:8px">대댓글 대기: ${data.count}건</div>`;
+            html += '<table style="width:100%;font-size:12px"><thead><tr>';
+            html += '<th style="text-align:left;padding:4px 6px">제목</th>';
+            html += '<th style="text-align:left;padding:4px 6px">계정</th>';
+            html += '<th style="text-align:left;padding:4px 6px">댓글</th>';
+            html += '<th style="text-align:left;padding:4px 6px">대댓글</th>';
+            html += '</tr></thead><tbody>';
+            for (const t of data.tasks) {
+                html += `<tr>
+                    <td style="padding:4px 6px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.video_title || '-'}</td>
+                    <td style="padding:4px 6px">${t.account || '-'}</td>
+                    <td style="padding:4px 6px;color:var(--text-dim);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.comment_preview || '-'}</td>
+                    <td style="padding:4px 6px;color:var(--accent-light);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.reply_preview || '-'}</td>
+                </tr>`;
+            }
+            html += '</tbody></table>';
+            body.innerHTML = html;
+        } catch (e) {
+            body.innerHTML = `<div style="color:var(--red);padding:8px">오류: ${e.message}</div>`;
+        }
+    }
+
+    async function startReplyAutomation() {
+        const limit = parseInt(document.getElementById('replyLimit').value);
+        if (limit === 0 && !confirm('대댓글 전체 실행을 시작합니다. 계속하시겠습니까?')) return;
+
+        const res = await api('/api/reply/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ limit: limit || 0 })
+        });
+        if (res && !res.error) {
+            document.getElementById('btnReplyStart').disabled = true;
+            document.getElementById('btnReplyStop').disabled = false;
+        } else if (res && res.error) {
+            alert(res.error);
+        }
+    }
+
+    async function stopReplyAutomation() {
+        await api('/api/reply/stop', { method: 'POST' });
+        document.getElementById('btnReplyStart').disabled = false;
+        document.getElementById('btnReplyStop').disabled = true;
+    }
+
+    async function pollReplyStatus() {
+        const data = await api('/api/reply/status');
+        if (!data) return;
+
+        const dot = document.getElementById('replyDot');
+        const fill = document.getElementById('replyProgressFill');
+        const statusText = document.getElementById('replyStatusText');
+        const label = document.getElementById('replyProgressLabel');
+
+        document.getElementById('btnReplyStart').disabled = data.running;
+        document.getElementById('btnReplyStop').disabled = !data.running;
+        document.getElementById('replySuccess').textContent = `성공 ${data.results.success}`;
+        document.getElementById('replyFail').textContent = `실패 ${data.results.fail}`;
+
+        const pct = data.total > 0 ? Math.round((data.progress / data.total) * 100) : 0;
+        fill.style.width = pct + '%';
+
+        if (data.running) {
+            dot.className = 'status-dot running';
+            statusText.textContent = '실행 중';
+            statusText.style.color = 'var(--green)';
+            fill.style.background = 'linear-gradient(90deg, var(--accent), var(--accent-light))';
+            label.textContent = data.current_task
+                ? `${data.progress}/${data.total}: ${data.current_task}`
+                : `${data.progress}/${data.total}`;
+        } else if (data.total > 0 && data.progress >= data.total) {
+            dot.className = 'status-dot';
+            dot.style.background = 'var(--green)';
+            statusText.textContent = '완료';
+            statusText.style.color = 'var(--green)';
+            fill.style.background = 'var(--green)';
+            label.textContent = `대댓글 ${data.total}건 처리 완료`;
+        } else {
+            dot.className = 'status-dot stopped';
+            statusText.textContent = '대기 중';
+            statusText.style.color = 'var(--text-dim)';
+            fill.style.background = 'var(--border)';
+        }
+    }
+
     function updateStatusIndicator(running, label) {
         const el = document.getElementById('statusIndicator');
         if (running) {
@@ -1657,6 +1791,7 @@
 
     // ─── 상태 폴링 ───
     async function pollStatus() {
+        pollReplyStatus();
         const data = await api('/api/status');
         if (!data) return;
 

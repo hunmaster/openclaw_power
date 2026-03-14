@@ -31,6 +31,7 @@ class NotionManager:
         self.col_result_url = os.getenv("NOTION_COLUMN_COMMENT_RESULT_URL", "댓글 url")
         self.col_status = os.getenv("NOTION_COLUMN_STATUS", "상태")
         self.col_account = os.getenv("NOTION_COLUMN_ACCOUNT", "댓글 계정")
+        self.col_reply_text = os.getenv("NOTION_COLUMN_REPLY_TEXT", "대댓글 원고")
 
         # DB 스키마에서 실제 속성명 확인 및 자동 매칭
         self._db_properties = {}
@@ -91,29 +92,55 @@ class NotionManager:
 
             # 체크박스 컬럼 자동 탐색 ("댓글 완료"를 "대댓글 완료"보다 우선 매칭)
             self.col_checkbox = None
+            self.col_reply_checkbox = None
             checkbox_candidates = []
             for name, prop_info in self._db_properties.items():
                 if prop_info.get("type") == "checkbox" and "댓글" in name and "완료" in name:
                     checkbox_candidates.append(name)
             if checkbox_candidates:
-                # "대댓글"이 아닌 것을 우선 선택
+                # "대댓글"이 아닌 것을 댓글 완료 체크박스로
                 for name in checkbox_candidates:
                     if "대댓글" not in name:
                         self.col_checkbox = name
                         break
                 if not self.col_checkbox:
                     self.col_checkbox = checkbox_candidates[0]
-                console.print(f"[dim]체크박스 컬럼 발견: '{self.col_checkbox}'[/dim]")
+                # "대댓글"이 포함된 것을 대댓글 완료 체크박스로
+                for name in checkbox_candidates:
+                    if "대댓글" in name:
+                        self.col_reply_checkbox = name
+                        break
+                console.print(f"[dim]체크박스 컬럼 발견: 댓글='{self.col_checkbox}', 대댓글='{self.col_reply_checkbox}'[/dim]")
+
+            # 대댓글 원고 컬럼 자동 탐색
+            reply_col = find_exact_or_icase(self.col_reply_text, prop_names)
+            if reply_col:
+                self.col_reply_text = reply_col
+            else:
+                # 키워드 기반 자동 탐색 (대댓글 + 원고/텍스트)
+                for name in prop_names:
+                    if "대댓글" in name and ("원고" in name or "텍스트" in name or "내용" in name):
+                        self.col_reply_text = name
+                        break
+            console.print(f"[dim]대댓글 원고 컬럼: '{self.col_reply_text}'[/dim]")
 
             console.print(f"[dim]DB 속성 목록: {', '.join(prop_names)}[/dim]")
 
         except Exception as e:
             console.print(f"[yellow]DB 스키마 조회 실패 (기본 컬럼명 사용): {e}[/yellow]")
             self.col_checkbox = "댓글 완료"  # 기본값
+            self.col_reply_checkbox = "대댓글 완료"  # 기본값
 
     def get_pending_tasks(self):
         """상태가 '댓글작업전'인 작업을 전부 가져옵니다 (페이지네이션)."""
         return self._get_all_tasks_by_status("댓글작업전")
+
+    def get_reply_pending_tasks(self):
+        """상태가 '댓글완료'이고 대댓글 원고가 있는 작업을 가져옵니다."""
+        tasks = self._get_all_tasks_by_status("댓글완료")
+        reply_tasks = [t for t in tasks if t.get("reply_text") and t.get("result_url")]
+        console.print(f"[green]대댓글 대기 작업: {len(reply_tasks)}개 (대댓글 원고+댓글URL 있음)[/green]")
+        return reply_tasks
 
     def _get_all_tasks_by_status(self, status_value):
         """페이지네이션으로 해당 상태의 작업을 전부 가져옵니다."""
@@ -375,6 +402,10 @@ class NotionManager:
         comment_prop = props.get(self.col_comment_text, {})
         task["comment_text"] = self._extract_text(comment_prop)
 
+        # 대댓글 원고 추출
+        reply_prop = props.get(self.col_reply_text, {})
+        task["reply_text"] = self._extract_text(reply_prop)
+
         # 상태 추출
         status_prop = props.get(self.col_status, {})
         task["status"] = self._extract_status(status_prop)
@@ -580,6 +611,49 @@ class NotionManager:
             console.print(f"[dim]체크박스 '{checkbox_name}' 업데이트됨[/dim]")
         except Exception:
             console.print(f"[dim]체크박스 '{checkbox_name}' 업데이트 실패 (무시)[/dim]")
+
+    def update_reply_result(self, page_id):
+        """대댓글 작성 완료 후 노션 업데이트: 상태→대댓글완료 + 대댓글 완료 체크박스 체크.
+        Returns:
+            (True, "") on success
+            (False, "에러 메시지") on failure
+        """
+        reply_cb = getattr(self, "col_reply_checkbox", None)
+
+        # 시도 순서: select+checkbox, select만, status+checkbox, status만
+        attempts = []
+        for st in ["select", "status"]:
+            if reply_cb:
+                attempts.append((st, True))
+            attempts.append((st, False))
+
+        last_err = ""
+        for status_type, inc_cb in attempts:
+            props = {}
+            if status_type == "select":
+                props[self.col_status] = {"select": {"name": "대댓글완료"}}
+            else:
+                props[self.col_status] = {"status": {"name": "대댓글완료"}}
+            if inc_cb and reply_cb:
+                props[reply_cb] = {"checkbox": True}
+
+            try:
+                self.client.pages.update(page_id=page_id, properties=props)
+                console.print(f"[dim]대댓글 완료 업데이트 성공 ({status_type}{'+cb' if inc_cb else ''})[/dim]")
+                return (True, "")
+            except Exception as e:
+                last_err = str(e)
+
+        # 체크박스만이라도 시도
+        if reply_cb:
+            try:
+                self.client.pages.update(page_id=page_id, properties={reply_cb: {"checkbox": True}})
+                console.print(f"[dim]대댓글 체크박스만 업데이트됨[/dim]")
+            except Exception:
+                pass
+
+        console.print(f"[red]대댓글 완료 업데이트 실패: {last_err}[/red]")
+        return (False, last_err)
 
     def get_completed_video_urls(self):
         """이미 댓글 작업이 완료된 영상들의 video ID 세트를 반환합니다.

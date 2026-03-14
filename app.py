@@ -45,6 +45,16 @@ automation_state = {
 }
 automation_lock = threading.Lock()
 
+# 대댓글 자동화 상태
+reply_state = {
+    "running": False,
+    "current_task": None,
+    "progress": 0,
+    "total": 0,
+    "results": {"success": 0, "fail": 0, "skip": 0},
+}
+reply_lock = threading.Lock()
+
 # 작업 목록 캐시 (매번 노션 API 전체 조회 방지) — 멀티 키 지원
 # { "status:date": {"tasks": [...], "fetched_at": timestamp}, ... }
 _task_cache = {}
@@ -423,6 +433,71 @@ def api_stop():
     automation_state["running"] = False
     add_log("사용자가 자동화를 중지했습니다.", "warning")
     return jsonify({"message": "중지 요청이 전송되었습니다."})
+
+
+@app.route("/api/reply/run", methods=["POST"])
+def api_reply_run():
+    """대댓글 자동화를 백그라운드에서 시작합니다."""
+    with reply_lock:
+        if reply_state["running"]:
+            return jsonify({"error": "대댓글 자동화가 이미 실행 중입니다."}), 409
+        if automation_state["running"]:
+            return jsonify({"error": "댓글 자동화가 실행 중입니다. 완료 후 시도하세요."}), 409
+
+        reply_state["running"] = True
+        reply_state["progress"] = 0
+        reply_state["results"] = {"success": 0, "fail": 0, "skip": 0}
+
+    data = request.get_json(silent=True) or {}
+    limit = data.get("limit", 0)
+
+    thread = threading.Thread(target=_run_reply_automation, args=(limit,), daemon=True)
+    thread.start()
+
+    mode = f"테스트 ({limit}건)" if limit > 0 else "전체 실행"
+    return jsonify({"message": f"대댓글 자동화가 시작되었습니다. [{mode}]"})
+
+
+@app.route("/api/reply/stop", methods=["POST"])
+def api_reply_stop():
+    """대댓글 자동화를 중지합니다."""
+    reply_state["running"] = False
+    add_log("[대댓글] 사용자가 대댓글 자동화를 중지했습니다.", "warning")
+    return jsonify({"message": "대댓글 자동화 중지 요청이 전송되었습니다."})
+
+
+@app.route("/api/reply/status")
+def api_reply_status():
+    """대댓글 자동화 상태를 반환합니다."""
+    return jsonify({
+        "running": reply_state["running"],
+        "progress": reply_state["progress"],
+        "total": reply_state["total"],
+        "current_task": reply_state["current_task"],
+        "results": reply_state["results"],
+    })
+
+
+@app.route("/api/reply/preview")
+def api_reply_preview():
+    """대댓글 대기 작업 목록을 미리보기합니다."""
+    try:
+        notion = NotionManager()
+        tasks = notion.get_reply_pending_tasks()
+        items = []
+        for t in tasks:
+            items.append({
+                "page_id": t.get("page_id", ""),
+                "video_title": t.get("video_title", ""),
+                "youtube_url": t.get("youtube_url", ""),
+                "account": t.get("account", ""),
+                "comment_preview": (t.get("comment_text", "")[:30] + "...") if len(t.get("comment_text", "")) > 30 else t.get("comment_text", ""),
+                "reply_preview": (t.get("reply_text", "")[:30] + "...") if len(t.get("reply_text", "")) > 30 else t.get("reply_text", ""),
+                "result_url": t.get("result_url", ""),
+            })
+        return jsonify({"tasks": items, "count": len(items)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/duplicate-scan", methods=["POST"])
@@ -1081,7 +1156,7 @@ def _run_automation(limit=0, selected_ids=None):
                     else:
                         add_log(f"[2/3 노션 반영 실패] {notion_err}", "warning")
 
-                    # ── 3단계: 즉시 좋아요 주문 ──
+                    # ── 3단계: 즉시 좋아요 주문 (상태는 댓글완료 유지 → 대댓글 대기) ──
                     if smm_client.enabled:
                         automation_state["current_task"] = f"[3/3 좋아요] {task_url_short}"
                         add_log(f"[3/3 좋아요 주문 중] {comment_url[:50]}...", "info")
@@ -1089,12 +1164,6 @@ def _run_automation(limit=0, selected_ids=None):
                         if single.get("success"):
                             automation_state["results"]["likes"] += 1
                             add_log(f"[3/3 좋아요 주문 성공] 주문ID: {single.get('order_id')}", "success")
-                            # 즉시 노션에 좋아요작업완료 반영
-                            try:
-                                notion.update_task_status(task["page_id"], "좋아요작업완료")
-                                add_log("[3/3 노션 반영 완료] 상태→좋아요작업완료", "success")
-                            except Exception as le:
-                                add_log(f"[3/3 노션 반영 실패] 좋아요작업완료: {le}", "warning")
                         else:
                             err = single.get("error", "?")
                             add_log(f"[3/3 좋아요 주문 실패] {err}", "warning")
@@ -1106,6 +1175,7 @@ def _run_automation(limit=0, selected_ids=None):
                                 )
                     else:
                         add_log("[3/3 좋아요] SMM 비활성화 - 건너뜀", "info")
+                    # 상태는 '댓글완료' 유지 (추후 대댓글 자동화에서 처리)
 
                     safety_rules.record_comment(current_label, task["youtube_url"], task["comment_text"])
                     automation_state["results"]["success"] += 1
@@ -1218,6 +1288,142 @@ def _run_full_auto():
         automation_state["running"] = False
         automation_state["full_auto"] = False
         automation_state["current_task"] = None
+
+
+def _run_reply_automation(limit=0):
+    """백그라운드에서 대댓글 자동화를 실행합니다."""
+    import time
+    from src.youtube_bot import YouTubeBot
+
+    test_mode = limit > 0
+
+    try:
+        mode_label = f"[대댓글 테스트 {limit}건]" if test_mode else "[대댓글 전체 실행]"
+        add_log(f"=== 대댓글 자동화 시작 {mode_label} ===", "info")
+
+        notion = NotionManager()
+        proxy_manager = ProxyManager()
+        fingerprint_manager = FingerprintManager()
+        accounts = load_accounts()
+
+        if not accounts:
+            add_log("[대댓글] 계정이 없습니다.", "error")
+            reply_state["running"] = False
+            return
+
+        tasks = notion.get_reply_pending_tasks()
+        if not tasks:
+            add_log("[대댓글] 대댓글 대기 작업이 없습니다. (댓글완료 + 대댓글 원고 필요)", "warning")
+            reply_state["running"] = False
+            return
+
+        if test_mode and len(tasks) > limit:
+            add_log(f"[대댓글] 테스트 모드: 전체 {len(tasks)}건 중 {limit}건만 실행", "warning")
+            tasks = tasks[:limit]
+
+        reply_state["total"] = len(tasks)
+        add_log(f"[대댓글] 총 {len(tasks)}개 작업 발견", "info")
+
+        comment_interval = int(os.getenv("COMMENT_INTERVAL_SEC", "180"))
+        delay_ip_change = int(os.getenv("DELAY_AFTER_IP_CHANGE", "3"))
+        prev_account_label = None
+
+        for i, task in enumerate(tasks):
+            if not reply_state["running"]:
+                add_log("[대댓글] 사용자에 의해 중지됨", "warning")
+                break
+
+            reply_state["progress"] = i + 1
+            task_url_short = task.get("youtube_url", "")[:50]
+            reply_state["current_task"] = task_url_short
+
+            # 계정 결정
+            account = None
+            account_label = task.get("account", "")
+            for acc in accounts:
+                if acc.get("label") == account_label or acc.get("email", "").startswith(account_label):
+                    account = acc
+                    break
+            if not account:
+                account = accounts[0]
+
+            current_label = account.get("label", account.get("email", "unknown"))
+
+            # 대기 시간
+            if prev_account_label and prev_account_label != current_label:
+                add_log(f"[대댓글] 계정 전환: {prev_account_label} → {current_label} ({delay_ip_change}초 대기)", "info")
+                time.sleep(delay_ip_change)
+            elif prev_account_label == current_label and i > 0:
+                add_log(f"[대댓글] 같은 계정 연속 - {comment_interval}초 대기", "info")
+                time.sleep(comment_interval)
+
+            # 프록시 설정
+            proxy_config = None
+            if account.get("account_type") == "sub":
+                proxy_url = proxy_manager.get_proxy_for_account(current_label)
+                if proxy_url:
+                    proxy_config = proxy_manager.parse_proxy_for_playwright(proxy_url)
+
+            bot = YouTubeBot(
+                proxy_config=proxy_config,
+                fingerprint_manager=fingerprint_manager,
+                account_label=current_label,
+            )
+            try:
+                reply_state["current_task"] = f"[브라우저 시작] {task_url_short}"
+                add_log(f"[대댓글] 작업 {i+1}/{len(tasks)}: {task['youtube_url'][:50]}...", "info")
+                bot.start_browser()
+
+                reply_state["current_task"] = f"[로그인 중] {current_label}"
+                login_ok = bot.login_youtube(account["email"], account["password"])
+                if not login_ok:
+                    add_log(f"[대댓글] 로그인 실패: {current_label}", "error")
+                    reply_state["results"]["fail"] += 1
+                    continue
+
+                comment_url = task.get("result_url", "")
+                reply_text = task.get("reply_text", "")
+
+                reply_state["current_task"] = f"[대댓글 작성 중] {task_url_short}"
+                add_log(f"[대댓글] 대댓글 작성 중: {comment_url[:50]}...", "info")
+                success = bot.post_reply(comment_url, reply_text)
+
+                if success:
+                    add_log(f"[대댓글] 대댓글 작성 성공", "success")
+
+                    # 노션 업데이트: 상태→대댓글완료 + 대댓글 완료 체크박스
+                    reply_state["current_task"] = f"[노션 반영] {task_url_short}"
+                    ok, err = notion.update_reply_result(task["page_id"])
+                    if ok:
+                        add_log("[대댓글] 노션 반영 완료: 대댓글완료", "success")
+                    else:
+                        add_log(f"[대댓글] 노션 반영 실패: {err}", "warning")
+
+                    reply_state["results"]["success"] += 1
+                    add_log(f"[대댓글] --- 작업 {i+1}/{len(tasks)} 완료 ---", "success")
+                else:
+                    reply_state["results"]["fail"] += 1
+                    add_log("[대댓글] 대댓글 작성 실패", "error")
+
+            except Exception as e:
+                reply_state["results"]["fail"] += 1
+                add_log(f"[대댓글] 오류: {str(e)}", "error")
+            finally:
+                bot.close_browser()
+                prev_account_label = current_label
+
+        add_log(
+            f"[대댓글 완료] 성공: {reply_state['results']['success']}, "
+            f"실패: {reply_state['results']['fail']}, "
+            f"건너뜀: {reply_state['results']['skip']}",
+            "success" if reply_state['results']['success'] > 0 else "warning",
+        )
+
+    except Exception as e:
+        add_log(f"[대댓글] 자동화 오류: {str(e)}", "error")
+    finally:
+        reply_state["running"] = False
+        reply_state["current_task"] = None
 
 
 if __name__ == "__main__":

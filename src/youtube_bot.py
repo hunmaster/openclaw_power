@@ -394,6 +394,98 @@ class YouTubeBot:
             console.print(f"[red]댓글 작성 실패: {e}[/red]")
             return None
 
+    def post_reply(self, comment_url, reply_text):
+        """
+        기존 댓글에 대댓글을 작성합니다.
+        comment_url: https://www.youtube.com/watch?v=VIDEO_ID&lc=COMMENT_ID
+        reply_text: 대댓글 텍스트
+
+        Returns:
+            bool: 성공 여부
+        """
+        console.print(f"[blue]댓글 페이지 접속: {comment_url}[/blue]")
+
+        try:
+            self.page.goto(comment_url)
+            time.sleep(3)
+
+            # 쿠키 동의 팝업 처리
+            try:
+                accept_btn = self.page.query_selector(
+                    'button[aria-label*="Accept"], '
+                    'button[aria-label*="동의"], '
+                    'tp-yt-paper-button:has-text("동의")'
+                )
+                if accept_btn:
+                    accept_btn.click()
+                    time.sleep(1)
+            except Exception:
+                pass
+
+            # 댓글 섹션까지 스크롤
+            self.page.evaluate("window.scrollTo(0, 500)")
+            time.sleep(3)
+
+            # lc= 파라미터가 있으면 해당 댓글이 하이라이트됨
+            # 답글 버튼 찾기 - 하이라이트된 댓글의 답글 버튼
+            reply_btn = None
+
+            # 방법 1: 하이라이트된 댓글 스레드의 답글 버튼
+            try:
+                reply_btn = self.page.wait_for_selector(
+                    'ytd-comment-thread-renderer:first-child #reply-button-end button, '
+                    'ytd-comment-thread-renderer:first-child ytd-button-renderer#reply-button-end, '
+                    'ytd-comment-thread-renderer:first-child [id="reply-button-end"] button',
+                    timeout=10000,
+                )
+            except PlaywrightTimeout:
+                pass
+
+            # 방법 2: 첫 번째 댓글의 답글 버튼
+            if not reply_btn:
+                try:
+                    reply_btn = self.page.wait_for_selector(
+                        '#reply-button-end button, '
+                        'ytd-button-renderer#reply-button-end',
+                        timeout=5000,
+                    )
+                except PlaywrightTimeout:
+                    console.print("[red]답글 버튼을 찾을 수 없습니다[/red]")
+                    return False
+
+            reply_btn.click()
+            time.sleep(1)
+
+            # 답글 입력란에 텍스트 입력
+            reply_input = self.page.wait_for_selector(
+                '#contenteditable-root, '
+                'div[contenteditable="true"]',
+                timeout=10000,
+            )
+            reply_input.click()
+            self.page.keyboard.type(reply_text, delay=50)
+            time.sleep(1)
+
+            # 답글 게시 버튼 클릭
+            submit_btn = self.page.wait_for_selector(
+                '#submit-button ytd-button-renderer, '
+                '#reply-dialog #submit-button',
+                timeout=5000,
+            )
+            submit_btn.click()
+
+            console.print("[green]대댓글 작성 요청 전송됨[/green]")
+            time.sleep(self.delay_after_comment)
+
+            return True
+
+        except PlaywrightTimeout:
+            console.print("[red]대댓글 작성 시간 초과[/red]")
+            return False
+        except Exception as e:
+            console.print(f"[red]대댓글 작성 실패: {e}[/red]")
+            return False
+
     def _extract_comment_url(self, video_url):
         """
         작성된 댓글의 URL을 추출합니다.
