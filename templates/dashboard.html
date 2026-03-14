@@ -907,6 +907,34 @@
     </div>
 </div>
 
+<!-- 좋아요 관리자 컨펌 모달 -->
+<div id="likeApprovalModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:9998;justify-content:center;align-items:center">
+    <div style="background:var(--card);border:2px solid var(--yellow);border-radius:16px;padding:32px;text-align:center;min-width:420px;max-width:520px;box-shadow:0 8px 32px rgba(0,0,0,0.5)">
+        <div style="font-size:28px;margin-bottom:8px">&#9888;</div>
+        <div style="font-size:18px;font-weight:700;color:var(--yellow);margin-bottom:8px">좋아요 고수량 주문 컨펌</div>
+        <div style="font-size:13px;color:var(--text-dim);margin-bottom:20px">자동 상한(1000개)을 초과하는 주문입니다</div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:20px;text-align:left">
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+                <span style="color:var(--text-dim)">계산된 수량</span>
+                <span style="color:var(--yellow);font-weight:700;font-size:20px" id="approvalQty">-</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+                <span style="color:var(--text-dim)">상위 댓글 좋아요</span>
+                <span style="color:var(--text)" id="approvalTopLikes">-</span>
+            </div>
+            <div style="display:flex;justify-content:space-between">
+                <span style="color:var(--text-dim)">영상</span>
+                <span style="color:var(--blue);font-size:12px;max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="approvalVideo">-</span>
+            </div>
+        </div>
+        <div style="display:flex;gap:12px;justify-content:center">
+            <button onclick="approveLikes()" style="flex:1;padding:12px 24px;background:var(--green);color:#fff;border:none;border-radius:10px;font-weight:700;font-size:15px;cursor:pointer">승인 (계산 수량)</button>
+            <button onclick="denyLikes()" style="flex:1;padding:12px 24px;background:var(--border);color:var(--text);border:none;border-radius:10px;font-weight:600;font-size:15px;cursor:pointer">거부 (기본 수량)</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:12px">5분 내 미응답 시 기본 수량으로 자동 진행됩니다</div>
+    </div>
+</div>
+
 <!-- 페이지 초기화 오버레이 -->
 <div id="initOverlay" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(10,10,18,0.85);z-index:10000;display:flex;justify-content:center;align-items:center">
     <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:36px 48px;min-width:400px;max-width:480px;box-shadow:0 8px 32px rgba(0,0,0,0.5)">
@@ -2175,7 +2203,31 @@
     }
 
     // ─── 상태 폴링 ───
+    // ── 좋아요 관리자 컨펌 ──
+    async function pollLikeApproval() {
+        const data = await api('/api/likes/approval');
+        if (!data) return;
+        const modal = document.getElementById('likeApprovalModal');
+        if (data.pending) {
+            document.getElementById('approvalQty').textContent = data.calculated_qty.toLocaleString() + '개';
+            document.getElementById('approvalTopLikes').textContent = data.top_likes.join(', ');
+            document.getElementById('approvalVideo').textContent = data.video_url || '-';
+            modal.style.display = 'flex';
+        } else {
+            modal.style.display = 'none';
+        }
+    }
+    async function approveLikes() {
+        await api('/api/likes/approve', 'POST');
+        document.getElementById('likeApprovalModal').style.display = 'none';
+    }
+    async function denyLikes() {
+        await api('/api/likes/deny', 'POST');
+        document.getElementById('likeApprovalModal').style.display = 'none';
+    }
+
     async function pollStatus() {
+        pollLikeApproval();
         pollReplyStatus();
         const data = await api('/api/status');
         if (!data) return;

@@ -48,6 +48,18 @@ automation_state = {
 }
 automation_lock = threading.Lock()
 
+# 좋아요 관리자 컨펌 대기 상태
+like_approval_state = {
+    "pending": False,          # 컨펌 대기 중 여부
+    "approved": False,         # 승인됨
+    "denied": False,           # 거부됨
+    "comment_url": None,       # 대상 댓글 URL
+    "page_id": None,           # 노션 페이지 ID
+    "calculated_qty": 0,       # 계산된 좋아요 수
+    "top_likes": [],           # 상위 댓글 좋아요 수
+    "video_url": None,         # 영상 URL
+}
+
 # 대댓글 자동화 상태
 reply_state = {
     "running": False,
@@ -707,6 +719,71 @@ def _mask_key(value, visible=4):
     return value[:visible] + "*" * (len(value) - visible)
 
 
+# ──────────────────────────── 좋아요 관리자 컨펌 API ────────────────────────────
+
+@app.route("/api/likes/approval")
+def api_likes_approval_status():
+    """좋아요 관리자 컨펌 대기 상태를 조회합니다."""
+    return jsonify(like_approval_state)
+
+
+@app.route("/api/likes/approve", methods=["POST"])
+def api_likes_approve():
+    """관리자가 고수량 좋아요 주문을 승인합니다."""
+    like_approval_state["approved"] = True
+    like_approval_state["denied"] = False
+    add_log(f"[관리자 승인] 좋아요 {like_approval_state['calculated_qty']}개 주문 승인됨", "success")
+    return jsonify({"success": True, "message": "승인됨"})
+
+
+@app.route("/api/likes/deny", methods=["POST"])
+def api_likes_deny():
+    """관리자가 고수량 좋아요 주문을 거부합니다 (기본 수량으로 진행)."""
+    like_approval_state["denied"] = True
+    like_approval_state["approved"] = False
+    add_log(f"[관리자 거부] 좋아요 기본 수량으로 진행", "info")
+    return jsonify({"success": True, "message": "거부됨 - 기본 수량으로 진행"})
+
+
+def _calculate_dynamic_likes(top_likes, default_qty):
+    """
+    상위 댓글 좋아요 수를 기반으로 동적 좋아요 수량을 계산합니다.
+
+    전략:
+    - 상위 3~5개 댓글의 좋아요 중간값을 기준으로 설정
+    - 최소: 기본 수량 (SMM_LIKE_QUANTITY)
+    - 자동 상한: SMM_LIKE_AUTO_MAX (기본 1000)
+    - 1000 초과 시: 관리자 컨펌 필요
+
+    Args:
+        top_likes: 상위 댓글 좋아요 수 리스트 (높은 순)
+        default_qty: 기본 좋아요 수량
+
+    Returns:
+        int: 주문할 좋아요 수량
+    """
+    if not top_likes:
+        return default_qty
+
+    # 0이 아닌 좋아요만 필터링
+    nonzero = [n for n in top_likes if n > 0]
+    if not nonzero:
+        return default_qty
+
+    # 중간값 기준 (상위 댓글 좋아요의 중간값 + 약간의 버퍼)
+    nonzero.sort()
+    median_idx = len(nonzero) // 2
+    median_likes = nonzero[median_idx]
+
+    # 중간값의 110%를 목표로 (상위 노출을 위해 살짝 높게)
+    target = int(median_likes * 1.1)
+
+    # 최소값 보장
+    target = max(target, default_qty)
+
+    return target
+
+
 @app.route("/api/settings", methods=["GET"])
 def api_get_settings():
     """현재 설정값을 반환합니다."""
@@ -717,6 +794,7 @@ def api_get_settings():
         "SMM_ENABLED": os.getenv("SMM_ENABLED", "false"),
         "SMM_LIKE_SERVICE_ID": os.getenv("SMM_LIKE_SERVICE_ID", "4001"),
         "SMM_LIKE_QUANTITY": os.getenv("SMM_LIKE_QUANTITY", "20"),
+        "SMM_LIKE_AUTO_MAX": os.getenv("SMM_LIKE_AUTO_MAX", "1000"),
         "MAX_COMMENTS_PER_DAY": os.getenv("MAX_COMMENTS_PER_DAY", "20"),
         "COMMENT_INTERVAL_SEC": os.getenv("COMMENT_INTERVAL_SEC", "180"),
         "SAME_VIDEO_INTERVAL_MIN": os.getenv("SAME_VIDEO_INTERVAL_MIN", "30"),
@@ -1469,14 +1547,83 @@ def _run_automation(limit=0, selected_ids=None):
                     else:
                         add_log(f"[2/3 노션 반영 실패] {notion_err}", "warning")
 
-                    # ── 3단계: 즉시 좋아요 주문 (상태는 댓글완료 유지 → 대댓글 대기) ──
+                    # ── 3단계: 동적 좋아요 주문 ──
                     if smm_client.enabled:
-                        automation_state["current_task"] = f"[3/3 좋아요] {task_url_short}"
-                        add_log(f"[3/3 좋아요 주문 중] {comment_url[:50]}...", "info")
-                        single = smm_client.order_likes(comment_url)
+                        automation_state["current_task"] = f"[3/3 좋아요 분석] {task_url_short}"
+                        like_auto_max = int(os.getenv("SMM_LIKE_AUTO_MAX", "1000"))
+                        default_qty = int(os.getenv("SMM_LIKE_QUANTITY", "20"))
+
+                        # 상위 댓글 좋아요 스크래핑
+                        top_likes = bot.get_top_comment_likes(count=5)
+                        dynamic_qty = _calculate_dynamic_likes(top_likes, default_qty)
+
+                        # 로그: 분석 결과
+                        if top_likes:
+                            add_log(
+                                f"[3/3 좋아요 분석] 상위 댓글 좋아요: {top_likes} → "
+                                f"목표 수량: {dynamic_qty}개",
+                                "info"
+                            )
+                        else:
+                            add_log(f"[3/3 좋아요] 상위 댓글 분석 실패 → 기본 수량 {default_qty}개", "info")
+
+                        # 자동 상한 초과 시 관리자 컨펌 대기
+                        final_qty = dynamic_qty
+                        if dynamic_qty > like_auto_max:
+                            add_log(
+                                f"[관리자 컨펌 필요] 좋아요 {dynamic_qty}개 > 자동 상한 {like_auto_max}개 | "
+                                f"대시보드에서 승인/거부 대기 중...",
+                                "warning"
+                            )
+                            # 컨펌 상태 설정
+                            like_approval_state.update({
+                                "pending": True,
+                                "approved": False,
+                                "denied": False,
+                                "comment_url": comment_url,
+                                "page_id": task["page_id"],
+                                "calculated_qty": dynamic_qty,
+                                "top_likes": top_likes,
+                                "video_url": task["youtube_url"],
+                            })
+                            automation_state["current_task"] = f"[컨펌 대기] 좋아요 {dynamic_qty}개"
+
+                            # 최대 5분 대기 (5초 간격 폴링)
+                            approval_timeout = 300
+                            waited = 0
+                            while waited < approval_timeout and automation_state["running"]:
+                                if like_approval_state["approved"]:
+                                    final_qty = dynamic_qty
+                                    add_log(f"[관리자 승인] 좋아요 {dynamic_qty}개 주문 진행", "success")
+                                    break
+                                elif like_approval_state["denied"]:
+                                    final_qty = default_qty
+                                    add_log(f"[관리자 거부] 기본 수량 {default_qty}개로 진행", "info")
+                                    break
+                                time.sleep(5)
+                                waited += 5
+
+                            # 타임아웃: 기본 수량으로 진행
+                            if waited >= approval_timeout and not like_approval_state["approved"]:
+                                final_qty = default_qty
+                                add_log(f"[컨펌 타임아웃] 5분 초과 → 기본 수량 {default_qty}개로 진행", "warning")
+
+                            # 상태 초기화
+                            like_approval_state.update({
+                                "pending": False, "approved": False, "denied": False,
+                                "comment_url": None, "page_id": None,
+                                "calculated_qty": 0, "top_likes": [], "video_url": None,
+                            })
+
+                        automation_state["current_task"] = f"[3/3 좋아요 {final_qty}개] {task_url_short}"
+                        add_log(f"[3/3 좋아요 주문 중] {final_qty}개 | {comment_url[:50]}...", "info")
+                        single = smm_client.order_likes(comment_url, quantity=final_qty)
                         if single.get("success"):
                             automation_state["results"]["likes"] += 1
-                            add_log(f"[3/3 좋아요 주문 성공] 주문ID: {single.get('order_id')}", "success")
+                            add_log(
+                                f"[3/3 좋아요 주문 성공] {final_qty}개 | 주문ID: {single.get('order_id')}",
+                                "success"
+                            )
                             # 좋아요 완료 체크박스 체크
                             try:
                                 notion.update_like_checkbox(task["page_id"])

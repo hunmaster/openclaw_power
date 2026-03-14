@@ -526,3 +526,62 @@ class YouTubeBot:
             video_id = video_id_match.group(1)
             return f"https://www.youtube.com/watch?v={video_id}"
         return video_url
+
+    def get_top_comment_likes(self, count=5):
+        """
+        현재 페이지의 상위 댓글 좋아요 수를 스크래핑합니다.
+        post_comment() 이후 페이지가 열린 상태에서 호출해야 합니다.
+
+        Args:
+            count: 스크래핑할 상위 댓글 수 (기본 5개)
+
+        Returns:
+            list[int]: 좋아요 수 리스트 (높은 순 정렬), 실패 시 빈 리스트
+        """
+        try:
+            # 댓글 섹션이 로드되어 있는 상태에서 좋아요 수 추출
+            likes_list = self.page.evaluate(f"""
+                (() => {{
+                    const comments = document.querySelectorAll(
+                        'ytd-comment-thread-renderer #vote-count-middle'
+                    );
+                    const result = [];
+                    for (let i = 0; i < Math.min(comments.length, {count}); i++) {{
+                        const text = comments[i].innerText.trim();
+                        result.push(text);
+                    }}
+                    return result;
+                }})()
+            """)
+
+            parsed = []
+            for text in likes_list:
+                parsed.append(self._parse_like_count(text))
+            parsed.sort(reverse=True)
+
+            console.print(f"[blue]상위 댓글 좋아요: {parsed}[/blue]")
+            return parsed
+
+        except Exception as e:
+            console.print(f"[yellow]좋아요 스크래핑 실패: {e}[/yellow]")
+            return []
+
+    @staticmethod
+    def _parse_like_count(text):
+        """좋아요 텍스트를 숫자로 변환 (예: '1.2천' → 1200)"""
+        if not text or text.strip() == "":
+            return 0
+        text = text.strip()
+        try:
+            if "천" in text:
+                return int(float(text.replace("천", "").strip()) * 1000)
+            elif "만" in text:
+                return int(float(text.replace("만", "").strip()) * 10000)
+            elif "K" in text.upper():
+                return int(float(text.upper().replace("K", "").strip()) * 1000)
+            elif "M" in text.upper():
+                return int(float(text.upper().replace("M", "").strip()) * 1000000)
+            else:
+                return int(text.replace(",", ""))
+        except (ValueError, AttributeError):
+            return 0
