@@ -690,7 +690,16 @@
 
         <div class="card" style="margin-top:16px">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-                <h3 style="margin:0;font-size:15px">등록된 댓글</h3>
+                <div style="display:flex;align-items:center;gap:10px">
+                    <h3 style="margin:0;font-size:15px">등록된 댓글</h3>
+                    <select id="trackFilter" onchange="applyTrackFilter()" style="font-size:12px;padding:3px 8px;border-radius:6px;border:1px solid var(--border);background:var(--card-bg);color:var(--text);cursor:pointer">
+                        <option value="all">전체</option>
+                        <option value="active">정상노출</option>
+                        <option value="hidden">숨김</option>
+                        <option value="unchecked">미확인</option>
+                        <option value="reposted">리포스팅됨</option>
+                    </select>
+                </div>
                 <div style="display:flex;gap:8px;align-items:center">
                     <span id="trackSelectedCount" style="font-size:12px;color:var(--accent-light);display:none"></span>
                     <span id="repostHint" style="font-size:11px;color:var(--text-dim);margin-right:4px">숨김 댓글 발견 시 리포스팅 버튼이 여기에 표시됩니다</span>
@@ -2868,7 +2877,7 @@
                     onclick="repostSingleComment('${c.comment_id}')">리포스팅</button>`
                 : '';
 
-            return `<tr style="border-bottom:1px solid var(--border)${c.status === 'hidden' ? ';background:rgba(255,59,48,0.05)' : ''}">
+            return `<tr data-status="${c.status}" data-checks="${c.total_checks || 0}" style="border-bottom:1px solid var(--border)${c.status === 'hidden' ? ';background:rgba(255,59,48,0.05)' : ''}">
                 <td style="padding:8px;text-align:center">
                     <input type="checkbox" class="track-select-cb" data-cid="${c.comment_id}"
                         onchange="updateTrackSelection()" style="cursor:pointer">
@@ -2895,11 +2904,41 @@
                 </td>
             </tr>`;
         }).join('');
+
+        // 현재 필터 다시 적용
+        applyTrackFilter();
+    }
+
+    function applyTrackFilter() {
+        const filter = document.getElementById('trackFilter').value;
+        const rows = document.querySelectorAll('#trackingTableBody tr[data-status]');
+        let visibleCount = 0;
+
+        rows.forEach(row => {
+            const status = row.dataset.status;
+            const checks = parseInt(row.dataset.checks || '0');
+            let show = false;
+
+            if (filter === 'all') show = true;
+            else if (filter === 'unchecked') show = checks === 0 && status !== 'deleted' && status !== 'reposted';
+            else show = status === filter;
+
+            row.style.display = show ? '' : 'none';
+            if (show) visibleCount++;
+        });
+
+        // 전체선택 체크박스 초기화
+        const selectAll = document.getElementById('trackSelectAll');
+        if (selectAll) selectAll.checked = false;
+        updateTrackSelection();
     }
 
     function toggleTrackSelectAll(masterCb) {
-        document.querySelectorAll('.track-select-cb').forEach(cb => {
-            cb.checked = masterCb.checked;
+        // 현재 보이는(필터된) 행의 체크박스만 선택/해제
+        document.querySelectorAll('#trackingTableBody tr[data-status]').forEach(row => {
+            if (row.style.display === 'none') return;
+            const cb = row.querySelector('.track-select-cb');
+            if (cb) cb.checked = masterCb.checked;
         });
         updateTrackSelection();
     }
@@ -2917,12 +2956,16 @@
             countEl.style.display = 'none';
             btnSelected.style.display = 'none';
         }
-        // 전체 선택 체크박스 상태 동기화
-        const allCbs = document.querySelectorAll('.track-select-cb');
+        // 보이는 행 기준으로 전체 선택 체크박스 상태 동기화
+        const visibleCbs = Array.from(document.querySelectorAll('#trackingTableBody tr[data-status]'))
+            .filter(row => row.style.display !== 'none')
+            .map(row => row.querySelector('.track-select-cb'))
+            .filter(Boolean);
+        const visibleChecked = visibleCbs.filter(cb => cb.checked);
         const masterCb = document.getElementById('trackSelectAll');
         if (masterCb) {
-            masterCb.checked = allCbs.length > 0 && checked.length === allCbs.length;
-            masterCb.indeterminate = checked.length > 0 && checked.length < allCbs.length;
+            masterCb.checked = visibleCbs.length > 0 && visibleChecked.length === visibleCbs.length;
+            masterCb.indeterminate = visibleChecked.length > 0 && visibleChecked.length < visibleCbs.length;
         }
     }
 
