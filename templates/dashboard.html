@@ -371,6 +371,10 @@
                     <span style="color:#e17055" id="progressDuplicate">중복 0</span>
                 </div>
             </div>
+            <!-- 미니 실시간 로그 -->
+            <div id="miniLogWrap" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+                <div id="miniLogBody" style="font-size:12px;line-height:1.7;font-family:monospace;max-height:90px;overflow:hidden"></div>
+            </div>
         </div>
 
         <!-- 대댓글 자동화 패널 -->
@@ -2256,6 +2260,26 @@
             if (wasAtBottom) {
                 container.scrollTop = container.scrollHeight;
             }
+        }
+
+        // 미니 실시간 로그 (대시보드 진행 패널 하단)
+        const miniLogWrap = document.getElementById('miniLogWrap');
+        const miniLogBody = document.getElementById('miniLogBody');
+        if (data.running && data.logs.length > 0) {
+            miniLogWrap.style.display = 'block';
+            const recentLogs = data.logs.slice(-4);
+            const colorMap = {
+                info: 'var(--text-dim)', success: 'var(--green)',
+                error: 'var(--red)', warning: 'var(--yellow)',
+            };
+            miniLogBody.innerHTML = recentLogs.map(log => {
+                const c = colorMap[log.level] || 'var(--text-dim)';
+                const icon = {info:'', success:'', error:'', warning:''}[log.level] || '';
+                return `<div style="color:${c};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">`
+                    + `<span style="opacity:0.5">${log.time}</span> ${icon} ${log.message}</div>`;
+            }).join('');
+        } else if (!data.running) {
+            miniLogWrap.style.display = 'none';
         }
     }
 
