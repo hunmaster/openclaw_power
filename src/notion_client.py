@@ -31,8 +31,47 @@ class NotionManager:
         self.col_result_url = os.getenv("NOTION_COLUMN_COMMENT_RESULT_URL", "댓글 url")
         self.col_status = os.getenv("NOTION_COLUMN_STATUS", "상태")
         self.col_account = os.getenv("NOTION_COLUMN_ACCOUNT", "댓글 계정")
+
+        # DB 스키마에서 실제 속성명 확인 및 자동 매칭
+        self._db_properties = {}
+        self._resolve_column_names()
+
         console.print(f"[dim]컬럼 설정: url='{self.col_youtube_url}', comment='{self.col_comment_text}', "
                       f"result='{self.col_result_url}', status='{self.col_status}', account='{self.col_account}'[/dim]")
+
+    def _resolve_column_names(self):
+        """DB 스키마를 조회하여 실제 속성명과 매칭합니다."""
+        try:
+            db_info = self.client.databases.retrieve(database_id=self.database_id)
+            self._db_properties = db_info.get("properties", {})
+            prop_names = set(self._db_properties.keys())
+
+            # 설정된 컬럼명이 DB에 없으면 자동 탐색
+            if self.col_result_url not in prop_names:
+                original = self.col_result_url
+                found = None
+                for name in prop_names:
+                    name_lower = name.lower().replace(" ", "")
+                    if "댓글" in name and "url" in name_lower:
+                        found = name
+                        break
+                if found:
+                    self.col_result_url = found
+                    console.print(f"[yellow]댓글 URL 컬럼 자동 매칭: '{original}' → '{found}'[/yellow]")
+                else:
+                    console.print(f"[yellow]⚠ 댓글 URL 컬럼 '{original}'이 DB에 없습니다. URL 저장이 생략됩니다.[/yellow]")
+                    self.col_result_url = None
+
+            if self.col_status not in prop_names:
+                original = self.col_status
+                for name in prop_names:
+                    if "상태" in name or "status" in name.lower():
+                        self.col_status = name
+                        console.print(f"[yellow]상태 컬럼 자동 매칭: '{original}' → '{name}'[/yellow]")
+                        break
+
+        except Exception as e:
+            console.print(f"[yellow]DB 스키마 조회 실패 (기본 컬럼명 사용): {e}[/yellow]")
 
     def get_pending_tasks(self):
         """상태가 '댓글작업전'인 작업을 전부 가져옵니다 (페이지네이션)."""
@@ -346,8 +385,9 @@ class NotionManager:
         self.last_error = ""
         properties = {}
 
-        # 댓글 URL 저장
-        if comment_url:
+        # 댓글 URL 저장 (col_result_url이 None이면 DB에 해당 속성 없음 → 건너뜀)
+        save_url = comment_url and self.col_result_url
+        if save_url:
             properties[self.col_result_url] = self._build_result_url_property(comment_url)
 
         # 1단계: select 타입 + rich_text(link) URL
@@ -360,9 +400,14 @@ class NotionManager:
         except Exception as e1:
             err1 = str(e1)[:120]
             console.print(f"[yellow]1단계(select) 실패: {err1}[/yellow]")
+            # URL 속성이 문제인 경우 URL 빼고 재시도
+            if save_url and "is not a property" in str(e1):
+                console.print(f"[yellow]댓글 URL 속성이 DB에 없음 → URL 제외하고 재시도[/yellow]")
+                self.col_result_url = None
+                return self.update_task_result(page_id, comment_url="", status=status)
 
         # 2단계: select + URL을 plain rich_text로 재시도
-        if comment_url:
+        if save_url:
             properties[self.col_result_url] = self._build_result_url_rich_text(comment_url)
         try:
             self.client.pages.update(page_id=page_id, properties=properties)
@@ -373,31 +418,31 @@ class NotionManager:
             err2 = str(e2)[:120]
             console.print(f"[yellow]2단계(select+plain) 실패: {err2}[/yellow]")
 
-        # 3단계: status 타입으로 시도
+        # 3단계: status 타입으로 시도 (URL 없이)
         try:
-            properties[self.col_status] = {"status": {"name": status}}
-            self.client.pages.update(page_id=page_id, properties=properties)
+            status_only = {self.col_status: {"status": {"name": status}}}
+            self.client.pages.update(page_id=page_id, properties=status_only)
             console.print(f"[green]Notion 업데이트 완료 (status): {status}[/green]")
+            if save_url:
+                console.print(f"[yellow]상태는 업데이트됨, URL 저장은 실패[/yellow]")
             self._try_update_checkbox(page_id, status)
             return (True, "")
         except Exception as e3:
             err3 = str(e3)[:120]
             console.print(f"[yellow]3단계(status) 실패: {err3}[/yellow]")
 
-        # 4단계: URL만이라도 저장
-        if comment_url:
-            try:
-                url_only = {self.col_result_url: self._build_result_url_rich_text(comment_url)}
-                self.client.pages.update(page_id=page_id, properties=url_only)
-                msg = f"URL만 저장됨. 상태 변경 실패: {err1}"
-                console.print(f"[yellow]{msg}[/yellow]")
-                self.last_error = msg
-                return (False, msg)
-            except Exception as e4:
-                msg = f"완전 실패: {str(e4)[:120]}"
-                console.print(f"[red]{msg}[/red]")
-                self.last_error = msg
-                return (False, msg)
+        # 4단계: select 타입으로 상태만 저장
+        try:
+            status_only = {self.col_status: {"select": {"name": status}}}
+            self.client.pages.update(page_id=page_id, properties=status_only)
+            console.print(f"[green]Notion 상태만 업데이트 완료 (select): {status}[/green]")
+            if save_url:
+                console.print(f"[yellow]URL 저장은 실패 (속성 문제)[/yellow]")
+            self._try_update_checkbox(page_id, status)
+            return (True, "")
+        except Exception as e4:
+            err4 = str(e4)[:120]
+            console.print(f"[yellow]4단계(select only) 실패: {err4}[/yellow]")
 
         self.last_error = f"상태 변경 실패: {err1}"
         return (False, self.last_error)
