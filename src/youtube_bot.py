@@ -566,6 +566,45 @@ class YouTubeBot:
             console.print(f"[yellow]좋아요 스크래핑 실패: {e}[/yellow]")
             return []
 
+    def get_top_comments_with_text(self, count=5):
+        """
+        현재 페이지의 상위 댓글 좋아요 수 + 댓글 텍스트를 함께 스크래핑합니다.
+
+        Returns:
+            list[dict]: [{"text": "댓글내용...", "likes": 1300}, ...] (좋아요 높은 순)
+            실패 시 빈 리스트
+        """
+        try:
+            raw = self.page.evaluate(f"""
+                (() => {{
+                    const threads = document.querySelectorAll('ytd-comment-thread-renderer');
+                    const result = [];
+                    for (let i = 0; i < Math.min(threads.length, {count}); i++) {{
+                        const likeEl = threads[i].querySelector('#vote-count-middle');
+                        const textEl = threads[i].querySelector('#content-text');
+                        result.push({{
+                            likes_text: likeEl ? likeEl.innerText.trim() : '',
+                            comment_text: textEl ? textEl.innerText.trim() : ''
+                        }});
+                    }}
+                    return result;
+                }})()
+            """)
+
+            comments = []
+            for item in raw:
+                likes = self._parse_like_count(item.get("likes_text", ""))
+                text = item.get("comment_text", "")[:100]  # 최대 100자
+                comments.append({"text": text, "likes": likes})
+
+            comments.sort(key=lambda x: x["likes"], reverse=True)
+            console.print(f"[blue]상위 댓글 (텍스트 포함): {len(comments)}건[/blue]")
+            return comments
+
+        except Exception as e:
+            console.print(f"[yellow]상위 댓글 텍스트 스크래핑 실패: {e}[/yellow]")
+            return []
+
     @staticmethod
     def _parse_like_count(text):
         """좋아요 텍스트를 숫자로 변환 (예: '1.2천' → 1200)"""

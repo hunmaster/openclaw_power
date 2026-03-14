@@ -2272,6 +2272,21 @@
                     <div style="color:var(--yellow);font-weight:700">${extraQty > 0 ? '+' + extraQty.toLocaleString() : '-'}개</div>
                 </div>
             </div>
+            ${(item.top_comments && item.top_comments.length > 0) ? `
+            <div style="margin-bottom:10px;background:var(--card);border-radius:6px;padding:8px 10px;font-size:11px">
+                <div style="color:var(--text-dim);margin-bottom:6px;font-weight:600">상위 댓글 미리보기</div>
+                ${item.top_comments.map((c, idx) => {
+                    const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉';
+                    const likeCnt = (c.likes || 0).toLocaleString();
+                    const txt = c.text || '';
+                    const truncated = txt.length > 80 ? txt.substring(0, 80) + '...' : txt;
+                    return `<div style="display:flex;align-items:flex-start;gap:6px;margin-bottom:4px;padding:4px 6px;border-radius:4px;background:rgba(255,255,255,0.03)">
+                        <span style="flex-shrink:0">${medal}</span>
+                        <span style="color:var(--text);line-height:1.4;word-break:break-all">${truncated}</span>
+                        <span style="flex-shrink:0;color:var(--text-dim);font-size:10px;margin-left:auto;white-space:nowrap">♥ ${likeCnt}</span>
+                    </div>`;
+                }).join('')}
+            </div>` : ''}
             <div style="display:flex;gap:8px">
                 <button onclick="approveSingleLike('${item.id}')" style="flex:1;padding:10px 0;background:var(--green);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;transition:opacity 0.2s" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
                     승인 (${item.qty.toLocaleString()}개 주문)

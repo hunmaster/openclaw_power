@@ -1614,8 +1614,11 @@ def _run_automation(limit=0, selected_ids=None):
                         like_auto_max = int(os.getenv("SMM_LIKE_AUTO_MAX", "500"))
                         default_qty = int(os.getenv("SMM_LIKE_QUANTITY", "20"))
 
-                        # 상위 댓글 좋아요 스크래핑
-                        top_likes = bot.get_top_comment_likes(count=5)
+                        # 상위 댓글 좋아요 스크래핑 (텍스트 포함)
+                        top_comments_data = bot.get_top_comments_with_text(count=5)
+                        top_likes = [c["likes"] for c in top_comments_data] if top_comments_data else bot.get_top_comment_likes(count=5)
+                        # 상위 3개 댓글 텍스트 (승인 대기 팝업용)
+                        top_comment_texts = [{"text": c["text"], "likes": c["likes"]} for c in top_comments_data[:3]] if top_comments_data else []
                         dynamic_qty = _calculate_dynamic_likes(top_likes, default_qty)
 
                         if top_likes:
@@ -1650,6 +1653,7 @@ def _run_automation(limit=0, selected_ids=None):
                                 "qty": dynamic_qty,
                                 "default_qty": default_qty,
                                 "top_likes": top_likes,
+                                "top_comments": top_comment_texts,
                                 "video_url": task["youtube_url"],
                                 "video_title": task.get("video_title", "")[:60],
                                 "account": current_label,
