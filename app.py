@@ -14,6 +14,7 @@ import sys
 import json
 import time
 import threading
+from collections import defaultdict, deque
 from datetime import datetime
 
 from flask import Flask, render_template, jsonify, request
@@ -1219,6 +1220,49 @@ def _save_accounts(accounts):
         json.dump(accounts, f, indent=2, ensure_ascii=False)
 
 
+# ──────────────────────────── 스마트 스케줄러 ────────────────────────────
+
+def _schedule_tasks(tasks):
+    """
+    계정별 라운드로빈으로 태스크를 인터리빙하여 같은 계정 연속을 최소화합니다.
+
+    예: A,A,A,B,B,C → A,B,C,A,B,A (계정 전환만으로 딜레이 없이 진행)
+    """
+    if len(tasks) <= 1:
+        return tasks
+
+    # 계정별 그룹핑 (순서 유지)
+    account_queues = defaultdict(deque)
+    account_order = []  # 등장 순서 보존
+    for task in tasks:
+        label = task.get("account", "unknown")
+        if label not in account_queues:
+            account_order.append(label)
+        account_queues[label].append(task)
+
+    # 라운드로빈 인터리빙
+    scheduled = []
+    remaining = sum(len(q) for q in account_queues.values())
+    robin_idx = 0
+
+    while remaining > 0:
+        # 빈 큐가 아닌 다음 계정 찾기
+        attempts = 0
+        while attempts < len(account_order):
+            label = account_order[robin_idx % len(account_order)]
+            robin_idx += 1
+            if account_queues[label]:
+                scheduled.append(account_queues[label].popleft())
+                remaining -= 1
+                break
+            attempts += 1
+        else:
+            # 모든 큐가 비었으면 종료 (안전장치)
+            break
+
+    return scheduled
+
+
 # ──────────────────────────── 자동화 실행 ────────────────────────────
 
 def _run_automation(limit=0, selected_ids=None):
@@ -1299,12 +1343,22 @@ def _run_automation(limit=0, selected_ids=None):
             add_log(f"테스트 모드: 전체 {len(tasks)}건 중 {limit}건만 실행", "warning")
             tasks = tasks[:limit]
 
+        # ── 스마트 스케줄링: 계정 인터리빙으로 대기시간 최소화 ──
+        tasks = _schedule_tasks(tasks)
+        # 계정 분포 로그
+        acct_counts = defaultdict(int)
+        for t in tasks:
+            acct_counts[t.get("account", "?")] += 1
+        acct_summary = ", ".join(f"{k}:{v}건" for k, v in acct_counts.items())
+        add_log(f"스케줄링 완료: {acct_summary} (계정 인터리빙 적용)", "info")
+
         automation_state["total"] = len(tasks)
         add_log(f"총 {len(tasks)}개 작업 {'(테스트)' if test_mode else ''} 발견", "info")
 
         delay_ip_change = int(os.getenv("DELAY_AFTER_IP_CHANGE", "3"))
         comment_interval = int(os.getenv("COMMENT_INTERVAL_SEC", "180"))
         prev_account_label = None
+        prev_task_success = True  # 실패/스킵 시 대기 스킵용
 
         for i, task in enumerate(tasks):
             if not automation_state["running"]:
@@ -1327,9 +1381,9 @@ def _run_automation(limit=0, selected_ids=None):
 
             current_label = account.get("label", account.get("email", "unknown"))
 
-            # 대기 시간
+            # ── 대기 시간 (스마트 스케줄링) ──
             if prev_account_label and prev_account_label != current_label:
-                # ADB 비행기모드로 IP 변경
+                # 다른 계정 → IP 변경 (대기시간 없이 바로 진행)
                 adb_changer = ADBIPChanger()
                 if adb_changer.enabled:
                     old_ip = adb_changer.get_current_ip()
@@ -1345,14 +1399,18 @@ def _run_automation(limit=0, selected_ids=None):
                     add_log(f"계정 전환: {prev_account_label} → {current_label} (IP 변경 {delay_ip_change}초 대기)", "info")
                     time.sleep(delay_ip_change)
             elif prev_account_label == current_label and i > 0:
-                human_delay = safety_rules.get_human_delay("comment")
-                actual_delay = human_delay["delay_sec"]
-                add_log(
-                    f"같은 계정 연속 - 🧑 {human_delay['description']} "
-                    f"(타이핑 {human_delay['typing_delay_ms']}ms)",
-                    "info"
-                )
-                time.sleep(actual_delay)
+                # 같은 계정 연속 - 이전 작업이 실패/스킵이면 대기 불필요
+                if not prev_task_success:
+                    add_log("같은 계정 연속이지만 이전 작업 실패/스킵 → 대기 없이 진행", "info")
+                else:
+                    human_delay = safety_rules.get_human_delay("comment")
+                    actual_delay = human_delay["delay_sec"]
+                    add_log(
+                        f"같은 계정 연속 - 🧑 {human_delay['description']} "
+                        f"(타이핑 {human_delay['typing_delay_ms']}ms)",
+                        "info"
+                    )
+                    time.sleep(actual_delay)
 
             # 안전 규칙 검사 (테스트/선택 실행 모드에서는 시간 간격 규칙 건너뜀)
             skip = test_mode or bool(selected_ids)
@@ -1363,6 +1421,7 @@ def _run_automation(limit=0, selected_ids=None):
             if not passed:
                 add_log(f"[건너뜀] {reason}", "warning")
                 automation_state["results"]["skip"] += 1
+                prev_task_success = False
                 prev_account_label = current_label
                 continue
 
@@ -1390,6 +1449,7 @@ def _run_automation(limit=0, selected_ids=None):
                     add_log(f"로그인 실패: {current_label}", "error")
                     automation_state["results"]["fail"] += 1
                     notion.update_task_error(task["page_id"], "로그인 실패")
+                    prev_task_success = False
                     continue
 
                 automation_state["current_task"] = f"[댓글 작성 중] {task_url_short}"
@@ -1447,13 +1507,16 @@ def _run_automation(limit=0, selected_ids=None):
                     automation_state["results"]["success"] += 1
                     automation_state["current_task"] = f"[완료] {task_url_short}"
                     add_log(f"--- 작업 {i+1}/{len(tasks)} 완료 ---", "success")
+                    prev_task_success = True
                 else:
                     automation_state["results"]["fail"] += 1
                     notion.update_task_error(task["page_id"], "댓글 작성 실패")
                     add_log("댓글 작성 실패", "error")
+                    prev_task_success = False
 
             except Exception as e:
                 automation_state["results"]["fail"] += 1
+                prev_task_success = False
                 add_log(f"오류: {str(e)}", "error")
             finally:
                 bot.close_browser()
