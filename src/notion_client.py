@@ -171,10 +171,48 @@ class NotionManager:
 
     def count_pending_tasks(self):
         """댓글작업전 상태의 전체 개수만 빠르게 세서 반환합니다."""
+        return self._count_by_status("댓글작업전")
+
+    def count_all_statuses(self):
+        """대시보드용: 주요 상태별 개수를 한 번에 반환합니다.
+        전체 DB를 1회만 조회하여 상태별로 분류합니다."""
+        console.print("[blue]대시보드 카운트 조회 (전체 1회 조회)[/blue]")
+        counts = {}
+        has_more = True
+        start_cursor = None
+
+        while has_more:
+            try:
+                kwargs = {"database_id": self.database_id, "page_size": 100}
+                if start_cursor:
+                    kwargs["start_cursor"] = start_cursor
+                response = self.client.databases.query(**kwargs)
+                for page in response.get("results", []):
+                    props = page.get("properties", {})
+                    status_prop = props.get(self.col_status, {})
+                    status_type = status_prop.get("type", "select")
+                    if status_type == "select":
+                        sv = (status_prop.get("select") or {}).get("name", "")
+                    elif status_type == "status":
+                        sv = (status_prop.get("status") or {}).get("name", "")
+                    else:
+                        sv = ""
+                    counts[sv] = counts.get(sv, 0) + 1
+                has_more = response.get("has_more", False)
+                start_cursor = response.get("next_cursor")
+            except Exception as e:
+                console.print(f"[red]카운트 조회 실패: {e}[/red]")
+                break
+
+        console.print(f"[green]상태별 카운트: {counts}[/green]")
+        return counts
+
+    def _count_by_status(self, status_value):
+        """특정 상태의 개수를 빠르게 셉니다."""
         count = 0
         has_more = True
         start_cursor = None
-        query_filter = {"property": self.col_status, "select": {"equals": "댓글작업전"}}
+        query_filter = {"property": self.col_status, "select": {"equals": status_value}}
 
         while has_more:
             try:
@@ -186,9 +224,8 @@ class NotionManager:
                 has_more = response.get("has_more", False)
                 start_cursor = response.get("next_cursor")
             except Exception:
-                # status 타입으로 시도
                 try:
-                    kwargs["filter"] = {"property": self.col_status, "status": {"equals": "댓글작업전"}}
+                    kwargs["filter"] = {"property": self.col_status, "status": {"equals": status_value}}
                     response = self.client.databases.query(**kwargs)
                     count += len(response.get("results", []))
                     has_more = response.get("has_more", False)

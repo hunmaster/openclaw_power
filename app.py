@@ -140,18 +140,21 @@ def api_dashboard():
     # 프록시 상태
     proxy = ProxyManager()
 
-    # 댓글 대기 전체 개수
-    pending_count = 0
+    # 상태별 카운트 (전체 DB 1회 조회)
+    status_counts = {}
     try:
         notion = NotionManager()
-        pending_count = notion.count_pending_tasks()
+        status_counts = notion.count_all_statuses()
     except Exception:
         pass
 
     return jsonify({
         "accounts": account_stats,
         "account_count": len(accounts),
-        "pending_count": pending_count,
+        "pending_count": status_counts.get("댓글작업전", 0),
+        "reply_done_count": status_counts.get("댓글완료", 0),
+        "like_pending_count": status_counts.get("대댓글완료", 0),
+        "status_counts": status_counts,
         "smm_enabled": smm.enabled,
         "smm_balance": smm_balance,
         "proxy_status": proxy.get_status(),

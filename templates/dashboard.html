@@ -671,7 +671,7 @@
         event.target.classList.add('active');
         document.getElementById('tab-' + tabName).classList.add('active');
 
-        if (tabName === 'tasks') loadTasks();
+        // tasks 탭: 이미 초기화 시 로드됨, 탭 전환만으로 재조회 안 함
         if (tabName === 'accounts') loadAccountList();
         if (tabName === 'settings') loadSettings();
         if (tabName === 'smm') loadSMMInfo();
@@ -701,17 +701,10 @@
         document.getElementById('smmBalance').textContent =
             data.smm_balance !== null ? '$' + parseFloat(data.smm_balance).toFixed(2) : 'N/A';
 
-        // 댓글 대기는 dashboard API에서 전체 개수 반영
+        // 상태별 카운트 (서버에서 한 번에 반환)
         document.getElementById('pendingCount').textContent = data.pending_count || 0;
-
-        // 나머지 상태별 카운트 (병렬)
-        Promise.all([
-            api('/api/tasks?status=댓글완료'),
-            api('/api/tasks?status=대댓글완료'),
-        ]).then(([reply, like]) => {
-            if (reply) document.getElementById('replyPendingCount').textContent = reply.count || 0;
-            if (like) document.getElementById('likePendingCount').textContent = like.count || 0;
-        });
+        document.getElementById('replyPendingCount').textContent = data.reply_done_count || 0;
+        document.getElementById('likePendingCount').textContent = data.like_pending_count || 0;
 
         // 계정 테이블
         const tbody = document.getElementById('accountTableBody');
@@ -804,16 +797,31 @@
         const msgEl = document.getElementById('taskFetchMsg');
         const tbody = document.getElementById('taskTableBody');
 
-        // 새로고침일 때만 로딩 오버레이 표시
-        if (_taskRefresh) {
-            showLoadingOverlay(true);
+        // 로딩 오버레이: 초기화 오버레이가 떠있을 땐 생략 (initApp에서 이미 표시 중)
+        const initVisible = document.getElementById('initOverlay').style.display !== 'none';
+        let overlayShown = false;
+
+        if (!initVisible) {
+            // 강제 새로고침 → 즉시 오버레이 표시
+            // 캐시 시도 → 1초 이상 걸리면 오버레이 표시
+            if (_taskRefresh) {
+                showLoadingOverlay(true);
+                overlayShown = true;
+            } else {
+                // 캐시 미스 대비: 500ms 후에도 응답 없으면 오버레이 표시
+                var _slowTimer = setTimeout(() => {
+                    showLoadingOverlay(true);
+                    overlayShown = true;
+                }, 500);
+            }
         }
 
-        msgEl.textContent = _taskRefresh ? '노션에서 불러오는 중...' : '페이지 로딩 중...';
+        msgEl.textContent = '로딩 중...';
         tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-dim)">조회 중...</td></tr>';
         await loadTasks(currentTaskStatus);
+        if (typeof _slowTimer !== 'undefined') clearTimeout(_slowTimer);
         msgEl.textContent = '';
-        showLoadingOverlay(false);
+        if (overlayShown) showLoadingOverlay(false);
         _taskRefresh = false;
     }
 
