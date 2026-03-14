@@ -760,17 +760,51 @@
     // ─── 작업 목록 로드 ───
     let _taskRefresh = true; // true면 노션에서 새로 가져옴, false면 캐시 사용
 
+    let _loadingPollTimer = null;
+
+    function showLoadingOverlay(show) {
+        document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none';
+        if (show) {
+            document.getElementById('loadingBar').style.width = '5%';
+            document.getElementById('loadingDetail').textContent = '노션 API에서 데이터를 가져오고 있습니다...';
+            document.getElementById('loadingTitle').textContent = '데이터 불러오는 중...';
+            // 진행 상태 폴링 시작
+            _loadingPollTimer = setInterval(async () => {
+                try {
+                    const res = await fetch('/api/loading-status');
+                    const data = await res.json();
+                    if (data.active && data.loaded > 0) {
+                        // 대략적 진행률 (1200건 기준 추정, 최대 95%)
+                        const est = Math.min(95, Math.round((data.loaded / 1200) * 100));
+                        document.getElementById('loadingBar').style.width = est + '%';
+                        document.getElementById('loadingDetail').textContent = `${data.loaded}건 로드됨... 잠시만 기다려주세요`;
+                    }
+                } catch (e) {}
+            }, 500);
+        } else {
+            if (_loadingPollTimer) { clearInterval(_loadingPollTimer); _loadingPollTimer = null; }
+            document.getElementById('loadingBar').style.width = '100%';
+        }
+    }
+
     async function fetchNotionTasks(page, forceRefresh) {
         if (page !== undefined) currentTaskPage = page;
         else currentTaskPage = 1;
         if (forceRefresh !== undefined) _taskRefresh = forceRefresh;
         const msgEl = document.getElementById('taskFetchMsg');
         const tbody = document.getElementById('taskTableBody');
+
+        // 새로고침일 때만 로딩 오버레이 표시
+        if (_taskRefresh) {
+            showLoadingOverlay(true);
+        }
+
         msgEl.textContent = _taskRefresh ? '노션에서 불러오는 중...' : '페이지 로딩 중...';
         tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-dim)">조회 중...</td></tr>';
         await loadTasks(currentTaskStatus);
         msgEl.textContent = '';
-        _taskRefresh = false; // 이후 페이지 이동은 캐시 사용
+        showLoadingOverlay(false);
+        _taskRefresh = false;
     }
 
     function switchTaskFilter(status, btn) {
@@ -1610,5 +1644,16 @@
     loadTasks();
     setInterval(pollStatus, 1500);
 </script>
+<!-- 로딩 오버레이 -->
+<div id="loadingOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:9999;justify-content:center;align-items:center">
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:32px 48px;text-align:center;min-width:360px;box-shadow:0 8px 32px rgba(0,0,0,0.4)">
+        <div style="font-size:16px;font-weight:600;margin-bottom:16px;color:var(--text)" id="loadingTitle">데이터 불러오는 중...</div>
+        <div style="height:16px;background:var(--border);border-radius:8px;overflow:hidden;margin-bottom:12px">
+            <div id="loadingBar" style="height:100%;border-radius:8px;background:linear-gradient(90deg,var(--accent),var(--accent-light));transition:width 0.3s ease;width:0%"></div>
+        </div>
+        <div style="font-size:13px;color:var(--text-dim)" id="loadingDetail">노션 API에서 데이터를 가져오고 있습니다...</div>
+    </div>
+</div>
+
 </body>
 </html>

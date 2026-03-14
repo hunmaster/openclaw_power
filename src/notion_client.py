@@ -197,7 +197,7 @@ class NotionManager:
                     break
         return count
 
-    def get_tasks_by_status(self, status_value, date_filter=None):
+    def get_tasks_by_status(self, status_value, date_filter=None, progress_callback=None):
         """지정된 상태의 작업 목록을 페이지네이션으로 전부 가져옵니다."""
         console.print(f"[blue]노션 DB 조회 (상태: '{status_value}', 날짜: {date_filter or '전체'})[/blue]")
 
@@ -247,6 +247,8 @@ class NotionManager:
 
             if has_more:
                 console.print(f"[dim]  {len(all_results)}건 로드, 추가 데이터 있음...[/dim]")
+            if progress_callback:
+                progress_callback(len(all_results), f"{len(all_results)}건 로드 중...")
 
         console.print(f"[blue]전체 조회 완료: {len(all_results)}건[/blue]")
 
@@ -256,10 +258,12 @@ class NotionManager:
             if task:
                 tasks.append(task)
 
+        if progress_callback:
+            progress_callback(len(tasks), f"완료: {len(tasks)}건")
         console.print(f"[green]'{status_value}' 작업: {len(tasks)}개[/green]")
         return tasks
 
-    def get_all_tasks(self):
+    def get_all_tasks(self, progress_callback=None):
         """전체 리스트: 상태 무관하게 DB의 모든 작업을 페이지네이션으로 가져옵니다."""
         console.print("[blue]노션 DB 전체 리스트 조회[/blue]")
 
@@ -278,6 +282,8 @@ class NotionManager:
                 start_cursor = response.get("next_cursor")
                 if has_more:
                     console.print(f"[dim]  {len(all_results)}건 로드, 추가 데이터 있음...[/dim]")
+                if progress_callback:
+                    progress_callback(len(all_results), f"{len(all_results)}건 로드 중...")
             except Exception as e:
                 console.print(f"[red]전체 리스트 조회 실패: {e}[/red]")
                 break
@@ -290,6 +296,8 @@ class NotionManager:
             if task:
                 tasks.append(task)
 
+        if progress_callback:
+            progress_callback(len(tasks), f"완료: {len(tasks)}건")
         return tasks
 
     def _parse_page(self, page, debug=False):

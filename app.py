@@ -54,6 +54,14 @@ _task_cache = {
 }
 _task_cache_lock = threading.Lock()
 
+# 작업 목록 로딩 진행 상태 (UI 프로그레스 바용)
+_loading_state = {
+    "active": False,
+    "loaded": 0,
+    "message": "",
+}
+_loading_lock = threading.Lock()
+
 
 def add_log(message, level="info"):
     """로그 메시지를 추가합니다."""
@@ -85,6 +93,17 @@ def dashboard():
 
 
 # ──────────────────────────── API 라우트 ────────────────────────────
+
+@app.route("/api/loading-status")
+def api_loading_status():
+    """작업 목록 로딩 진행 상태를 반환합니다."""
+    with _loading_lock:
+        return jsonify({
+            "active": _loading_state["active"],
+            "loaded": _loading_state["loaded"],
+            "message": _loading_state["message"],
+        })
+
 
 @app.route("/api/status")
 def api_status():
@@ -176,11 +195,29 @@ def api_tasks():
 
         # 캐시 미스 → 노션에서 가져오기
         if tasks is None:
-            notion = NotionManager()
-            if status_filter == "전체":
-                tasks = notion.get_all_tasks()
-            else:
-                tasks = notion.get_tasks_by_status(status_filter, date_filter=date_filter)
+            # 로딩 상태 시작
+            def on_progress(loaded, message=""):
+                with _loading_lock:
+                    _loading_state["active"] = True
+                    _loading_state["loaded"] = loaded
+                    _loading_state["message"] = message
+
+            with _loading_lock:
+                _loading_state["active"] = True
+                _loading_state["loaded"] = 0
+                _loading_state["message"] = "노션 데이터 불러오는 중..."
+
+            try:
+                notion = NotionManager()
+                if status_filter == "전체":
+                    tasks = notion.get_all_tasks(progress_callback=on_progress)
+                else:
+                    tasks = notion.get_tasks_by_status(status_filter, date_filter=date_filter, progress_callback=on_progress)
+            finally:
+                with _loading_lock:
+                    _loading_state["active"] = False
+                    _loading_state["loaded"] = len(tasks) if tasks else 0
+                    _loading_state["message"] = ""
 
             # 캐시 저장
             with _task_cache_lock:
