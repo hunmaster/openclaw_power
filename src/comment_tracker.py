@@ -20,11 +20,54 @@ import os
 import json
 import time
 import re
+import asyncio
+import threading
+from concurrent.futures import Future
 from datetime import datetime
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 from rich.console import Console
 
 console = Console()
+
+
+def _run_in_clean_thread(func, *args, **kwargs):
+    """asyncio 루프가 없는 깨끗한 스레드에서 함수를 실행합니다.
+
+    Playwright sync API는 실행 중인 asyncio 루프가 있으면 에러를 발생시킵니다.
+    별도 스레드에서 실행하면 부모 스레드의 asyncio 루프와 격리됩니다.
+    """
+    # 먼저 현재 스레드에 실행 중인 루프가 있는지 확인
+    try:
+        running = asyncio._get_running_loop()
+    except AttributeError:
+        running = None
+
+    if running is None:
+        # 실행 중인 루프가 없으면 그냥 직접 실행
+        return func(*args, **kwargs)
+
+    # 실행 중인 루프가 있으면 별도 깨끗한 스레드에서 실행
+    result_future = Future()
+
+    def _worker():
+        try:
+            r = func(*args, **kwargs)
+            result_future.set_result(r)
+        except Exception as e:
+            result_future.set_exception(e)
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    t.join(timeout=600)  # 최대 10분 대기
+    return result_future.result()
+
+
+def _ensure_clean_event_loop():
+    """현재 스레드의 asyncio 이벤트 루프를 깨끗한 상태로 교체합니다."""
+    try:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+    except Exception:
+        pass
 
 
 class CommentTracker:
@@ -53,6 +96,9 @@ class CommentTracker:
         """트래킹용 브라우저 (비로그인, 시크릿 모드)"""
         if self.browser:
             return  # 이미 열려있으면 재사용
+
+        # Flask/threading 환경에서 asyncio 루프 충돌 방지
+        _ensure_clean_event_loop()
         self.playwright = sync_playwright().start()
         self.browser = self.playwright.chromium.launch(
             headless=True,
@@ -150,6 +196,18 @@ class CommentTracker:
         return True
 
     def check_comment(self, comment_id, reuse_browser=False):
+        """
+        개별 댓글의 생존 상태와 위치를 확인합니다.
+        asyncio 루프 충돌 방지를 위해 필요 시 별도 스레드에서 실행됩니다.
+        (reuse_browser=True일 때는 이미 안전한 스레드에서 호출되므로 직접 실행)
+        """
+        if reuse_browser:
+            # check_all 내부에서 호출 - 이미 깨끗한 스레드
+            return self._check_comment_impl(comment_id, reuse_browser)
+        # 외부에서 직접 호출 - 깨끗한 스레드에서 실행
+        return _run_in_clean_thread(self._check_comment_impl, comment_id, reuse_browser)
+
+    def _check_comment_impl(self, comment_id, reuse_browser=False):
         """
         개별 댓글의 생존 상태와 위치를 확인합니다.
 
@@ -297,6 +355,13 @@ class CommentTracker:
                 self._close_browser()
 
     def check_all(self):
+        """
+        등록된 모든 댓글의 상태를 확인합니다.
+        asyncio 루프 충돌 방지를 위해 필요 시 별도 스레드에서 실행됩니다.
+        """
+        return _run_in_clean_thread(self._check_all_impl)
+
+    def _check_all_impl(self):
         """
         등록된 모든 댓글의 상태를 확인합니다.
         같은 영상의 댓글은 한 번의 접속으로 묶어서 확인합니다.
