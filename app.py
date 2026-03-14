@@ -1164,6 +1164,11 @@ def _run_automation(limit=0, selected_ids=None):
                         if single.get("success"):
                             automation_state["results"]["likes"] += 1
                             add_log(f"[3/3 좋아요 주문 성공] 주문ID: {single.get('order_id')}", "success")
+                            # 좋아요 완료 체크박스 체크
+                            try:
+                                notion.update_like_checkbox(task["page_id"])
+                            except Exception:
+                                pass
                         else:
                             err = single.get("error", "?")
                             add_log(f"[3/3 좋아요 주문 실패] {err}", "warning")
