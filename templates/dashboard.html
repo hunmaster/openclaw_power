@@ -686,8 +686,9 @@
                 <div style="display:flex;gap:8px;align-items:center">
                     <span id="trackSelectedCount" style="font-size:12px;color:var(--accent-light);display:none"></span>
                     <span id="repostStatus" style="font-size:12px;color:var(--text-dim)"></span>
+                    <span id="repostHint" style="font-size:11px;color:var(--text-dim);margin-right:4px">숨김 댓글 발견 시 리포스팅 버튼이 여기에 표시됩니다</span>
                     <button class="btn" id="btnRepostHidden" onclick="repostHiddenComments()"
-                        style="background:var(--error);color:#fff;font-size:12px">
+                        style="background:var(--error);color:#fff;font-size:12px;display:none">
                         블라인드 리포스팅
                     </button>
                     <button class="btn btn-secondary" id="btnCheckSelected" onclick="runTrackingCheckSelected()"
@@ -2757,11 +2758,14 @@
         // 블라인드 리포스팅 버튼 표시 여부
         const hiddenCount = data.comments.filter(c => c.status === 'hidden').length;
         const repostBtn = document.getElementById('btnRepostHidden');
+        const repostHint = document.getElementById('repostHint');
         if (hiddenCount > 0) {
             repostBtn.style.display = '';
             repostBtn.textContent = `블라인드 리포스팅 (${hiddenCount})`;
+            if (repostHint) repostHint.style.display = 'none';
         } else {
             repostBtn.style.display = 'none';
+            if (repostHint) repostHint.style.display = '';
         }
 
         tbody.innerHTML = data.comments.map(c => {
