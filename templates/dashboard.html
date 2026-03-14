@@ -702,6 +702,10 @@
                         style="display:none;font-size:12px">
                         선택 확인
                     </button>
+                    <button class="btn" id="btnCheckUnchecked" onclick="runTrackingCheckUnchecked()"
+                        style="display:none;font-size:12px;background:var(--warning);color:#000">
+                        미확인 노출확인
+                    </button>
                     <button class="btn btn-primary" id="btnCheckAll" onclick="runTrackingCheckAll()">
                         전체 노출확인
                     </button>
@@ -2791,6 +2795,19 @@
             return;
         }
 
+        // 미확인 노출확인 버튼 표시 여부
+        const uncheckedIds = data.comments
+            .filter(c => c.total_checks === 0 && c.status !== 'deleted' && c.status !== 'reposted')
+            .map(c => c.comment_id);
+        const btnUnchecked = document.getElementById('btnCheckUnchecked');
+        if (uncheckedIds.length > 0) {
+            btnUnchecked.style.display = '';
+            btnUnchecked.textContent = `미확인 노출확인 (${uncheckedIds.length})`;
+            btnUnchecked.dataset.ids = JSON.stringify(uncheckedIds);
+        } else {
+            btnUnchecked.style.display = 'none';
+        }
+
         // 블라인드 리포스팅 버튼 표시 여부
         const hiddenCount = data.comments.filter(c => c.status === 'hidden').length;
         const repostBtn = document.getElementById('btnRepostHidden');
@@ -3005,6 +3022,30 @@
         } else {
             btn.disabled = false;
             btn.textContent = '전체 노출확인';
+            document.getElementById('trackProgressArea').style.display = 'none';
+            alert(data?.error || '트래킹 시작 실패');
+        }
+    }
+
+    async function runTrackingCheckUnchecked() {
+        const btn = document.getElementById('btnCheckUnchecked');
+        const ids = JSON.parse(btn.dataset.ids || '[]');
+        if (ids.length === 0) { alert('미확인 댓글이 없습니다.'); return; }
+
+        btn.disabled = true;
+        btn.textContent = '확인 중...';
+        document.getElementById('trackStatus').textContent = `${ids.length}건 준비 중...`;
+
+        const data = await api('/api/tracking/check-selected', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({comment_ids: ids})
+        });
+        if (data && data.ok) {
+            startTrackingPoll(btn, `미확인 노출확인 (${ids.length})`);
+        } else {
+            btn.disabled = false;
+            btn.textContent = `미확인 노출확인 (${ids.length})`;
             document.getElementById('trackProgressArea').style.display = 'none';
             alert(data?.error || '트래킹 시작 실패');
         }
