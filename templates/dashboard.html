@@ -810,11 +810,11 @@
     function switchTaskFilter(status, btn) {
         currentTaskStatus = status;
         currentTaskPage = 1;
-        _taskRefresh = true; // 탭 전환 시 새로 가져옴
+        _taskRefresh = false; // 탭 전환은 캐시 사용 (불러오기 버튼으로 강제 새로고침)
         document.querySelectorAll('.task-filter').forEach(b => b.classList.remove('active'));
         if (btn) btn.classList.add('active');
         document.getElementById('taskTableTitle').textContent = status === '전체' ? '노션 DB 전체 리스트' : `노션 DB 작업 (${status})`;
-        fetchNotionTasks(1, true);
+        fetchNotionTasks(1, false);
     }
 
     function goTaskPage(delta) {
@@ -934,7 +934,14 @@
 
         const dateLabel = currentDateFilter ? ` (${currentDateFilter})` : '';
         const searchLabel = searchQuery ? ` [검색: "${searchQuery}"]` : '';
-        if (msgEl) msgEl.innerHTML = `<span style="color:var(--green)">전체 ${totalCount}개${dateLabel}${searchLabel}</span>`;
+        let cacheLabel = '';
+        if (data.from_cache && data.cached_ago > 0) {
+            const mins = Math.floor(data.cached_ago / 60);
+            const secs = data.cached_ago % 60;
+            const agoText = mins > 0 ? `${mins}분 ${secs}초` : `${secs}초`;
+            cacheLabel = ` <span style="color:var(--yellow);font-size:12px;margin-left:8px" title="캐시된 데이터입니다. [불러오기] 버튼으로 최신 데이터를 가져올 수 있습니다.">⚡ ${agoText} 전 캐시</span>`;
+        }
+        if (msgEl) msgEl.innerHTML = `<span style="color:var(--green)">전체 ${totalCount}개${dateLabel}${searchLabel}</span>${cacheLabel}`;
 
         if (data.tasks.length === 0) {
             const emptyMsg = searchQuery

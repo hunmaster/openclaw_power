@@ -45,13 +45,10 @@ automation_state = {
 }
 automation_lock = threading.Lock()
 
-# 작업 목록 캐시 (매번 노션 API 전체 조회 방지)
-_task_cache = {
-    "key": None,        # "status:date" 형태의 캐시 키
-    "tasks": [],        # 캐시된 작업 목록
-    "fetched_at": 0,    # 캐시 시간 (timestamp)
-    "ttl": 120,         # 캐시 유효 시간 (초)
-}
+# 작업 목록 캐시 (매번 노션 API 전체 조회 방지) — 멀티 키 지원
+# { "status:date": {"tasks": [...], "fetched_at": timestamp}, ... }
+_task_cache = {}
+_task_cache_ttl = 300  # 5분 (탭 전환 캐시용)
 _task_cache_lock = threading.Lock()
 
 # 작업 목록 로딩 진행 상태 (UI 프로그레스 바용)
@@ -186,12 +183,17 @@ def api_tasks():
 
         # 캐시 확인 (유효한 캐시가 있으면 노션 API 호출 생략)
         tasks = None
+        cached_ago = 0  # 캐시 경과 시간 (초)
+        from_cache = False
         with _task_cache_lock:
+            entry = _task_cache.get(cache_key)
             if (not force_refresh
-                    and _task_cache["key"] == cache_key
-                    and _task_cache["tasks"]
-                    and (time.time() - _task_cache["fetched_at"]) < _task_cache["ttl"]):
-                tasks = _task_cache["tasks"]
+                    and entry
+                    and entry["tasks"]
+                    and (time.time() - entry["fetched_at"]) < _task_cache_ttl):
+                tasks = entry["tasks"]
+                cached_ago = int(time.time() - entry["fetched_at"])
+                from_cache = True
 
         # 캐시 미스 → 노션에서 가져오기
         if tasks is None:
@@ -220,10 +222,14 @@ def api_tasks():
                     _loading_state["message"] = ""
 
             # 캐시 저장
+            now = time.time()
             with _task_cache_lock:
-                _task_cache["key"] = cache_key
-                _task_cache["tasks"] = tasks
-                _task_cache["fetched_at"] = time.time()
+                _task_cache[cache_key] = {"tasks": tasks, "fetched_at": now}
+                # 오래된 캐시 정리 (10개 초과 시 가장 오래된 것 제거)
+                if len(_task_cache) > 10:
+                    oldest_key = min(_task_cache, key=lambda k: _task_cache[k]["fetched_at"])
+                    del _task_cache[oldest_key]
+            cached_ago = 0
 
         # 검색 필터 적용 (캐시된 데이터에서 필터링)
         if search_query:
@@ -252,6 +258,8 @@ def api_tasks():
             "status": status_filter,
             "date": date_filter,
             "search": search_query,
+            "from_cache": from_cache,
+            "cached_ago": cached_ago,
         })
     except Exception as e:
         return jsonify({"error": str(e), "tasks": [], "count": 0}), 500
