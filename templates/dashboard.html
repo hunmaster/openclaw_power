@@ -865,11 +865,45 @@
         border:2px solid var(--border);border-top-color:var(--accent);
         animation: initSpin 0.8s linear infinite;
     }
+    @keyframes initBlockPulse {
+        from { width: 30%; }
+        to { width: 80%; }
+    }
 </style>
 
 <script>
+    // ─── 초기 셋업 완료 플래그 ───
+    let _initDone = false;
+
+    function showInitBlockMsg() {
+        // 이미 표시 중이면 무시
+        if (document.getElementById('initBlockPopup')) return;
+        const popup = document.createElement('div');
+        popup.id = 'initBlockPopup';
+        popup.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.55);z-index:10001;display:flex;justify-content:center;align-items:center;cursor:pointer';
+        popup.innerHTML = `
+            <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:32px 40px;text-align:center;min-width:340px;max-width:440px;box-shadow:0 8px 32px rgba(0,0,0,0.5);pointer-events:auto">
+                <div style="font-size:28px;margin-bottom:12px">&#9203;</div>
+                <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:8px">데이터 수집 중입니다</div>
+                <div style="font-size:13px;color:var(--text-dim);line-height:1.6">
+                    초기 셋업이 진행 중이에요.<br>
+                    잠시만 기다려 주시면 자동으로 완료됩니다.
+                </div>
+                <div style="margin-top:16px;height:4px;background:var(--border);border-radius:4px;overflow:hidden">
+                    <div style="height:100%;width:60%;background:linear-gradient(90deg,var(--accent),var(--accent-light));border-radius:4px;animation:initBlockPulse 1.5s ease-in-out infinite alternate"></div>
+                </div>
+                <div style="margin-top:14px;font-size:11px;color:var(--text-dim)">화면을 클릭하면 닫힙니다</div>
+            </div>`;
+        popup.addEventListener('click', () => popup.remove());
+        document.body.appendChild(popup);
+        // 3초 후 자동 닫힘
+        setTimeout(() => { if (popup.parentNode) popup.remove(); }, 3000);
+    }
+
     // ─── 탭 전환 ───
     function switchTab(tabName) {
+        if (!_initDone) { showInitBlockMsg(); return; }
+
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
         document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
 
@@ -1016,6 +1050,7 @@
     }
 
     async function fetchNotionTasks(page, forceRefresh) {
+        if (!_initDone) { showInitBlockMsg(); return; }
         if (page !== undefined) currentTaskPage = page;
         else currentTaskPage = 1;
         if (forceRefresh !== undefined) _taskRefresh = forceRefresh;
@@ -2262,7 +2297,11 @@
         } catch (e) {
             console.error('초기화 실패:', e);
         } finally {
+            _initDone = true;
             showInitOverlay(false);
+            // 초기화 중 막혔던 팝업이 있으면 자동 제거
+            const blocked = document.getElementById('initBlockPopup');
+            if (blocked) blocked.remove();
         }
 
         // 상태 폴링 시작
