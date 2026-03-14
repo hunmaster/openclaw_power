@@ -247,6 +247,24 @@ class CommentTracker:
             found_text = ""
 
             # YouTube는 lc= 접속 시 해당 댓글을 상단에 "고정된 댓글"처럼 보여줌
+            # 블라인드된 댓글은 lc= 접속 시 하이라이트 영역 없이 일반 댓글만 표시됨
+            #
+            # 판별 전략:
+            # 1) "하이라이트된 댓글" 배너가 있는지 확인 (lc= 정상 동작 증거)
+            # 2) 첫 번째 댓글 텍스트가 우리 댓글과 일치하는지 확인
+            # → 둘 다 아니면 블라인드 판정
+
+            # 방법 1: "하이라이트된 댓글" 헤더/배지 존재 확인
+            # YouTube는 lc= 로 접속 시 해당 댓글에 특별한 속성/배지를 부여함
+            # 블라인드 댓글이면 이 요소들이 존재하지 않음
+            highlight_header = self.page.query_selector(
+                'ytd-comment-thread-renderer[is-showing-linked-comment], '
+                '#linked-comment-badge, '
+                'yt-formatted-string#linked-comment-badge, '
+                '#header-author ytd-comment-renderer[is-linked-comment]'
+            )
+            console.print(f"[dim]  하이라이트 배지 존재: {bool(highlight_header)}[/dim]")
+
             highlighted_selectors = [
                 "ytd-comment-thread-renderer.ytd-item-section-renderer #content-text",
                 "#content-text.ytd-comment-renderer",
@@ -255,29 +273,52 @@ class CommentTracker:
             for selector in highlighted_selectors:
                 elements = self.page.query_selector_all(selector)
                 if elements:
-                    # 첫 번째 댓글이 보통 하이라이트된 댓글
                     first_text = elements[0].inner_text().strip()
                     if first_text:
-                        alive = True
                         found_text = first_text
 
-                        # 댓글 텍스트가 비어있었다면 채워넣기 (수동 등록 시)
-                        if not comment_text and found_text:
-                            comment_data["comment_text"] = found_text[:200]
+                        # 텍스트 매칭으로 우리 댓글인지 확인
+                        is_our_comment = False
+                        if comment_text:
+                            # 앞부분 40자 이상 일치하면 우리 댓글로 판정
+                            match_len = min(40, len(comment_text))
+                            our_prefix = comment_text[:match_len].strip()
+                            found_prefix = first_text[:match_len].strip()
+                            if our_prefix and found_prefix and our_prefix in first_text:
+                                is_our_comment = True
+                            elif found_prefix and found_prefix in comment_text:
+                                is_our_comment = True
 
-                        # 좋아요 수 추출
-                        try:
-                            parent = elements[0].evaluate_handle(
-                                "el => el.closest('ytd-comment-renderer')"
+                        # 하이라이트 헤더가 있으면 lc= 가 정상 동작한 것
+                        if highlight_header:
+                            is_our_comment = True
+
+                        if is_our_comment:
+                            alive = True
+
+                            # 댓글 텍스트가 비어있었다면 채워넣기 (수동 등록 시)
+                            if not comment_text and found_text:
+                                comment_data["comment_text"] = found_text[:200]
+
+                            # 좋아요 수 추출
+                            try:
+                                parent = elements[0].evaluate_handle(
+                                    "el => el.closest('ytd-comment-renderer')"
+                                )
+                                like_el = parent.as_element().query_selector(
+                                    "#vote-count-middle"
+                                )
+                                if like_el:
+                                    like_text = like_el.inner_text().strip()
+                                    likes = self._parse_like_count(like_text)
+                            except Exception:
+                                pass
+                        else:
+                            console.print(
+                                f"[yellow]텍스트 불일치 → 블라인드 판정[/yellow]\n"
+                                f"  기대: {comment_text[:60]}...\n"
+                                f"  발견: {first_text[:60]}..."
                             )
-                            like_el = parent.as_element().query_selector(
-                                "#vote-count-middle"
-                            )
-                            if like_el:
-                                like_text = like_el.inner_text().strip()
-                                likes = self._parse_like_count(like_text)
-                        except Exception:
-                            pass
                         break
 
             # ── 2단계: 영상 전체 댓글에서 위치 확인 ──
@@ -332,8 +373,12 @@ class CommentTracker:
                     comment_data["last_position"] = position
                     if comment_data["best_position"] is None or position < comment_data["best_position"]:
                         comment_data["best_position"] = position
+                console.print(f"[green]✓ 정상노출 확인 (좋아요:{likes}, 위치:{position})[/green]")
             else:
                 comment_data["status"] = "hidden"
+                console.print(
+                    f"[red]✗ 숨김/블라인드 판정: {comment_text[:40]}...[/red]"
+                )
 
             self._save_history()
 
