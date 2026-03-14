@@ -290,10 +290,10 @@
             <option value="2">테스트 2건</option>
             <option value="3">테스트 3건</option>
             <option value="5">테스트 5건</option>
-            <option value="0">전체 실행</option>
             <option value="-1">Full Auto (무한 반복)</option>
         </select>
-        <button class="btn btn-secondary" id="btnDupScan" onclick="runDuplicateScan()" title="시작 전 중복 영상 사전 스캔">중복 스캔</button>
+        <button class="btn btn-secondary" id="btnDupScan" onclick="runDuplicateScan()" title="수동으로 중복 영상을 사전 스캔합니다. 실행 시 자동으로 수행되므로 확인용입니다.">중복 스캔</button>
+        <span style="font-size:10px;color:var(--text-dim);max-width:110px;line-height:1.3;opacity:0.7">수동 확인용<br>(실행 시 자동수행)</span>
         <button class="btn btn-primary" id="btnStart" onclick="startAutomation()">실행</button>
         <button class="btn btn-danger" id="btnStop" onclick="stopAutomation()" disabled>중지</button>
     </div>
