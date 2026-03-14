@@ -89,13 +89,21 @@ class NotionManager:
                         self.col_status = name
                         break
 
-            # 체크박스 컬럼 자동 탐색 (댓글 + 완료 키워드)
+            # 체크박스 컬럼 자동 탐색 ("댓글 완료"를 "대댓글 완료"보다 우선 매칭)
             self.col_checkbox = None
+            checkbox_candidates = []
             for name, prop_info in self._db_properties.items():
                 if prop_info.get("type") == "checkbox" and "댓글" in name and "완료" in name:
-                    self.col_checkbox = name
-                    console.print(f"[dim]체크박스 컬럼 발견: '{name}'[/dim]")
-                    break
+                    checkbox_candidates.append(name)
+            if checkbox_candidates:
+                # "대댓글"이 아닌 것을 우선 선택
+                for name in checkbox_candidates:
+                    if "대댓글" not in name:
+                        self.col_checkbox = name
+                        break
+                if not self.col_checkbox:
+                    self.col_checkbox = checkbox_candidates[0]
+                console.print(f"[dim]체크박스 컬럼 발견: '{self.col_checkbox}'[/dim]")
 
             console.print(f"[dim]DB 속성 목록: {', '.join(prop_names)}[/dim]")
 
