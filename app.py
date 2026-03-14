@@ -1775,6 +1775,40 @@ def api_tracking_check_all():
     return jsonify({"ok": True, "message": "트래킹 시작됨"})
 
 
+@app.route("/api/tracking/check-selected", methods=["POST"])
+def api_tracking_check_selected():
+    """선택된 댓글만 트래킹 (백그라운드)"""
+    data = request.json or {}
+    comment_ids = data.get("comment_ids", [])
+    if not comment_ids:
+        return jsonify({"ok": False, "error": "선택된 댓글이 없습니다."})
+
+    with tracking_lock:
+        if tracking_state["running"]:
+            return jsonify({"ok": False, "error": "이미 트래킹 진행 중입니다."})
+        tracking_state["running"] = True
+        tracking_state["progress"] = 0
+
+    def run_selected_tracking():
+        try:
+            result = comment_tracker.check_selected(comment_ids)
+            tracking_state["last_result"] = result
+            add_log(
+                f"[트래킹] 선택 {len(comment_ids)}건 완료: "
+                f"{result['active']}/{result['total']}개 생존, "
+                f"{result['hidden']}개 숨김",
+                "info"
+            )
+        except Exception as e:
+            add_log(f"[트래킹] 오류: {str(e)}", "error")
+        finally:
+            tracking_state["running"] = False
+
+    thread = threading.Thread(target=run_selected_tracking, daemon=True)
+    thread.start()
+    return jsonify({"ok": True, "message": f"{len(comment_ids)}건 트래킹 시작됨"})
+
+
 @app.route("/api/tracking/check/<comment_id>", methods=["POST"])
 def api_tracking_check_one(comment_id):
     """개별 댓글 상태 확인"""
@@ -2084,5 +2118,64 @@ def api_tracking_import_notion():
         return jsonify({"ok": False, "error": str(e)})
 
 
+# ━━━ 매일 아침 8시 자동 트래킹 스케줄러 ━━━
+_scheduler_started = False
+
+
+def _daily_tracking_job():
+    """매일 아침 8시에 전체 댓글 트래킹을 실행합니다."""
+    with tracking_lock:
+        if tracking_state["running"]:
+            add_log("[스케줄] 이미 트래킹 진행 중 - 스킵", "warning")
+            return
+        tracking_state["running"] = True
+
+    try:
+        add_log("[스케줄] 매일 아침 자동 트래킹 시작", "info")
+        result = comment_tracker.check_all()
+        tracking_state["last_result"] = result
+        add_log(
+            f"[스케줄] 자동 트래킹 완료: {result['active']}/{result['total']}개 생존, "
+            f"{result['hidden']}개 숨김",
+            "info"
+        )
+    except Exception as e:
+        add_log(f"[스케줄] 자동 트래킹 오류: {str(e)}", "error")
+    finally:
+        tracking_state["running"] = False
+
+
+def _start_scheduler():
+    """백그라운드 스케줄러 스레드 시작"""
+    global _scheduler_started
+    if _scheduler_started:
+        return
+    _scheduler_started = True
+
+    def scheduler_loop():
+        import time as _time
+        last_run_date = None
+        target_hour = 8  # 매일 오전 8시
+
+        while True:
+            now = datetime.now()
+            today = now.date()
+
+            if now.hour == target_hour and last_run_date != today:
+                last_run_date = today
+                add_log(f"[스케줄] 오전 {target_hour}시 자동 트래킹 실행", "info")
+                try:
+                    _daily_tracking_job()
+                except Exception as e:
+                    add_log(f"[스케줄] 오류: {str(e)}", "error")
+
+            _time.sleep(60)  # 1분마다 체크
+
+    t = threading.Thread(target=scheduler_loop, daemon=True)
+    t.start()
+    add_log("[스케줄] 매일 오전 8시 자동 트래킹 스케줄러 시작됨", "info")
+
+
 if __name__ == "__main__":
+    _start_scheduler()
     app.run(host="0.0.0.0", port=5000, debug=True)

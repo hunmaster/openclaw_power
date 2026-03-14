@@ -415,6 +415,59 @@ class CommentTracker:
             "results": results,
         }
 
+    def check_selected(self, comment_ids):
+        """선택된 댓글만 트래킹합니다."""
+        return _run_in_clean_thread(self._check_selected_impl, comment_ids)
+
+    def _check_selected_impl(self, comment_ids):
+        """선택된 댓글 ID 목록만 트래킹합니다."""
+        targets = {
+            cid: self.history["comments"][cid]
+            for cid in comment_ids
+            if cid in self.history["comments"]
+            and self.history["comments"][cid]["status"] not in ("deleted", "reposted")
+        }
+
+        total = len(targets)
+        if total == 0:
+            return {"total": 0, "active": 0, "hidden": 0, "results": []}
+
+        console.print(f"[blue]선택된 {total}개 댓글 트래킹 시작...[/blue]")
+
+        results = []
+        try:
+            self._start_browser()
+
+            for idx, (comment_id, data) in enumerate(targets.items(), 1):
+                console.print(
+                    f"[dim]확인 중 ({idx}/{total}): "
+                    f"{data['account_label']} - {data['comment_text'][:30]}...[/dim]"
+                )
+                result = self.check_comment(comment_id, reuse_browser=True)
+                result["comment_id"] = comment_id
+                result["account_label"] = data["account_label"]
+                result["comment_text"] = data["comment_text"][:50]
+                result["video_id"] = data.get("video_id", "")
+                results.append(result)
+
+                if idx < total:
+                    time.sleep(3)
+
+        except Exception as e:
+            console.print(f"[red]선택 트래킹 오류: {e}[/red]")
+        finally:
+            self._close_browser()
+
+        active_count = sum(1 for r in results if r.get("alive"))
+        hidden_count = sum(1 for r in results if not r.get("alive") and "error" not in r)
+
+        return {
+            "total": total,
+            "active": active_count,
+            "hidden": hidden_count,
+            "results": results,
+        }
+
     def get_summary(self):
         """등록된 댓글들의 현재 요약 정보를 반환합니다."""
         comments = self.history.get("comments", {})

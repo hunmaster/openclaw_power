@@ -626,10 +626,15 @@
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
                 <h3 style="margin:0;font-size:15px">등록된 댓글</h3>
                 <div style="display:flex;gap:8px;align-items:center">
+                    <span id="trackSelectedCount" style="font-size:12px;color:var(--accent-light);display:none"></span>
                     <span id="repostStatus" style="font-size:12px;color:var(--text-dim)"></span>
                     <button class="btn" id="btnRepostHidden" onclick="repostHiddenComments()"
                         style="background:var(--error);color:#fff;font-size:12px">
                         블라인드 리포스팅
+                    </button>
+                    <button class="btn btn-secondary" id="btnCheckSelected" onclick="runTrackingCheckSelected()"
+                        style="display:none;font-size:12px">
+                        선택 확인
                     </button>
                     <button class="btn btn-primary" id="btnCheckAll" onclick="runTrackingCheckAll()">
                         전체 생존 확인
@@ -639,6 +644,10 @@
             <table style="width:100%;border-collapse:collapse;font-size:13px">
                 <thead>
                     <tr style="border-bottom:1px solid var(--border)">
+                        <th style="text-align:center;padding:8px;width:32px">
+                            <input type="checkbox" id="trackSelectAll" onchange="toggleTrackSelectAll(this)"
+                                style="cursor:pointer">
+                        </th>
                         <th style="text-align:left;padding:8px;color:var(--text-dim)">계정</th>
                         <th style="text-align:left;padding:8px;color:var(--text-dim)">댓글 내용</th>
                         <th style="text-align:center;padding:8px;color:var(--text-dim)">상태</th>
@@ -650,7 +659,7 @@
                     </tr>
                 </thead>
                 <tbody id="trackingTableBody">
-                    <tr><td colspan="8" style="text-align:center;padding:32px;color:var(--text-dim)">
+                    <tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text-dim)">
                         등록된 댓글이 없습니다. 댓글 작성 시 자동으로 등록됩니다.
                     </td></tr>
                 </tbody>
@@ -2463,7 +2472,7 @@
 
         const tbody = document.getElementById('trackingTableBody');
         if (!data.comments || data.comments.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--text-dim)">
+            tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text-dim)">
                 등록된 댓글이 없습니다. 댓글 작성 시 자동으로 등록됩니다.</td></tr>`;
             return;
         }
@@ -2513,6 +2522,10 @@
                 : '';
 
             return `<tr style="border-bottom:1px solid var(--border)${c.status === 'hidden' ? ';background:rgba(255,59,48,0.05)' : ''}">
+                <td style="padding:8px;text-align:center">
+                    <input type="checkbox" class="track-select-cb" data-cid="${c.comment_id}"
+                        onchange="updateTrackSelection()" style="cursor:pointer">
+                </td>
                 <td style="padding:8px">${c.account_label}</td>
                 <td style="padding:8px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
                     title="${(c.comment_text||'').replace(/"/g,'&quot;')}">${c.comment_text}</td>
@@ -2530,6 +2543,70 @@
                 </td>
             </tr>`;
         }).join('');
+    }
+
+    function toggleTrackSelectAll(masterCb) {
+        document.querySelectorAll('.track-select-cb').forEach(cb => {
+            cb.checked = masterCb.checked;
+        });
+        updateTrackSelection();
+    }
+
+    function updateTrackSelection() {
+        const checked = document.querySelectorAll('.track-select-cb:checked');
+        const countEl = document.getElementById('trackSelectedCount');
+        const btnSelected = document.getElementById('btnCheckSelected');
+        if (checked.length > 0) {
+            countEl.style.display = '';
+            countEl.textContent = `${checked.length}건 선택`;
+            btnSelected.style.display = '';
+            btnSelected.textContent = `선택 확인 (${checked.length})`;
+        } else {
+            countEl.style.display = 'none';
+            btnSelected.style.display = 'none';
+        }
+        // 전체 선택 체크박스 상태 동기화
+        const allCbs = document.querySelectorAll('.track-select-cb');
+        const masterCb = document.getElementById('trackSelectAll');
+        if (masterCb) {
+            masterCb.checked = allCbs.length > 0 && checked.length === allCbs.length;
+            masterCb.indeterminate = checked.length > 0 && checked.length < allCbs.length;
+        }
+    }
+
+    function getSelectedTrackIds() {
+        return Array.from(document.querySelectorAll('.track-select-cb:checked'))
+            .map(cb => cb.dataset.cid);
+    }
+
+    async function runTrackingCheckSelected() {
+        const ids = getSelectedTrackIds();
+        if (ids.length === 0) { alert('확인할 댓글을 선택하세요.'); return; }
+
+        const btn = document.getElementById('btnCheckSelected');
+        btn.disabled = true;
+        btn.textContent = '확인 중...';
+        document.getElementById('trackStatus').textContent = '확인 중...';
+
+        const data = await api('/api/tracking/check-selected', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({comment_ids: ids})
+        });
+        if (data && data.ok) {
+            const pollTracking = setInterval(async () => {
+                const st = await api('/api/tracking/status');
+                if (st && !st.running) {
+                    clearInterval(pollTracking);
+                    btn.disabled = false;
+                    btn.style.display = 'none';
+                    loadTrackingSummary();
+                }
+            }, 3000);
+        } else {
+            btn.disabled = false;
+            alert(data?.error || '트래킹 시작 실패');
+        }
     }
 
     async function runTrackingCheckAll() {
