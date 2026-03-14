@@ -303,7 +303,7 @@
     <!-- 탭 -->
     <div class="tabs">
         <button class="tab active" onclick="switchTab('dashboard')">대시보드</button>
-        <button class="tab" onclick="switchTab('tasks')">작업 목록</button>
+        <button class="tab" id="tabBtnTasks" onclick="switchTab('tasks')">작업 목록</button>
         <button class="tab" onclick="switchTab('accounts')">계정 관리</button>
         <button class="tab" onclick="switchTab('smm')">SMM 좋아요</button>
         <button class="tab" onclick="switchTab('settings')">설정</button>
@@ -868,6 +868,28 @@
     @keyframes initBlockPulse {
         from { width: 30%; }
         to { width: 80%; }
+    }
+    @keyframes tabLoading {
+        0%, 100% { color: var(--text-dim); }
+        50% { color: var(--accent-light); }
+    }
+    .tab-loading {
+        animation: tabLoading 1.8s ease-in-out infinite;
+        position: relative;
+    }
+    .tab-loading::after {
+        content: '';
+        position: absolute;
+        bottom: 0; left: 20%; right: 20%;
+        height: 2px;
+        background: linear-gradient(90deg, transparent, var(--accent-light), transparent);
+        animation: tabLoadingBar 1.5s ease-in-out infinite;
+        border-radius: 2px;
+    }
+    @keyframes tabLoadingBar {
+        0% { left: 20%; right: 80%; opacity: 0.3; }
+        50% { left: 10%; right: 10%; opacity: 1; }
+        100% { left: 80%; right: 20%; opacity: 0.3; }
     }
 </style>
 
@@ -2266,6 +2288,7 @@
     // ─── 초기화 (단계별 로딩) ───
     async function initApp() {
         showInitOverlay(true);
+        document.getElementById('tabBtnTasks').classList.add('tab-loading');
 
         try {
             // 1단계: 서버 연결 확인
@@ -2299,6 +2322,7 @@
         } finally {
             _initDone = true;
             showInitOverlay(false);
+            document.getElementById('tabBtnTasks').classList.remove('tab-loading');
             // 초기화 중 막혔던 팝업이 있으면 자동 제거
             const blocked = document.getElementById('initBlockPopup');
             if (blocked) blocked.remove();
