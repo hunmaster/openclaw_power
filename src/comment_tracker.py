@@ -326,29 +326,69 @@ class CommentTracker:
                     self.page.goto(video_url, wait_until="domcontentloaded")
                     time.sleep(3)
                     self._dismiss_consent()
-                    self.page.evaluate("window.scrollTo(0, 500)")
-                    time.sleep(3)
 
-                # 댓글 더 로드 (최대 5번 스크롤)
-                for _ in range(5):
-                    self.page.evaluate("window.scrollBy(0, 1000)")
+                # 댓글 섹션까지 스크롤하여 로드 트리거
+                self.page.evaluate("window.scrollTo(0, 500)")
+                time.sleep(3)
+
+                # 댓글이 로드될 때까지 대기
+                try:
+                    self.page.wait_for_selector(
+                        "ytd-comment-renderer #content-text",
+                        timeout=10000
+                    )
+                except PlaywrightTimeout:
+                    console.print("[yellow]  댓글 로드 대기 타임아웃[/yellow]")
+
+                # 댓글 더 로드 (최대 10번 스크롤, 충분히 로드)
+                prev_count = 0
+                for scroll_i in range(10):
+                    self.page.evaluate("window.scrollBy(0, 1500)")
                     time.sleep(1.5)
+                    cur_count = self.page.evaluate(
+                        "document.querySelectorAll('ytd-comment-renderer #content-text').length"
+                    )
+                    if cur_count == prev_count and cur_count > 0:
+                        break  # 더 이상 새 댓글 로드 안 됨
+                    prev_count = cur_count
+
+                console.print(f"[dim]  댓글 {prev_count}개 로드됨[/dim]")
 
                 # 댓글 목록에서 위치 찾기
                 comment_elements = self.page.query_selector_all(
-                    "#content-text.ytd-comment-renderer, "
                     "ytd-comment-renderer #content-text"
                 )
 
                 search_text = found_text or comment_text
                 if search_text:
-                    match_text = search_text[:80]
+                    match_len = min(40, len(search_text))
+                    match_prefix = search_text[:match_len].strip()
                     for idx, el in enumerate(comment_elements):
                         el_text = el.inner_text().strip()
-                        if match_text in el_text or (comment_text and comment_text[:80] in el_text):
+                        if match_prefix and match_prefix in el_text:
                             position = idx + 1  # 1-based
                             is_highlighted = position <= 3
+
+                            # 위치 찾은 김에 좋아요도 재확인
+                            try:
+                                parent = el.evaluate_handle(
+                                    "el => el.closest('ytd-comment-renderer')"
+                                )
+                                like_el = parent.as_element().query_selector(
+                                    "#vote-count-middle"
+                                )
+                                if like_el:
+                                    like_text = like_el.inner_text().strip()
+                                    parsed = self._parse_like_count(like_text)
+                                    if parsed > likes:
+                                        likes = parsed
+                            except Exception:
+                                pass
                             break
+
+                console.print(
+                    f"[dim]  위치 확인 결과: {position}위, 좋아요: {likes}[/dim]"
+                )
 
             # ── 결과 기록 ──
             check_result = {
