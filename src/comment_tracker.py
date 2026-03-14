@@ -294,12 +294,22 @@ class CommentTracker:
                                 parent = el.evaluate_handle(
                                     "el => el.closest('ytd-comment-renderer')"
                                 )
-                                like_el = parent.as_element().query_selector(
-                                    "#vote-count-middle"
-                                )
-                                if like_el:
-                                    like_text = like_el.inner_text().strip()
-                                    likes = self._parse_like_count(like_text)
+                                parent_el = parent.as_element()
+                                # YouTube 좋아요 셀렉터 (버전별 대응)
+                                like_selectors = [
+                                    "#vote-count-middle",
+                                    "span#vote-count-middle",
+                                    "#toolbar yt-formatted-string.count-text",
+                                    "#toolbar span[aria-label*='좋아요']",
+                                    "#toolbar span[aria-label*='like']",
+                                ]
+                                for like_sel in like_selectors:
+                                    like_el = parent_el.query_selector(like_sel)
+                                    if like_el:
+                                        like_text = like_el.inner_text().strip()
+                                        if like_text:
+                                            likes = self._parse_like_count(like_text)
+                                            break
                             except Exception:
                                 pass
                             break
@@ -328,16 +338,34 @@ class CommentTracker:
                     self._dismiss_consent()
 
                 # 댓글 섹션까지 스크롤하여 로드 트리거
-                self.page.evaluate("window.scrollTo(0, 500)")
+                # YouTube 댓글은 뷰포트에 들어와야 lazy-load 됨
+                # 1) 댓글 섹션 요소로 직접 스크롤 시도
+                self.page.evaluate("""
+                    const comments = document.querySelector('ytd-comments#comments, #comments');
+                    if (comments) {
+                        comments.scrollIntoView({behavior: 'instant', block: 'start'});
+                    } else {
+                        window.scrollTo(0, 800);
+                    }
+                """)
                 time.sleep(3)
 
-                # 댓글이 로드될 때까지 대기
-                try:
-                    self.page.wait_for_selector(
-                        "ytd-comment-renderer #content-text",
-                        timeout=10000
-                    )
-                except PlaywrightTimeout:
+                # 2) 댓글이 아직 안 보이면 점진적으로 더 스크롤
+                comments_loaded = False
+                for scroll_try in range(3):
+                    try:
+                        self.page.wait_for_selector(
+                            "ytd-comment-renderer #content-text",
+                            timeout=5000
+                        )
+                        comments_loaded = True
+                        break
+                    except PlaywrightTimeout:
+                        # 더 아래로 스크롤
+                        self.page.evaluate(f"window.scrollBy(0, {800 + scroll_try * 500})")
+                        time.sleep(2)
+
+                if not comments_loaded:
                     console.print("[yellow]  댓글 로드 대기 타임아웃[/yellow]")
 
                 # 댓글 더 로드 (최대 10번 스크롤, 충분히 로드)
@@ -374,14 +402,23 @@ class CommentTracker:
                                 parent = el.evaluate_handle(
                                     "el => el.closest('ytd-comment-renderer')"
                                 )
-                                like_el = parent.as_element().query_selector(
-                                    "#vote-count-middle"
-                                )
-                                if like_el:
-                                    like_text = like_el.inner_text().strip()
-                                    parsed = self._parse_like_count(like_text)
-                                    if parsed > likes:
-                                        likes = parsed
+                                parent_el = parent.as_element()
+                                like_selectors = [
+                                    "#vote-count-middle",
+                                    "span#vote-count-middle",
+                                    "#toolbar yt-formatted-string.count-text",
+                                    "#toolbar span[aria-label*='좋아요']",
+                                    "#toolbar span[aria-label*='like']",
+                                ]
+                                for like_sel in like_selectors:
+                                    like_el = parent_el.query_selector(like_sel)
+                                    if like_el:
+                                        like_text = like_el.inner_text().strip()
+                                        if like_text:
+                                            parsed = self._parse_like_count(like_text)
+                                            if parsed > likes:
+                                                likes = parsed
+                                            break
                             except Exception:
                                 pass
                             break
