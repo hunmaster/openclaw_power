@@ -672,7 +672,9 @@
                 </div>
                 <div class="form-group" style="width:150px;margin:0">
                     <label>계정 (선택)</label>
-                    <input type="text" id="manualAccountLabel" placeholder="계정명">
+                    <select id="manualAccountLabel" style="height:36px;padding:0 8px;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:13px;width:100%">
+                        <option value="">선택안함</option>
+                    </select>
                 </div>
                 <button class="btn" onclick="registerManualComment()" style="height:36px;white-space:nowrap">
                     수동 등록
@@ -2738,7 +2740,19 @@
     initApp();
 
     // ─── 댓글 트래킹 ───
+    let _trackAccountsLoaded = false;
+    async function loadTrackingAccounts() {
+        if (_trackAccountsLoaded) return;
+        const data = await api('/api/dashboard');
+        if (!data || !data.accounts) return;
+        const sel = document.getElementById('manualAccountLabel');
+        sel.innerHTML = '<option value="">선택안함</option>' +
+            data.accounts.map(a => `<option value="${a.label}">${a.label}</option>`).join('');
+        _trackAccountsLoaded = true;
+    }
+
     async function loadTrackingSummary() {
+        loadTrackingAccounts();
         const data = await api('/api/tracking/summary');
         if (!data || !data.ok) return;
 
