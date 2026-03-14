@@ -560,29 +560,40 @@ class NotionManager:
         return match.group(1) if match else url  # ID 추출 실패 시 URL 자체 반환
 
     def check_duplicates(self, tasks):
-        """작업 목록에서 이미 댓글 완료된 영상을 찾아 중복 표시합니다.
+        """작업 목록에서 이미 댓글 완료된 영상 + 배치 내 중복을 찾아 중복 표시합니다.
         Returns:
             (clean_tasks, duplicate_tasks): 중복이 아닌 작업 / 중복 작업 리스트
         """
         completed_ids = self.get_completed_video_urls()
-        if not completed_ids:
-            return tasks, []
 
         clean_tasks = []
         duplicate_tasks = []
+        seen_in_batch = set()  # 같은 배치 내 중복 체크용
 
         for task in tasks:
             vid = self._extract_video_id(task.get("youtube_url", ""))
+            is_duplicate = False
+
+            # 1) 이미 댓글 완료된 영상인지 체크
             if vid and vid in completed_ids:
+                is_duplicate = True
+                console.print(f"[yellow]중복 감지(댓글완료) → {task['youtube_url'][:50]}[/yellow]")
+
+            # 2) 같은 배치 내 중복 체크 (같은 영상이 여러 번 등록된 경우)
+            elif vid and vid in seen_in_batch:
+                is_duplicate = True
+                console.print(f"[yellow]중복 감지(배치내) → {task['youtube_url'][:50]}[/yellow]")
+
+            if is_duplicate:
                 duplicate_tasks.append(task)
-                # 노션 상태를 '중복'으로 변경
                 try:
                     self.update_task_status(task["page_id"], "중복")
-                    console.print(f"[yellow]중복 감지 → 상태 변경: {task['youtube_url'][:50]}[/yellow]")
                 except Exception as e:
                     console.print(f"[red]중복 상태 변경 실패: {e}[/red]")
             else:
                 clean_tasks.append(task)
+                if vid:
+                    seen_in_batch.add(vid)
 
         if duplicate_tasks:
             console.print(f"[yellow]중복 영상 {len(duplicate_tasks)}건 발견 → 상태를 '중복'으로 변경[/yellow]")
