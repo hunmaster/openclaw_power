@@ -263,9 +263,6 @@ def api_dashboard():
         except Exception:
             smm_balance = None
 
-    # 프록시 상태
-    proxy = ProxyManager()
-
     # 상태별 카운트 (전체 DB 1회 조회)
     status_counts = {}
     try:
@@ -283,7 +280,6 @@ def api_dashboard():
         "status_counts": status_counts,
         "smm_enabled": smm.enabled,
         "smm_balance": smm_balance,
-        "proxy_status": proxy.get_status(),
         "settings": {
             "max_comments_per_day": int(os.getenv("MAX_COMMENTS_PER_DAY", "20")),
             "comment_interval_sec": int(os.getenv("COMMENT_INTERVAL_SEC", "180")),
@@ -859,7 +855,6 @@ def api_get_settings():
         "COMMENT_INTERVAL_SEC": os.getenv("COMMENT_INTERVAL_SEC", "180"),
         "SAME_VIDEO_INTERVAL_MIN": os.getenv("SAME_VIDEO_INTERVAL_MIN", "30"),
         "HEADLESS": os.getenv("HEADLESS", "false"),
-        "USE_PROXY": os.getenv("USE_PROXY", "false"),
         "ADB_IP_CHANGE_ENABLED": os.getenv("ADB_IP_CHANGE_ENABLED", "false"),
         "ADB_PATH": os.getenv("ADB_PATH", "adb"),
         "ADB_AIRPLANE_WAIT": os.getenv("ADB_AIRPLANE_WAIT", "4"),
@@ -881,7 +876,7 @@ def api_save_settings():
             "NOTION_API_TOKEN", "NOTION_DATABASE_ID",
             "SMM_API_KEY", "SMM_ENABLED", "SMM_LIKE_SERVICE_ID", "SMM_LIKE_QUANTITY",
             "MAX_COMMENTS_PER_DAY", "COMMENT_INTERVAL_SEC", "SAME_VIDEO_INTERVAL_MIN",
-            "HEADLESS", "USE_PROXY",
+            "HEADLESS",
             "ADB_IP_CHANGE_ENABLED", "ADB_PATH", "ADB_AIRPLANE_WAIT",
             "ADB_AUTO_ETHERNET", "ADB_ETHERNET_NAME",
         }

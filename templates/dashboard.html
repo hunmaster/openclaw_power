@@ -605,8 +605,8 @@
                     <div class="form-group">
                         <label>유형</label>
                         <select id="newType">
-                            <option value="sub">부계정 (프록시 사용)</option>
-                            <option value="main">찐계정 (프록시 미사용)</option>
+                            <option value="sub">부계정</option>
+                            <option value="main">찐계정</option>
                         </select>
                     </div>
                 </div>
@@ -1880,11 +1880,11 @@
             smm: 'SMM Kings API',
             accounts: '계정 파일',
             adb: 'ADB IP 변경',
-            proxy: '프록시',
         };
 
         let html = '<div style="display:flex;flex-direction:column;gap:10px">';
         for (const [key, info] of Object.entries(data)) {
+            if (key === 'proxy') continue;  // 프록시 항목 스킵
             const icon = info.ok === true ? '&#10004;' : info.ok === false ? '&#10008;' : '&#9644;';
             const color = info.ok === true ? 'var(--green)' : info.ok === false ? 'var(--red)' : 'var(--text-dim)';
             const bg = info.ok === true ? 'rgba(0,184,148,0.08)' : info.ok === false ? 'rgba(255,107,107,0.08)' : 'rgba(136,136,160,0.08)';
