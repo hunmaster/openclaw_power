@@ -2187,27 +2187,70 @@ def api_repost():
                 comment_text = comment_data["comment_text"]
                 original_account = comment_data["account_label"]
 
-                # 원래 계정 제외하고 다른 계정 선택
-                available = [a for a in accounts if a.get("label") != original_account]
-                if not available:
-                    available = accounts  # 다른 계정 없으면 전체에서 선택
+                # ── 스마트 계정 선택 ──
+                # 우선순위:
+                #   1) 원래 블라인드된 계정 제외
+                #   2) 같은 영상에 이미 댓글 단 계정 제외 (중복 방지)
+                #   3) 직전에 사용한 계정 회피 (IP 변경 최소화)
+                #   4) 남은 일일 횟수가 가장 많은 계정 우선
+                video_id = comment_data.get("video_id", "")
 
-                # 남은 댓글 수가 가장 적은 계정 선택
-                best_account = None
-                min_count = float("inf")
+                # 해당 영상에 이미 댓글 단 계정 목록 수집
+                already_commented = set()
+                for _, cdata in comment_tracker.history["comments"].items():
+                    if (cdata.get("video_id") == video_id
+                            and cdata["status"] in ("active", "reposted")
+                            and cdata.get("account_label")):
+                        already_commented.add(cdata["account_label"])
+
+                # 1차: 원래 계정 + 이미 해당 영상에 댓글 단 계정 제외
+                available = [
+                    a for a in accounts
+                    if a.get("label") != original_account
+                    and a.get("label") not in already_commented
+                ]
+
+                # 2차: 1차에서 후보가 없으면 원래 계정만 제외
+                if not available:
+                    available = [a for a in accounts if a.get("label") != original_account]
+                    if available:
+                        add_log(f"[리포스팅] 영상 중복 필터 완화: 모든 계정이 이미 해당 영상에 댓글 작성함", "warning")
+
+                # 3차: 그래도 없으면 전체 계정
+                if not available:
+                    available = accounts
+
+                # 남은 횟수 기준 내림차순 정렬 → 직전 계정은 후순위
+                scored = []
                 for acc in available:
                     label = acc.get("label", acc.get("email", "unknown"))
                     status = safety_rules.get_account_status(label)
-                    if status["remaining"] > 0 and status["today_count"] < min_count:
-                        min_count = status["today_count"]
-                        best_account = acc
+                    remaining = status["remaining"]
+                    if remaining <= 0:
+                        continue  # 일일 한도 도달 → 스킵
 
-                if not best_account:
+                    # 점수: 남은 횟수가 높을수록 유리, 직전 계정이면 감점
+                    score = remaining
+                    if label == prev_account_label:
+                        score -= 100  # 직전 계정 페널티 (가능하면 다른 계정 우선)
+
+                    scored.append((score, remaining, label, acc))
+
+                scored.sort(key=lambda x: x[0], reverse=True)
+
+                if not scored:
                     add_log(f"[리포스팅] 사용 가능한 계정 없음 (모두 일일 한도 도달)", "error")
                     repost_state["results"]["fail"] += 1
                     continue
 
-                current_label = best_account.get("label", best_account.get("email", "unknown"))
+                # 최고 점수 계정 선택
+                best_score, best_remaining, best_label, best_account = scored[0]
+                current_label = best_label
+                add_log(
+                    f"[리포스팅] 계정 선택: {current_label} (남은횟수:{best_remaining}, "
+                    f"후보:{len(scored)}개, 영상중복제외:{len(already_commented)}개)",
+                    "debug"
+                )
                 repost_state["current_task"] = f"[리포스팅] {current_label} → {video_url[:40]}..."
 
                 # IP 변경 (비행기모드)
