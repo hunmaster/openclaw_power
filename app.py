@@ -2034,5 +2034,55 @@ def api_repost_hidden_list():
     return jsonify({"ok": True, "comments": hidden, "count": len(hidden)})
 
 
+@app.route("/api/tracking/import-notion", methods=["POST"])
+def api_tracking_import_notion():
+    """
+    노션 DB에서 댓글 URL이 있는 작업을 일괄로 트래킹 등록합니다.
+    (댓글완료 / 대댓글완료 / 좋아요작업완료 상태의 작업)
+    """
+    try:
+        notion = NotionManager()
+        tasks = notion.get_all_tasks()
+
+        imported = 0
+        skipped = 0
+        no_url = 0
+
+        for task in tasks:
+            result_url = task.get("result_url", "")
+            if not result_url or "lc=" not in result_url:
+                no_url += 1
+                continue
+
+            video_url = task.get("youtube_url", "")
+            account_label = task.get("account", "")
+            comment_text = task.get("comment_text", "")
+
+            ok = comment_tracker.register_comment(
+                result_url, video_url, account_label, comment_text
+            )
+            if ok:
+                # 이미 등록된 건 register_comment에서 True 반환하지만 실제론 스킵
+                comment_id = comment_tracker._extract_comment_id(result_url)
+                existing = comment_tracker.history["comments"].get(comment_id, {})
+                if len(existing.get("checks", [])) == 0 and existing.get("registered_at", "") >= datetime.now().strftime("%Y-%m-%d"):
+                    imported += 1
+                else:
+                    skipped += 1
+            else:
+                skipped += 1
+
+        return jsonify({
+            "ok": True,
+            "imported": imported,
+            "skipped": skipped,
+            "no_url": no_url,
+            "total_tasks": len(tasks),
+            "message": f"노션에서 {imported}개 신규 등록, {skipped}개 이미 등록됨, {no_url}개 댓글URL 없음",
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

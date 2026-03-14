@@ -591,13 +591,18 @@
             </div>
         </div>
 
-        <!-- 수동 등록 -->
+        <!-- 댓글 등록 -->
         <div class="card" style="margin-top:16px">
-            <h3 style="margin:0 0 12px;font-size:15px">기존 댓글 등록</h3>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <h3 style="margin:0;font-size:15px">댓글 등록</h3>
+                <button class="btn btn-primary" id="btnImportNotion" onclick="importFromNotion()">
+                    노션에서 일괄 가져오기
+                </button>
+            </div>
             <p style="font-size:12px;color:var(--text-dim);margin:0 0 12px">
-                이미 작성된 댓글 URL을 붙여넣어 트래킹 대상에 추가합니다.
-                (예: https://www.youtube.com/watch?v=xxxxx&lc=댓글ID)
+                노션 DB에서 댓글 URL이 있는 작업을 한 번에 가져오거나, 개별 URL을 수동 등록할 수 있습니다.
             </p>
+            <div id="importResult" style="display:none;margin-bottom:12px;padding:10px;border-radius:8px;font-size:13px"></div>
             <div style="display:flex;gap:8px;align-items:flex-end">
                 <div class="form-group" style="flex:1;margin:0">
                     <label>댓글 URL (lc= 포함)</label>
@@ -607,8 +612,8 @@
                     <label>계정 (선택)</label>
                     <input type="text" id="manualAccountLabel" placeholder="계정명">
                 </div>
-                <button class="btn btn-primary" onclick="registerManualComment()" style="height:36px;white-space:nowrap">
-                    등록
+                <button class="btn" onclick="registerManualComment()" style="height:36px;white-space:nowrap">
+                    수동 등록
                 </button>
             </div>
         </div>
@@ -2532,6 +2537,35 @@
         if (!confirm('트래킹 대상에서 제거하시겠습니까?')) return;
         await api(`/api/tracking/remove/${commentId}`, {method:'POST'});
         loadTrackingSummary();
+    }
+
+    async function importFromNotion() {
+        const btn = document.getElementById('btnImportNotion');
+        const resultDiv = document.getElementById('importResult');
+        btn.disabled = true;
+        btn.textContent = '가져오는 중...';
+        resultDiv.style.display = 'none';
+
+        const data = await api('/api/tracking/import-notion', {method: 'POST'});
+        btn.disabled = false;
+        btn.textContent = '노션에서 일괄 가져오기';
+
+        if (data && data.ok) {
+            resultDiv.style.display = 'block';
+            resultDiv.style.background = 'rgba(52,199,89,0.1)';
+            resultDiv.style.color = 'var(--success)';
+            resultDiv.innerHTML = `
+                <strong>${data.message}</strong><br>
+                <span style="font-size:12px;color:var(--text-dim)">
+                    전체 ${data.total_tasks}건 중 댓글URL 있는 작업 ${data.total_tasks - data.no_url}건 처리
+                </span>`;
+            loadTrackingSummary();
+        } else {
+            resultDiv.style.display = 'block';
+            resultDiv.style.background = 'rgba(255,59,48,0.1)';
+            resultDiv.style.color = 'var(--error)';
+            resultDiv.textContent = data?.error || '가져오기 실패';
+        }
     }
 
     async function registerManualComment() {
