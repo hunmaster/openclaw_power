@@ -2018,7 +2018,7 @@ def api_tracking_summary():
 
 @app.route("/api/tracking/check-all", methods=["POST"])
 def api_tracking_check_all():
-    """모든 등록된 댓글의 생존 상태를 확인 (백그라운드)"""
+    """모든 등록된 댓글의 노출 상태를 확인 (백그라운드)"""
     with tracking_lock:
         if tracking_state["running"]:
             return jsonify({"ok": False, "error": "이미 트래킹 진행 중입니다."})
@@ -2030,7 +2030,7 @@ def api_tracking_check_all():
             result = comment_tracker.check_all()
             tracking_state["last_result"] = result
             add_log(
-                f"[트래킹] 완료: {result['active']}/{result['total']}개 생존, "
+                f"[트래킹] 완료: {result['active']}/{result['total']}개 정상노출, "
                 f"{result['hidden']}개 숨김",
                 "info"
             )
@@ -2064,7 +2064,7 @@ def api_tracking_check_selected():
             tracking_state["last_result"] = result
             add_log(
                 f"[트래킹] 선택 {len(comment_ids)}건 완료: "
-                f"{result['active']}/{result['total']}개 생존, "
+                f"{result['active']}/{result['total']}개 정상노출, "
                 f"{result['hidden']}개 숨김",
                 "info"
             )
@@ -2404,7 +2404,7 @@ def _daily_tracking_job():
         result = comment_tracker.check_all()
         tracking_state["last_result"] = result
         add_log(
-            f"[스케줄] 자동 트래킹 완료: {result['active']}/{result['total']}개 생존, "
+            f"[스케줄] 자동 트래킹 완료: {result['active']}/{result['total']}개 정상노출, "
             f"{result['hidden']}개 숨김",
             "info"
         )

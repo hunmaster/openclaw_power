@@ -640,7 +640,7 @@
                 <div class="card-value" id="trackTotal">0</div>
             </div>
             <div class="card">
-                <div class="card-label">생존 확인</div>
+                <div class="card-label">노출 확인</div>
                 <div class="card-value" id="trackActive" style="color:var(--success)">0</div>
             </div>
             <div class="card">
@@ -695,7 +695,7 @@
                         선택 확인
                     </button>
                     <button class="btn btn-primary" id="btnCheckAll" onclick="runTrackingCheckAll()">
-                        전체 생존 확인
+                        전체 노출확인
                     </button>
                 </div>
             </div>
@@ -709,8 +709,8 @@
                         <th style="text-align:left;padding:8px;color:var(--text-dim)">계정</th>
                         <th style="text-align:left;padding:8px;color:var(--text-dim)">댓글 내용</th>
                         <th style="text-align:center;padding:8px;color:var(--text-dim)">상태</th>
-                        <th style="text-align:center;padding:8px;color:var(--text-dim)">위치</th>
-                        <th style="text-align:center;padding:8px;color:var(--text-dim)">최고위치</th>
+                        <th style="text-align:center;padding:8px;color:var(--text-dim)">노출순위</th>
+                        <th style="text-align:center;padding:8px;color:var(--text-dim)">최고순위</th>
                         <th style="text-align:center;padding:8px;color:var(--text-dim)">좋아요</th>
                         <th style="text-align:center;padding:8px;color:var(--text-dim)">마지막 확인</th>
                         <th style="text-align:center;padding:8px;color:var(--text-dim)">작업</th>
@@ -1105,6 +1105,7 @@
         if (tabName === 'accounts') loadAccountList();
         if (tabName === 'settings') loadSettings();
         if (tabName === 'smm') loadSMMInfo();
+        if (tabName === 'tracking') loadTrackingSummary();
         if (tabName === 'tracking') loadTrackingSummary();
     }
 
@@ -2375,6 +2376,7 @@
 
     // 대시보드 카운트 자동 갱신 (작업 진행에 따라)
     let _lastProgress = 0;
+    let _lastLikes = 0;
     function checkAutoRefreshDashboard(data) {
         if (data.running && data.progress > _lastProgress && data.progress > 0) {
             _lastProgress = data.progress;
@@ -2392,10 +2394,21 @@
                 pendingEl.textContent = remaining >= 0 ? remaining : '-';
             }
         }
+        // 좋아요 완료 시 트래킹 탭 건바이건 갱신
+        if (data.running && data.results.likes > _lastLikes) {
+            _lastLikes = data.results.likes;
+            // 트래킹 탭이 보이는 경우 즉시 갱신
+            const trackTab = document.getElementById('tab-tracking');
+            if (trackTab && trackTab.style.display !== 'none') {
+                loadTrackingSummary();
+            }
+        }
         if (!data.running && _lastProgress > 0) {
             // 자동화 종료 시 전체 갱신
             _lastProgress = 0;
+            _lastLikes = 0;
             loadDashboard();
+            loadTrackingSummary();
         }
     }
 
@@ -2754,24 +2767,24 @@
         tbody.innerHTML = data.comments.map(c => {
             let statusBadge;
             if (c.status === 'active') {
-                statusBadge = '<span style="color:var(--success)">● 생존</span>';
+                statusBadge = '<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(0,184,148,0.15);color:#00b894;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600"><span style="width:6px;height:6px;border-radius:50%;background:#00b894;display:inline-block"></span>정상노출</span>';
             } else if (c.status === 'hidden') {
-                statusBadge = '<span style="color:var(--error)">● 숨김</span>';
+                statusBadge = '<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(255,59,48,0.15);color:#ff3b30;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600"><span style="width:6px;height:6px;border-radius:50%;background:#ff3b30;display:inline-block"></span>숨김</span>';
             } else if (c.status === 'reposted') {
-                statusBadge = '<span style="color:var(--accent-light)">● 리포스팅됨</span>';
+                statusBadge = '<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(108,92,231,0.15);color:var(--accent-light);padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent-light);display:inline-block"></span>리포스팅됨</span>';
             } else {
-                statusBadge = '<span style="color:var(--text-dim)">● 미확인</span>';
+                statusBadge = '<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(255,255,255,0.08);color:var(--text-dim);padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600"><span style="width:6px;height:6px;border-radius:50%;background:var(--text-dim);display:inline-block"></span>미확인</span>';
             }
 
             const posText = c.position
                 ? (c.position <= 3
-                    ? `<span style="color:var(--warning);font-weight:bold">⭐ ${c.position}위</span>`
+                    ? `<span style="color:var(--warning);font-weight:bold">${c.position}위</span>`
                     : `${c.position}위`)
                 : '-';
 
             const bestText = c.best_position
                 ? (c.best_position <= 3
-                    ? `<span style="color:var(--warning);font-weight:bold">⭐ ${c.best_position}위</span>`
+                    ? `<span style="color:var(--warning);font-weight:bold">${c.best_position}위</span>`
                     : `${c.best_position}위`)
                 : '-';
 
@@ -2800,9 +2813,9 @@
                 <td style="padding:8px;text-align:center;font-size:11px;color:var(--text-dim)">${lastChecked}</td>
                 <td style="padding:8px;text-align:center;white-space:nowrap">
                     ${repostBtnHtml}
-                    <button class="btn" style="font-size:11px;padding:2px 8px"
+                    <button class="btn" style="font-size:11px;padding:3px 10px;background:var(--blue);color:#fff;border:none;border-radius:4px"
                         onclick="checkOneComment('${c.comment_id}')">확인</button>
-                    <button class="btn" style="font-size:11px;padding:2px 8px;color:var(--error)"
+                    <button class="btn" style="font-size:11px;padding:3px 10px;background:rgba(255,59,48,0.15);color:#ff3b30;border:1px solid rgba(255,59,48,0.3);border-radius:4px"
                         onclick="removeTracking('${c.comment_id}')">삭제</button>
                 </td>
             </tr>`;
@@ -2887,13 +2900,13 @@
                 if (st && !st.running) {
                     clearInterval(pollTracking);
                     btn.disabled = false;
-                    btn.textContent = '전체 생존 확인';
+                    btn.textContent = '전체 노출확인';
                     loadTrackingSummary();
                 }
             }, 3000);
         } else {
             btn.disabled = false;
-            btn.textContent = '전체 생존 확인';
+            btn.textContent = '전체 노출확인';
             alert(data?.error || '트래킹 시작 실패');
         }
     }
@@ -2964,7 +2977,7 @@
             document.getElementById('manualCommentUrl').value = '';
             document.getElementById('manualAccountLabel').value = '';
             loadTrackingSummary();
-            alert('트래킹 등록 완료! "전체 생존 확인"을 누르면 댓글 내용과 위치가 자동으로 채워집니다.');
+            alert('트래킹 등록 완료! "전체 노출확인"을 누르면 댓글 내용과 위치가 자동으로 채워집니다.');
         } else {
             alert(data?.error || '등록 실패');
         }
