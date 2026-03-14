@@ -808,7 +808,9 @@ def _run_automation(limit=0, selected_ids=None):
             return
 
         # 중복 영상 체크 (이미 댓글 완료된 영상 필터링)
-        add_log("중복 영상 체크 중...", "info")
+        automation_state["total"] = len(tasks)
+        automation_state["current_task"] = "[준비] 중복 영상 체크 중..."
+        add_log(f"대기 작업 {len(tasks)}건 로드 → 중복 영상 체크 중...", "info")
         tasks, duplicate_tasks = notion.check_duplicates(tasks)
         if duplicate_tasks:
             dup_count = len(duplicate_tasks)
@@ -817,6 +819,7 @@ def _run_automation(limit=0, selected_ids=None):
         if not tasks:
             add_log("중복 제외 후 대기 작업이 없습니다.", "warning")
             automation_state["running"] = False
+            automation_state["current_task"] = None
             return
 
         # 선택 실행: 선택된 page_id만 필터링

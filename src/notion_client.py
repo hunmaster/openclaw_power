@@ -507,47 +507,77 @@ class NotionManager:
             console.print(f"[dim]체크박스 '{checkbox_name}' 업데이트 실패 (무시)[/dim]")
 
     def get_completed_video_urls(self):
-        """댓글 완료 체크박스가 True인 작업들의 영상 URL 세트를 반환합니다.
-        중복 영상 체크에 사용됩니다."""
+        """이미 댓글 작업이 완료된 영상들의 video ID 세트를 반환합니다.
+        두 가지 방법으로 조회:
+        1) '댓글 완료' 체크박스가 True인 항목
+        2) 상태가 '댓글완료', '대댓글완료', '좋아요작업완료' 중 하나인 항목
+        """
         completed_urls = set()
-        checkbox_name = getattr(self, "col_checkbox", "댓글 완료")
-        if not checkbox_name:
-            return completed_urls
 
-        has_more = True
-        start_cursor = None
-        query_filter = {"property": checkbox_name, "checkbox": {"equals": True}}
+        # 방법 1: 체크박스 기반
+        checkbox_name = getattr(self, "col_checkbox", None)
+        if checkbox_name:
+            self._collect_video_ids_by_filter(
+                {"property": checkbox_name, "checkbox": {"equals": True}},
+                completed_urls,
+                f"체크박스({checkbox_name})",
+            )
 
-        while has_more:
+        # 방법 2: 상태 기반 (완료 상태들)
+        completed_statuses = ["댓글완료", "대댓글완료", "좋아요작업완료"]
+        for status in completed_statuses:
+            # select 타입 시도
             try:
-                kwargs = {
-                    "database_id": self.database_id,
-                    "page_size": 100,
-                    "filter": query_filter,
-                }
-                if start_cursor:
-                    kwargs["start_cursor"] = start_cursor
-                response = self.client.databases.query(**kwargs)
-
-                for page in response.get("results", []):
-                    props = page.get("properties", {})
-                    # 영상 URL 추출
-                    url_prop = props.get(self.col_youtube_url, {})
-                    url = self._extract_url(url_prop) or self._extract_text(url_prop)
-                    if url:
-                        # 쿼리 파라미터 차이 무시를 위해 video ID만 추출
-                        vid = self._extract_video_id(url)
-                        if vid:
-                            completed_urls.add(vid)
-
-                has_more = response.get("has_more", False)
-                start_cursor = response.get("next_cursor")
-            except Exception as e:
-                console.print(f"[yellow]완료 목록 조회 오류: {e}[/yellow]")
-                break
+                self._collect_video_ids_by_filter(
+                    {"property": self.col_status, "select": {"equals": status}},
+                    completed_urls,
+                    f"상태({status})",
+                )
+            except Exception:
+                # status 타입으로 재시도
+                try:
+                    self._collect_video_ids_by_filter(
+                        {"property": self.col_status, "status": {"equals": status}},
+                        completed_urls,
+                        f"상태({status})",
+                    )
+                except Exception:
+                    pass
 
         console.print(f"[dim]댓글 완료된 영상: {len(completed_urls)}개[/dim]")
         return completed_urls
+
+    def _collect_video_ids_by_filter(self, query_filter, result_set, label=""):
+        """필터 조건으로 조회하여 video ID를 result_set에 추가합니다."""
+        has_more = True
+        start_cursor = None
+        count = 0
+
+        while has_more:
+            kwargs = {
+                "database_id": self.database_id,
+                "page_size": 100,
+                "filter": query_filter,
+            }
+            if start_cursor:
+                kwargs["start_cursor"] = start_cursor
+            response = self.client.databases.query(**kwargs)
+
+            for page in response.get("results", []):
+                props = page.get("properties", {})
+                url_prop = props.get(self.col_youtube_url, {})
+                url = self._extract_url(url_prop) or self._extract_text(url_prop)
+                if url:
+                    vid = self._extract_video_id(url)
+                    if vid:
+                        result_set.add(vid)
+                        count += 1
+
+            has_more = response.get("has_more", False)
+            start_cursor = response.get("next_cursor")
+
+        if count > 0:
+            console.print(f"[dim]  {label}: {count}건[/dim]")
 
     @staticmethod
     def _extract_video_id(url):
@@ -560,40 +590,32 @@ class NotionManager:
         return match.group(1) if match else url  # ID 추출 실패 시 URL 자체 반환
 
     def check_duplicates(self, tasks):
-        """작업 목록에서 이미 댓글 완료된 영상 + 배치 내 중복을 찾아 중복 표시합니다.
+        """작업 목록에서 이미 댓글 완료된 영상을 찾아 중복 표시합니다.
+        중복 기준: 전체 DB에서 해당 영상 링크에 댓글 완료(체크박스 또는 상태)가 이미 있는 경우
+        같은 배치 내 동일 영상은 다른 계정/댓글일 수 있으므로 중복으로 처리하지 않음
         Returns:
             (clean_tasks, duplicate_tasks): 중복이 아닌 작업 / 중복 작업 리스트
         """
         completed_ids = self.get_completed_video_urls()
+        if not completed_ids:
+            console.print("[dim]완료된 영상이 없어 중복 체크 건너뜀[/dim]")
+            return tasks, []
 
         clean_tasks = []
         duplicate_tasks = []
-        seen_in_batch = set()  # 같은 배치 내 중복 체크용
 
         for task in tasks:
             vid = self._extract_video_id(task.get("youtube_url", ""))
-            is_duplicate = False
 
-            # 1) 이미 댓글 완료된 영상인지 체크
             if vid and vid in completed_ids:
-                is_duplicate = True
-                console.print(f"[yellow]중복 감지(댓글완료) → {task['youtube_url'][:50]}[/yellow]")
-
-            # 2) 같은 배치 내 중복 체크 (같은 영상이 여러 번 등록된 경우)
-            elif vid and vid in seen_in_batch:
-                is_duplicate = True
-                console.print(f"[yellow]중복 감지(배치내) → {task['youtube_url'][:50]}[/yellow]")
-
-            if is_duplicate:
                 duplicate_tasks.append(task)
+                console.print(f"[yellow]중복 감지 → {task['youtube_url'][:60]}[/yellow]")
                 try:
                     self.update_task_status(task["page_id"], "중복")
                 except Exception as e:
                     console.print(f"[red]중복 상태 변경 실패: {e}[/red]")
             else:
                 clean_tasks.append(task)
-                if vid:
-                    seen_in_batch.add(vid)
 
         if duplicate_tasks:
             console.print(f"[yellow]중복 영상 {len(duplicate_tasks)}건 발견 → 상태를 '중복'으로 변경[/yellow]")

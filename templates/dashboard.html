@@ -1365,8 +1365,13 @@
             }
             const title = isFullAuto ? 'Full Auto 진행 중' : isTest ? `테스트 진행 중${testLabel}` : '자동화 진행 중';
             document.getElementById('progressTitle').textContent = title;
-            document.getElementById('progressLabel').textContent =
-                data.current_task ? `${data.progress}/${data.total}: ${data.current_task}` : `${data.progress}/${data.total}`;
+            if (data.current_task && data.progress === 0) {
+                // 중복 체크 등 준비 단계
+                document.getElementById('progressLabel').textContent = data.current_task;
+            } else {
+                document.getElementById('progressLabel').textContent =
+                    data.current_task ? `${data.progress}/${data.total}: ${data.current_task}` : `${data.progress}/${data.total}`;
+            }
             const statusLabel = isFullAuto ? 'Full Auto' : isTest ? `테스트 ${data.limit}건` : null;
             updateStatusIndicator(true, statusLabel);
         } else if (data.total > 0 && data.progress >= data.total) {
