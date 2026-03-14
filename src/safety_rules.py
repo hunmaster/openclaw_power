@@ -75,13 +75,8 @@ class SafetyRules:
         if not passed:
             return False, reason
 
-        # 규칙 3: 같은 영상 시간 간격 (테스트 모드에서는 건너뜀)
-        if not skip_interval:
-            passed, reason = self._check_same_video_interval(video_url)
-            if not passed:
-                return False, reason
-
-        # 규칙 4: 동일/유사 문구 검사 (테스트 모드에서는 건너뜀)
+        # 규칙 3: 동일/유사 문구 검사 (테스트 모드에서는 건너뜀)
+        # (같은 영상 간격 규칙은 중복 스캔으로 대체되어 제거됨)
         if not skip_interval:
             passed, reason = self._check_duplicate_text(comment_text)
             if not passed:
@@ -289,13 +284,6 @@ class SafetyRules:
 
             # 최소 30초는 보장
             delay = max(30, delay)
-
-        elif delay_type == "same_video":
-            base = self.same_video_interval * 60  # 분 → 초
-            jitter = random.uniform(-0.3, 0.5)  # 약간 길어지는 쪽으로 편향
-            delay = base * (1 + jitter)
-            delay = max(300, delay)  # 최소 5분
-            desc = f"같은 영상 간격 대기 {int(delay // 60)}분 {int(delay % 60)}초"
 
         else:
             delay = random.uniform(60, 180)
