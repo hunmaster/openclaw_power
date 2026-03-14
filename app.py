@@ -67,6 +67,16 @@ tracking_state = {
 }
 tracking_lock = threading.Lock()
 
+# 리포스팅 상태
+repost_state = {
+    "running": False,
+    "current_task": None,
+    "progress": 0,
+    "total": 0,
+    "results": {"success": 0, "fail": 0},
+}
+repost_lock = threading.Lock()
+
 # 작업 목록 캐시 (매번 노션 API 전체 조회 방지) — 멀티 키 지원
 # { "status:date": {"tasks": [...], "fetched_at": timestamp}, ... }
 _task_cache = {}
@@ -1807,6 +1817,221 @@ def api_tracking_status():
         "running": tracking_state["running"],
         "last_result": tracking_state.get("last_result"),
     })
+
+
+# ━━━ 리포스팅 API ━━━
+
+@app.route("/api/repost", methods=["POST"])
+def api_repost():
+    """
+    블라인드/삭제된 댓글을 다른 계정 + IP 변경 후 리포스팅합니다.
+
+    요청 body:
+        comment_ids: [댓글ID 배열] - 리포스팅할 댓글 ID 목록
+    """
+    with repost_lock:
+        if repost_state["running"]:
+            return jsonify({"ok": False, "error": "이미 리포스팅 진행 중입니다."})
+        repost_state["running"] = True
+        repost_state["results"] = {"success": 0, "fail": 0}
+        repost_state["progress"] = 0
+
+    data = request.json or {}
+    comment_ids = data.get("comment_ids", [])
+
+    if not comment_ids:
+        repost_state["running"] = False
+        return jsonify({"ok": False, "error": "리포스팅할 댓글을 선택하세요."})
+
+    def run_repost():
+        try:
+            from src.youtube_bot import YouTubeBot
+
+            accounts = load_accounts()
+            if not accounts:
+                add_log("[리포스팅] 사용 가능한 계정이 없습니다.", "error")
+                return
+
+            safety_rules = SafetyRules()
+            proxy_manager = ProxyManager()
+            fingerprint_manager = FingerprintManager()
+            smm_client = SMMClient()
+            adb_changer = ADBIPChanger()
+
+            # 리포스팅 대상 수집
+            targets = []
+            for cid in comment_ids:
+                comment_data = comment_tracker.history["comments"].get(cid)
+                if comment_data and comment_data["status"] == "hidden":
+                    targets.append((cid, comment_data))
+
+            if not targets:
+                add_log("[리포스팅] 블라인드 상태인 댓글이 없습니다.", "warning")
+                return
+
+            repost_state["total"] = len(targets)
+            add_log(f"[리포스팅] {len(targets)}개 댓글 리포스팅 시작", "info")
+
+            # 원래 작성 계정을 제외한 사용 가능한 계정 목록
+            prev_account_label = None
+
+            for i, (cid, comment_data) in enumerate(targets):
+                if not repost_state["running"]:
+                    add_log("[리포스팅] 사용자에 의해 중지됨", "warning")
+                    break
+
+                repost_state["progress"] = i + 1
+                video_url = comment_data["video_url"]
+                comment_text = comment_data["comment_text"]
+                original_account = comment_data["account_label"]
+
+                # 원래 계정 제외하고 다른 계정 선택
+                available = [a for a in accounts if a.get("label") != original_account]
+                if not available:
+                    available = accounts  # 다른 계정 없으면 전체에서 선택
+
+                # 남은 댓글 수가 가장 적은 계정 선택
+                best_account = None
+                min_count = float("inf")
+                for acc in available:
+                    label = acc.get("label", acc.get("email", "unknown"))
+                    status = safety_rules.get_account_status(label)
+                    if status["remaining"] > 0 and status["today_count"] < min_count:
+                        min_count = status["today_count"]
+                        best_account = acc
+
+                if not best_account:
+                    add_log(f"[리포스팅] 사용 가능한 계정 없음 (모두 일일 한도 도달)", "error")
+                    repost_state["results"]["fail"] += 1
+                    continue
+
+                current_label = best_account.get("label", best_account.get("email", "unknown"))
+                repost_state["current_task"] = f"[리포스팅] {current_label} → {video_url[:40]}..."
+
+                # IP 변경 (비행기모드)
+                if prev_account_label and prev_account_label != current_label:
+                    if adb_changer.enabled:
+                        old_ip = adb_changer.get_current_ip()
+                        add_log(f"[리포스팅] IP 변경 중... (현재: {old_ip or '?'})", "info")
+                        success, msg = adb_changer.toggle_airplane_mode()
+                        new_ip = adb_changer.get_current_ip()
+                        add_log(f"[리포스팅] IP 변경: {old_ip or '?'} → {new_ip or '?'}", "info")
+                elif prev_account_label == current_label and i > 0:
+                    human_delay = safety_rules.get_human_delay("comment")
+                    add_log(f"[리포스팅] 🧑 {human_delay['description']}", "info")
+                    time.sleep(human_delay["delay_sec"])
+
+                # 안전 규칙 검사
+                passed, reason = safety_rules.check_all_rules(
+                    current_label, video_url, comment_text, skip_interval=True
+                )
+                if not passed:
+                    add_log(f"[리포스팅] 안전 규칙 위반: {reason}", "warning")
+                    repost_state["results"]["fail"] += 1
+                    prev_account_label = current_label
+                    continue
+
+                # 프록시 설정
+                proxy_config = None
+                if best_account.get("account_type") == "sub":
+                    proxy_url = proxy_manager.get_proxy_for_account(current_label)
+                    if proxy_url:
+                        proxy_config = proxy_manager.parse_proxy_for_playwright(proxy_url)
+
+                # 브라우저 시작 → 로그인 → 댓글 작성
+                bot = YouTubeBot(
+                    proxy_config=proxy_config,
+                    fingerprint_manager=fingerprint_manager,
+                    account_label=current_label,
+                )
+                try:
+                    bot.start_browser()
+                    login_ok = bot.login_youtube(best_account["email"], best_account["password"])
+                    if not login_ok:
+                        add_log(f"[리포스팅] 로그인 실패: {current_label}", "error")
+                        repost_state["results"]["fail"] += 1
+                        continue
+
+                    # 인간형 타이핑 속도
+                    human_delay = safety_rules.get_human_delay("comment")
+                    new_comment_url = bot.post_comment(
+                        video_url, comment_text,
+                        typing_delay_ms=human_delay["typing_delay_ms"]
+                    )
+
+                    if new_comment_url:
+                        # 성공: 기록 업데이트
+                        safety_rules.record_comment(current_label, video_url, comment_text)
+
+                        # 원본 댓글에 리포스팅 기록
+                        comment_data["reposted_as"] = new_comment_url
+                        comment_data["reposted_by"] = current_label
+                        comment_data["reposted_at"] = datetime.now().isoformat()
+                        comment_data["status"] = "reposted"
+
+                        # 새 댓글을 트래킹 등록
+                        comment_tracker.register_comment(
+                            new_comment_url, video_url, current_label, comment_text
+                        )
+                        comment_tracker._save_history()
+
+                        # SMM 좋아요 주문
+                        if smm_client.enabled:
+                            single = smm_client.order_likes(new_comment_url)
+                            if single.get("success"):
+                                add_log(f"[리포스팅] 좋아요 주문 완료: {single.get('order_id')}", "success")
+
+                        repost_state["results"]["success"] += 1
+                        add_log(
+                            f"[리포스팅] 성공! {original_account}→{current_label} | {new_comment_url[:60]}",
+                            "success"
+                        )
+                    else:
+                        repost_state["results"]["fail"] += 1
+                        add_log(f"[리포스팅] 댓글 작성 실패: {video_url[:50]}", "error")
+
+                except Exception as e:
+                    repost_state["results"]["fail"] += 1
+                    add_log(f"[리포스팅] 오류: {e}", "error")
+                finally:
+                    bot.close_browser()
+
+                prev_account_label = current_label
+
+            s = repost_state["results"]["success"]
+            f = repost_state["results"]["fail"]
+            add_log(f"[리포스팅] 완료: 성공 {s}, 실패 {f}", "info")
+
+        except Exception as e:
+            add_log(f"[리포스팅] 전체 오류: {str(e)}", "error")
+        finally:
+            repost_state["running"] = False
+            repost_state["current_task"] = None
+
+    thread = threading.Thread(target=run_repost, daemon=True)
+    thread.start()
+    return jsonify({"ok": True, "message": f"{len(comment_ids)}개 리포스팅 시작"})
+
+
+@app.route("/api/repost/stop", methods=["POST"])
+def api_repost_stop():
+    """리포스팅 중지"""
+    repost_state["running"] = False
+    return jsonify({"ok": True})
+
+
+@app.route("/api/repost/status")
+def api_repost_status():
+    """리포스팅 진행 상태"""
+    return jsonify(repost_state)
+
+
+@app.route("/api/repost/hidden-list")
+def api_repost_hidden_list():
+    """블라인드 상태인 댓글 목록 (리포스팅 대상)"""
+    summary = comment_tracker.get_summary()
+    hidden = [c for c in summary if c["status"] == "hidden"]
+    return jsonify({"ok": True, "comments": hidden, "count": len(hidden)})
 
 
 if __name__ == "__main__":

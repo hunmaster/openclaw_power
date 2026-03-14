@@ -616,9 +616,16 @@
         <div class="card" style="margin-top:16px">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
                 <h3 style="margin:0;font-size:15px">등록된 댓글</h3>
-                <button class="btn btn-primary" id="btnCheckAll" onclick="runTrackingCheckAll()">
-                    전체 생존 확인
-                </button>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <span id="repostStatus" style="font-size:12px;color:var(--text-dim)"></span>
+                    <button class="btn" id="btnRepostHidden" onclick="repostHiddenComments()"
+                        style="background:var(--error);color:#fff;font-size:12px">
+                        블라인드 리포스팅
+                    </button>
+                    <button class="btn btn-primary" id="btnCheckAll" onclick="runTrackingCheckAll()">
+                        전체 생존 확인
+                    </button>
+                </div>
             </div>
             <table style="width:100%;border-collapse:collapse;font-size:13px">
                 <thead>
@@ -2423,12 +2430,27 @@
             return;
         }
 
+        // 블라인드 리포스팅 버튼 표시 여부
+        const hiddenCount = data.comments.filter(c => c.status === 'hidden').length;
+        const repostBtn = document.getElementById('btnRepostHidden');
+        if (hiddenCount > 0) {
+            repostBtn.style.display = '';
+            repostBtn.textContent = `블라인드 리포스팅 (${hiddenCount})`;
+        } else {
+            repostBtn.style.display = 'none';
+        }
+
         tbody.innerHTML = data.comments.map(c => {
-            const statusBadge = c.status === 'active'
-                ? '<span style="color:var(--success)">● 생존</span>'
-                : c.status === 'hidden'
-                ? '<span style="color:var(--error)">● 숨김</span>'
-                : '<span style="color:var(--text-dim)">● 미확인</span>';
+            let statusBadge;
+            if (c.status === 'active') {
+                statusBadge = '<span style="color:var(--success)">● 생존</span>';
+            } else if (c.status === 'hidden') {
+                statusBadge = '<span style="color:var(--error)">● 숨김</span>';
+            } else if (c.status === 'reposted') {
+                statusBadge = '<span style="color:var(--accent-light)">● 리포스팅됨</span>';
+            } else {
+                statusBadge = '<span style="color:var(--text-dim)">● 미확인</span>';
+            }
 
             const posText = c.position
                 ? (c.position <= 3
@@ -2446,7 +2468,13 @@
                 ? new Date(c.last_checked).toLocaleString('ko-KR', {month:'numeric',day:'numeric',hour:'numeric',minute:'numeric'})
                 : '미확인';
 
-            return `<tr style="border-bottom:1px solid var(--border)">
+            // 숨김 상태일 때 리포스팅 버튼 표시
+            const repostBtnHtml = c.status === 'hidden'
+                ? `<button class="btn" style="font-size:11px;padding:2px 8px;background:var(--error);color:#fff"
+                    onclick="repostSingleComment('${c.comment_id}')">리포스팅</button>`
+                : '';
+
+            return `<tr style="border-bottom:1px solid var(--border)${c.status === 'hidden' ? ';background:rgba(255,59,48,0.05)' : ''}">
                 <td style="padding:8px">${c.account_label}</td>
                 <td style="padding:8px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
                     title="${(c.comment_text||'').replace(/"/g,'&quot;')}">${c.comment_text}</td>
@@ -2455,7 +2483,8 @@
                 <td style="padding:8px;text-align:center">${bestText}</td>
                 <td style="padding:8px;text-align:center">${c.likes || 0}</td>
                 <td style="padding:8px;text-align:center;font-size:11px;color:var(--text-dim)">${lastChecked}</td>
-                <td style="padding:8px;text-align:center">
+                <td style="padding:8px;text-align:center;white-space:nowrap">
+                    ${repostBtnHtml}
                     <button class="btn" style="font-size:11px;padding:2px 8px"
                         onclick="checkOneComment('${c.comment_id}')">확인</button>
                     <button class="btn" style="font-size:11px;padding:2px 8px;color:var(--error)"
@@ -2530,6 +2559,65 @@
             alert('트래킹 등록 완료! "전체 생존 확인"을 누르면 댓글 내용과 위치가 자동으로 채워집니다.');
         } else {
             alert(data?.error || '등록 실패');
+        }
+    }
+
+    // ─── 리포스팅 ───
+    async function repostHiddenComments() {
+        if (!confirm('블라인드된 모든 댓글을 다른 계정 + IP 변경 후 리포스팅합니다.\n\n진행하시겠습니까?')) return;
+
+        // 숨김 상태 댓글 ID 수집
+        const data = await api('/api/repost/hidden-list');
+        if (!data || !data.ok || data.count === 0) {
+            alert('블라인드 상태인 댓글이 없습니다.');
+            return;
+        }
+
+        const ids = data.comments.map(c => c.comment_id);
+        startRepost(ids);
+    }
+
+    async function repostSingleComment(commentId) {
+        if (!confirm('이 댓글을 다른 계정 + IP 변경 후 리포스팅합니다.\n\n진행하시겠습니까?')) return;
+        startRepost([commentId]);
+    }
+
+    async function startRepost(commentIds) {
+        const btn = document.getElementById('btnRepostHidden');
+        btn.disabled = true;
+        btn.textContent = '리포스팅 중...';
+        document.getElementById('repostStatus').textContent = '진행 중...';
+
+        const data = await api('/api/repost', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({comment_ids: commentIds})
+        });
+
+        if (data && data.ok) {
+            // 폴링으로 완료 대기
+            const pollRepost = setInterval(async () => {
+                const st = await api('/api/repost/status');
+                if (st) {
+                    const s = st.results?.success || 0;
+                    const f = st.results?.fail || 0;
+                    document.getElementById('repostStatus').textContent =
+                        st.running ? `${st.progress}/${st.total} (성공:${s} 실패:${f})` : '';
+
+                    if (!st.running) {
+                        clearInterval(pollRepost);
+                        btn.disabled = false;
+                        loadTrackingSummary();
+                        if (s > 0) {
+                            alert(`리포스팅 완료!\n성공: ${s}개, 실패: ${f}개`);
+                        }
+                    }
+                }
+            }, 3000);
+        } else {
+            btn.disabled = false;
+            document.getElementById('repostStatus').textContent = '';
+            alert(data?.error || '리포스팅 시작 실패');
         }
     }
 </script>

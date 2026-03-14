@@ -306,7 +306,7 @@ class CommentTracker:
         """
         active_comments = {
             cid: data for cid, data in self.history["comments"].items()
-            if data["status"] != "deleted"
+            if data["status"] not in ("deleted", "reposted")
         }
 
         total = len(active_comments)
