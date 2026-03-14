@@ -2825,10 +2825,9 @@
                 <td style="padding:8px">${c.account_label}</td>
                 <td style="padding:8px;text-align:center">${c.video_id
                     ? `<a href="https://www.youtube.com/watch?v=${c.video_id}${c.comment_id ? '&lc=' + c.comment_id : ''}" target="_blank" rel="noopener"
-                        onclick="event.preventDefault(); openIncognito(this.href)"
-                        title="시크릿/비공개 모드로 열어 실제 노출을 확인합니다"
-                        style="color:var(--blue);font-size:11px;text-decoration:none;display:inline-flex;align-items:center;gap:3px;cursor:pointer"
-                        >🔒 영상확인</a>`
+                        title="영상 페이지로 이동하여 댓글 노출을 확인합니다"
+                        style="color:var(--blue);font-size:11px;text-decoration:none;display:inline-flex;align-items:center;gap:3px"
+                        >▶ 영상확인</a>`
                     : '<span style="color:var(--text-dim);font-size:11px">-</span>'}</td>
                 <td style="padding:8px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
                     title="${(c.comment_text||'').replace(/"/g,'&quot;')}">${c.comment_text}</td>
@@ -2935,25 +2934,6 @@
             btn.textContent = '전체 노출확인';
             alert(data?.error || '트래킹 시작 실패');
         }
-    }
-
-    function openIncognito(url) {
-        // 시크릿/비공개 모드로 URL 복사 + 안내
-        navigator.clipboard.writeText(url).then(() => {
-            // 간단한 토스트 표시
-            const toast = document.createElement('div');
-            toast.textContent = '🔒 URL 복사완료! 시크릿 모드(Ctrl+Shift+N)에서 붙여넣기하세요';
-            Object.assign(toast.style, {
-                position:'fixed', bottom:'24px', left:'50%', transform:'translateX(-50%)',
-                background:'var(--card)', color:'var(--text)', padding:'12px 24px',
-                borderRadius:'8px', fontSize:'13px', zIndex:'9999',
-                border:'1px solid var(--border)', boxShadow:'0 4px 12px rgba(0,0,0,0.3)'
-            });
-            document.body.appendChild(toast);
-            setTimeout(() => toast.remove(), 3500);
-        }).catch(() => {
-            prompt('아래 URL을 복사하여 시크릿 모드(Ctrl+Shift+N)에서 열어주세요:', url);
-        });
     }
 
     async function checkOneComment(commentId) {
