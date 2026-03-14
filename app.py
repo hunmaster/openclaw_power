@@ -12,6 +12,7 @@ YouTube 댓글 자동화 - 웹 대시보드 (Flask)
 import os
 import sys
 import json
+import time
 import threading
 from datetime import datetime
 
