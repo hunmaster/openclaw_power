@@ -254,23 +254,14 @@ class CommentTracker:
             self.page.evaluate("window.scrollTo(0, 500)")
             time.sleep(3)
 
-            # lc= 파라미터로 접속하면 해당 댓글이 하이라이트됨
-            # 하이라이트된 댓글 또는 "linked comment" 영역을 찾는다
             alive = False
             likes = 0
             found_text = ""
+            position = -1
+            is_highlighted = False
 
-            # YouTube는 lc= 접속 시 해당 댓글을 상단에 "고정된 댓글"처럼 보여줌
-            # 블라인드된 댓글은 lc= 접속 시 하이라이트 영역 없이 일반 댓글만 표시됨
-            #
-            # 판별 전략:
-            # 1) "하이라이트된 댓글" 배너가 있는지 확인 (lc= 정상 동작 증거)
-            # 2) 첫 번째 댓글 텍스트가 우리 댓글과 일치하는지 확인
-            # → 둘 다 아니면 블라인드 판정
-
-            # 판별 전략: 텍스트 매칭만 신뢰
-            # YouTube 배지(linked-comment-badge)는 블라인드 댓글에서도 나타날 수 있어 신뢰 불가
-            # → 페이지에서 찾은 댓글 텍스트가 우리 댓글과 일치하는지만으로 판정
+            # lc= URL 페이지에서 댓글 생존 + 위치 + 좋아요를 한 번에 확인
+            # (headless에서 일반 영상 URL은 댓글 렌더링 안 되므로 lc= 페이지 활용)
 
             highlighted_selectors = [
                 "ytd-comment-thread-renderer.ytd-item-section-renderer #content-text",
@@ -281,7 +272,6 @@ class CommentTracker:
                 elements = self.page.query_selector_all(selector)
                 self._log(f"1단계 셀렉터 '{selector}' → {len(elements)}개 요소 발견", "debug")
                 if elements:
-                    # 모든 댓글을 순회하며 우리 댓글 텍스트와 매칭
                     for el in elements:
                         el_text = el.inner_text().strip()
                         if not el_text:
@@ -300,39 +290,83 @@ class CommentTracker:
                             alive = True
                             found_text = el_text
 
-                            # 댓글 텍스트가 비어있었다면 채워넣기 (수동 등록 시)
                             if not comment_text and found_text:
                                 comment_data["comment_text"] = found_text[:200]
 
-                            # 좋아요 수 추출
+                            # 좋아요 수 추출 (JavaScript로 직접 추출)
                             try:
                                 parent = el.evaluate_handle(
                                     "el => el.closest('ytd-comment-renderer')"
                                 )
                                 parent_el = parent.as_element()
-                                # YouTube 좋아요 셀렉터 (버전별 대응)
-                                like_selectors = [
-                                    "#vote-count-middle",
-                                    "span#vote-count-middle",
-                                    "#toolbar yt-formatted-string.count-text",
-                                    "#toolbar span[aria-label*='좋아요']",
-                                    "#toolbar span[aria-label*='like']",
-                                ]
-                                for like_sel in like_selectors:
-                                    like_el = parent_el.query_selector(like_sel)
-                                    if like_el:
-                                        like_text = like_el.inner_text().strip()
-                                        if like_text:
-                                            likes = self._parse_like_count(like_text)
-                                            break
-                            except Exception:
-                                pass
+
+                                # 방법1: aria-label에서 좋아요 수 추출
+                                like_btn = parent_el.query_selector(
+                                    "#like-button button, "
+                                    "#like-button ytd-toggle-button-renderer, "
+                                    "#like-button yt-button-shape button"
+                                )
+                                if like_btn:
+                                    aria = like_btn.get_attribute("aria-label") or ""
+                                    self._log(f"좋아요 버튼 aria-label: '{aria}'", "debug")
+                                    import re as _re
+                                    num_match = _re.search(r'(\d[\d,\.]*)', aria)
+                                    if num_match:
+                                        likes = self._parse_like_count(num_match.group(1))
+                                        self._log(f"좋아요 aria-label에서 추출: {likes}", "debug")
+
+                                # 방법2: #vote-count-middle 등 텍스트 셀렉터
+                                if likes == 0:
+                                    like_selectors = [
+                                        "#vote-count-middle",
+                                        "span#vote-count-middle",
+                                        "#toolbar yt-formatted-string.count-text",
+                                        "#toolbar span[aria-label*='좋아요']",
+                                        "#toolbar span[aria-label*='like']",
+                                    ]
+                                    for like_sel in like_selectors:
+                                        like_el = parent_el.query_selector(like_sel)
+                                        if like_el:
+                                            like_text = like_el.inner_text().strip()
+                                            self._log(f"좋아요 셀렉터 '{like_sel}' → text='{like_text}'", "debug")
+                                            if like_text:
+                                                likes = self._parse_like_count(like_text)
+                                                if likes > 0:
+                                                    break
+
+                                # 방법3: JavaScript로 좋아요 수 직접 탐색
+                                if likes == 0:
+                                    js_likes = parent_el.evaluate("""
+                                        el => {
+                                            // aria-label 에서 숫자 추출
+                                            const btns = el.querySelectorAll('button[aria-label], yt-button-shape button[aria-label]');
+                                            for (const btn of btns) {
+                                                const label = btn.getAttribute('aria-label') || '';
+                                                if (label.includes('좋아요') || label.toLowerCase().includes('like')) {
+                                                    const m = label.match(/(\\d[\\d,\\.]*)/);
+                                                    if (m) return m[1];
+                                                }
+                                            }
+                                            // vote-count 에서 텍스트 추출
+                                            const vote = el.querySelector('#vote-count-middle');
+                                            if (vote && vote.textContent.trim()) return vote.textContent.trim();
+                                            // 모든 aria-label 수집 (디버그)
+                                            const allLabels = Array.from(el.querySelectorAll('[aria-label]'))
+                                                .map(e => e.getAttribute('aria-label')).filter(Boolean);
+                                            return 'NO_LIKES_FOUND|labels:' + allLabels.join('|');
+                                        }
+                                    """)
+                                    self._log(f"좋아요 JS 탐색 결과: '{js_likes}'", "debug")
+                                    if js_likes and not js_likes.startswith("NO_LIKES"):
+                                        likes = self._parse_like_count(str(js_likes))
+
+                            except Exception as e:
+                                self._log(f"좋아요 추출 오류: {e}", "warning")
                             break
 
                     if alive:
                         self._log(f"1단계 결과: 텍스트 매칭 성공, 좋아요={likes}, found_text={found_text[:60]}", "info")
                     else:
-                        # 첫 번째 댓글 텍스트를 로그로 남김 (디버그용)
                         sample = elements[0].inner_text().strip()[:60] if elements else "없음"
                         self._log(
                             f"1단계 결과: 텍스트 불일치 → 블라인드 판정\n"
@@ -341,158 +375,90 @@ class CommentTracker:
                         )
                     break
 
-            # ── 2단계: 영상 전체 댓글에서 위치 확인 ──
-            position = -1
-            is_highlighted = False
+            # ── 2단계: lc= 페이지에서 댓글 위치 확인 ──
+            # (headless에서 일반 영상 URL은 댓글이 로드되지 않으므로
+            #  lc= 페이지에 이미 로드된 댓글 목록을 활용)
 
             if alive:
-                # 영상 페이지로 이동 (인기순 정렬 기본)
-                if video_url and video_url != comment_url:
-                    self._log(f"2단계 시작: 영상 페이지 이동 → {video_url}", "debug")
-                    self.page.goto(video_url, wait_until="domcontentloaded")
-                    time.sleep(3)
-                    self._dismiss_consent()
-                else:
-                    self._log(f"2단계: video_url='{video_url}', comment_url과 동일하여 페이지 이동 안함", "warning")
+                self._log("2단계: lc= 페이지에서 댓글 위치 확인 시작", "debug")
 
-                # 현재 페이지 URL 확인
-                current_url = self.page.url
-                self._log(f"2단계 현재 페이지: {current_url}", "debug")
-
-                # 댓글 섹션 요소 존재 여부 확인
-                has_comments_section = self.page.evaluate("""
-                    (() => {
-                        const el = document.querySelector('ytd-comments#comments, #comments');
-                        return el ? el.tagName + ' found' : 'NOT found';
-                    })()
-                """)
-                self._log(f"2단계 댓글 섹션 요소: {has_comments_section}", "debug")
-
-                # 댓글 섹션까지 스크롤하여 로드 트리거
-                # YouTube 댓글은 뷰포트에 들어와야 lazy-load 됨
-                # 1) 댓글 섹션 요소로 직접 스크롤 시도
-                scroll_result = self.page.evaluate("""
-                    (() => {
-                        const comments = document.querySelector('ytd-comments#comments, #comments');
-                        if (comments) {
-                            comments.scrollIntoView({behavior: 'instant', block: 'start'});
-                            return 'scrollIntoView 실행됨';
-                        } else {
-                            window.scrollTo(0, 800);
-                            return 'comments 요소 없음 → fallback scrollTo(0, 800)';
-                        }
-                    })()
-                """)
-                self._log(f"2단계 스크롤: {scroll_result}", "debug")
-                time.sleep(3)
-
-                # 2) 댓글이 아직 안 보이면 점진적으로 더 스크롤
-                comments_loaded = False
-                for scroll_try in range(3):
-                    try:
-                        self.page.wait_for_selector(
-                            "ytd-comment-renderer #content-text",
-                            timeout=5000
-                        )
-                        comments_loaded = True
-                        self._log(f"2단계 댓글 로드 성공 (시도 {scroll_try + 1}회)", "debug")
-                        break
-                    except PlaywrightTimeout:
-                        scroll_amount = 800 + scroll_try * 500
-                        self._log(f"2단계 댓글 미로드 → 추가 스크롤 {scroll_amount}px (시도 {scroll_try + 1}/3)", "debug")
-                        self.page.evaluate(f"window.scrollBy(0, {scroll_amount})")
-                        time.sleep(2)
-
-                if not comments_loaded:
-                    self._log("2단계 실패: 댓글 로드 타임아웃 (3회 스크롤 시도 후에도 댓글 없음)", "warning")
-                    # 페이지 HTML 일부를 로그에 남김
-                    page_info = self.page.evaluate("""
-                        (() => {
-                            const body = document.body;
-                            const title = document.title;
-                            const commentSections = document.querySelectorAll('[id*="comment"], [class*="comment"]');
-                            const sectionInfo = Array.from(commentSections).slice(0, 5).map(
-                                el => el.tagName + '#' + el.id + '.' + el.className.split(' ')[0]
-                            );
-                            return {
-                                title: title,
-                                url: location.href,
-                                bodyLen: body.innerHTML.length,
-                                commentSections: sectionInfo
-                            };
-                        })()
-                    """)
-                    self._log(f"2단계 페이지 진단: title={page_info.get('title', '?')[:50]}, "
-                              f"bodyLen={page_info.get('bodyLen', 0)}, "
-                              f"comment요소={page_info.get('commentSections', [])}", "warning")
-
-                # 댓글 더 로드 (최대 10번 스크롤, 충분히 로드)
+                # 댓글을 더 로드하기 위해 스크롤
                 prev_count = 0
                 for scroll_i in range(10):
                     self.page.evaluate("window.scrollBy(0, 1500)")
                     time.sleep(1.5)
                     cur_count = self.page.evaluate(
-                        "document.querySelectorAll('ytd-comment-renderer #content-text').length"
+                        "document.querySelectorAll('ytd-comment-thread-renderer #content-text').length"
                     )
                     if cur_count == prev_count and cur_count > 0:
-                        break  # 더 이상 새 댓글 로드 안 됨
+                        break
                     prev_count = cur_count
 
                 self._log(f"2단계 댓글 {prev_count}개 로드됨", "debug")
 
-                # 댓글 목록에서 위치 찾기
+                # 모든 댓글에서 위치 찾기
                 comment_elements = self.page.query_selector_all(
-                    "ytd-comment-renderer #content-text"
+                    "ytd-comment-thread-renderer #content-text"
                 )
 
                 search_text = found_text or comment_text
-                self._log(f"2단계 텍스트 매칭: 검색어='{search_text[:50] if search_text else '(없음)'}', "
-                          f"댓글요소={len(comment_elements)}개", "debug")
-
-                if search_text:
+                if search_text and comment_elements:
                     match_len = min(40, len(search_text))
                     match_prefix = search_text[:match_len].strip()
 
-                    # 처음 5개 댓글 텍스트 로그 (디버그용)
+                    # 처음 5개 댓글 로그
                     for dbg_idx, dbg_el in enumerate(comment_elements[:5]):
                         dbg_text = dbg_el.inner_text().strip()[:60]
                         self._log(f"  댓글[{dbg_idx}]: {dbg_text}", "debug")
 
+                    # lc= 페이지에서 첫 번째 댓글은 하이라이트(우리 댓글)
+                    # 두 번째부터가 인기순 정렬된 일반 댓글
+                    # → 일반 댓글 중에서 우리 댓글 위치를 찾음
+                    found_in_regular = False
                     for idx, el in enumerate(comment_elements):
+                        if idx == 0:
+                            continue  # 하이라이트 댓글 건너뜀
                         el_text = el.inner_text().strip()
                         if match_prefix and match_prefix in el_text:
-                            position = idx + 1  # 1-based
+                            position = idx  # 인기순 목록에서의 위치 (1-based: idx=1→1위)
                             is_highlighted = position <= 3
+                            found_in_regular = True
+                            self._log(f"2단계 인기순 목록에서 발견: {position}위", "info")
 
-                            # 위치 찾은 김에 좋아요도 재확인
+                            # 좋아요 재확인
                             try:
                                 parent = el.evaluate_handle(
                                     "el => el.closest('ytd-comment-renderer')"
                                 )
-                                parent_el = parent.as_element()
-                                like_selectors = [
-                                    "#vote-count-middle",
-                                    "span#vote-count-middle",
-                                    "#toolbar yt-formatted-string.count-text",
-                                    "#toolbar span[aria-label*='좋아요']",
-                                    "#toolbar span[aria-label*='like']",
-                                ]
-                                for like_sel in like_selectors:
-                                    like_el = parent_el.query_selector(like_sel)
-                                    if like_el:
-                                        like_text = like_el.inner_text().strip()
-                                        self._log(f"2단계 좋아요 셀렉터 '{like_sel}' → '{like_text}'", "debug")
-                                        if like_text:
-                                            parsed = self._parse_like_count(like_text)
-                                            if parsed > likes:
-                                                likes = parsed
-                                            break
-                            except Exception as e:
-                                self._log(f"2단계 좋아요 추출 오류: {e}", "warning")
+                                js_likes = parent.as_element().evaluate("""
+                                    el => {
+                                        const btns = el.querySelectorAll('button[aria-label], yt-button-shape button[aria-label]');
+                                        for (const btn of btns) {
+                                            const label = btn.getAttribute('aria-label') || '';
+                                            if (label.includes('좋아요') || label.toLowerCase().includes('like')) {
+                                                const m = label.match(/(\\d[\\d,\\.]*)/);
+                                                if (m) return m[1];
+                                            }
+                                        }
+                                        const vote = el.querySelector('#vote-count-middle');
+                                        if (vote && vote.textContent.trim()) return vote.textContent.trim();
+                                        return '';
+                                    }
+                                """)
+                                if js_likes:
+                                    parsed = self._parse_like_count(str(js_likes))
+                                    if parsed > likes:
+                                        likes = parsed
+                            except Exception:
+                                pass
                             break
 
-                    if position == -1:
-                        self._log(f"2단계 실패: '{match_prefix}' 텍스트가 {len(comment_elements)}개 댓글에서 미발견", "warning")
+                    if not found_in_regular:
+                        # 인기순 목록에서 못 찾았지만 하이라이트로는 확인됨
+                        # → 최소한 position=1로 설정 (페이지 최상단 노출)
+                        position = 1
+                        is_highlighted = True
+                        self._log("2단계: 인기순 목록에서 미발견 → 하이라이트 위치(1위)로 설정", "debug")
 
                 self._log(f"2단계 최종 결과: 위치={position}, 좋아요={likes}", "info")
 
