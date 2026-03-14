@@ -1457,6 +1457,34 @@
         }
     }
 
+    // ─── 중복 스캔 오버레이 ───
+    let _dupScanTimer = null;
+    function showDupScanOverlay(show, phase) {
+        const overlay = document.getElementById('loadingOverlay');
+        const bar = document.getElementById('loadingBar');
+        const title = document.getElementById('loadingTitle');
+        const detail = document.getElementById('loadingDetail');
+        overlay.style.display = show ? 'flex' : 'none';
+        if (show) {
+            title.textContent = '중복 스캔 진행 중...';
+            detail.textContent = phase || '대기 작업 목록을 가져오는 중...';
+            bar.style.width = '10%';
+            let tick = 10;
+            if (_dupScanTimer) clearInterval(_dupScanTimer);
+            _dupScanTimer = setInterval(() => {
+                tick = Math.min(tick + 3, 90);
+                bar.style.width = tick + '%';
+                if (tick < 40) detail.textContent = '대기 작업 목록을 가져오는 중...';
+                else if (tick < 70) detail.textContent = '완료된 영상 DB 조회 중...';
+                else detail.textContent = '중복 비교 분석 중...';
+            }, 600);
+        } else {
+            if (_dupScanTimer) { clearInterval(_dupScanTimer); _dupScanTimer = null; }
+            bar.style.width = '100%';
+            setTimeout(() => { overlay.style.display = 'none'; }, 300);
+        }
+    }
+
     // ─── 중복 사전 스캔 ───
     async function runDuplicateScan() {
         const btn = document.getElementById('btnDupScan');
@@ -1466,15 +1494,15 @@
 
         btn.disabled = true;
         btn.textContent = '스캔 중...';
-        resultPanel.style.display = 'block';
-        resultBody.innerHTML = '<div style="color:var(--text-dim);padding:12px">전체 DB에서 완료된 영상 목록 조회 중...</div>';
-        resultTitle.textContent = '중복 스캔 진행 중';
+        showDupScanOverlay(true);
 
         try {
             const data = await api('/api/duplicate-scan', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' }
             });
+            showDupScanOverlay(false);
+            resultPanel.style.display = 'block';
 
             if (!data) {
                 resultBody.innerHTML = '<div style="color:var(--red)">스캔 실패</div>';
@@ -1530,6 +1558,8 @@
                 resultBody.innerHTML = html;
             }
         } catch (e) {
+            showDupScanOverlay(false);
+            resultPanel.style.display = 'block';
             resultBody.innerHTML = `<div style="color:var(--red)">스캔 오류: ${e.message}</div>`;
         } finally {
             btn.disabled = false;
@@ -1550,12 +1580,14 @@
         const btnStart = document.getElementById('btnStart');
         btnStart.disabled = true;
         btnStart.textContent = '스캔 중...';
+        showDupScanOverlay(true, '자동화 시작 전 중복 사전 스캔 중...');
 
         try {
             const scanData = await api('/api/duplicate-scan', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' }
             });
+            showDupScanOverlay(false);
 
             if (scanData && scanData.duplicate_count > 0) {
                 // 스캔 결과 패널에 표시
@@ -1580,6 +1612,7 @@
                 }
             }
         } catch (e) {
+            showDupScanOverlay(false);
             // 스캔 실패 시에도 자동화는 진행 (2차 체크가 있으므로)
             console.warn('사전 스캔 실패, 자동화 내 2차 체크로 진행:', e);
         }
