@@ -662,6 +662,64 @@
     </div>
 </div>
 
+<!-- 작업목록 로딩 오버레이 (불러오기 버튼용) -->
+<div id="loadingOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:9999;justify-content:center;align-items:center">
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:32px 48px;text-align:center;min-width:360px;box-shadow:0 8px 32px rgba(0,0,0,0.4)">
+        <div style="font-size:16px;font-weight:600;margin-bottom:16px;color:var(--text)" id="loadingTitle">데이터 불러오는 중...</div>
+        <div style="height:16px;background:var(--border);border-radius:8px;overflow:hidden;margin-bottom:12px">
+            <div id="loadingBar" style="height:100%;border-radius:8px;background:linear-gradient(90deg,var(--accent),var(--accent-light));transition:width 0.3s ease;width:0%"></div>
+        </div>
+        <div style="font-size:13px;color:var(--text-dim)" id="loadingDetail">노션 API에서 데이터를 가져오고 있습니다...</div>
+    </div>
+</div>
+
+<!-- 페이지 초기화 오버레이 -->
+<div id="initOverlay" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(10,10,18,0.85);z-index:10000;display:flex;justify-content:center;align-items:center">
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:36px 48px;min-width:400px;max-width:480px;box-shadow:0 8px 32px rgba(0,0,0,0.5)">
+        <div style="font-size:18px;font-weight:700;margin-bottom:6px;color:var(--text)">YT 댓글 자동화</div>
+        <div style="font-size:13px;color:var(--text-dim);margin-bottom:24px">시스템을 초기화하고 있습니다...</div>
+
+        <div id="initSteps" style="display:flex;flex-direction:column;gap:14px">
+            <div class="init-step" data-step="server" style="display:flex;align-items:center;gap:12px">
+                <div class="init-icon" style="width:22px;height:22px;border-radius:50%;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0"></div>
+                <div>
+                    <div style="font-size:14px;color:var(--text-dim)">서버 연결 확인</div>
+                    <div class="init-detail" style="font-size:11px;color:var(--text-dim);opacity:0.6">대기 중</div>
+                </div>
+            </div>
+            <div class="init-step" data-step="dashboard" style="display:flex;align-items:center;gap:12px">
+                <div class="init-icon" style="width:22px;height:22px;border-radius:50%;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0"></div>
+                <div>
+                    <div style="font-size:14px;color:var(--text-dim)">대시보드 데이터</div>
+                    <div class="init-detail" style="font-size:11px;color:var(--text-dim);opacity:0.6">대기 중</div>
+                </div>
+            </div>
+            <div class="init-step" data-step="tasks" style="display:flex;align-items:center;gap:12px">
+                <div class="init-icon" style="width:22px;height:22px;border-radius:50%;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0"></div>
+                <div>
+                    <div style="font-size:14px;color:var(--text-dim)">작업 목록 (노션 DB)</div>
+                    <div class="init-detail" style="font-size:11px;color:var(--text-dim);opacity:0.6">대기 중</div>
+                </div>
+            </div>
+        </div>
+
+        <div style="margin-top:20px;height:4px;background:var(--border);border-radius:4px;overflow:hidden">
+            <div id="initProgressBar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent-light));transition:width 0.4s ease;border-radius:4px"></div>
+        </div>
+    </div>
+</div>
+
+<style>
+    @keyframes initSpin {
+        to { transform: rotate(360deg); }
+    }
+    .init-spinner {
+        width:22px;height:22px;border-radius:50%;
+        border:2px solid var(--border);border-top-color:var(--accent);
+        animation: initSpin 0.8s linear infinite;
+    }
+</style>
+
 <script>
     // ─── 탭 전환 ───
     function switchTab(tabName) {
@@ -1768,64 +1826,6 @@
     }
     initApp();
 </script>
-<!-- 작업목록 로딩 오버레이 (불러오기 버튼용) -->
-<div id="loadingOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:9999;justify-content:center;align-items:center">
-    <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:32px 48px;text-align:center;min-width:360px;box-shadow:0 8px 32px rgba(0,0,0,0.4)">
-        <div style="font-size:16px;font-weight:600;margin-bottom:16px;color:var(--text)" id="loadingTitle">데이터 불러오는 중...</div>
-        <div style="height:16px;background:var(--border);border-radius:8px;overflow:hidden;margin-bottom:12px">
-            <div id="loadingBar" style="height:100%;border-radius:8px;background:linear-gradient(90deg,var(--accent),var(--accent-light));transition:width 0.3s ease;width:0%"></div>
-        </div>
-        <div style="font-size:13px;color:var(--text-dim)" id="loadingDetail">노션 API에서 데이터를 가져오고 있습니다...</div>
-    </div>
-</div>
-
-<!-- 페이지 초기화 오버레이 -->
-<div id="initOverlay" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(10,10,18,0.85);z-index:10000;display:flex;justify-content:center;align-items:center">
-    <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:36px 48px;min-width:400px;max-width:480px;box-shadow:0 8px 32px rgba(0,0,0,0.5)">
-        <div style="font-size:18px;font-weight:700;margin-bottom:6px;color:var(--text)">YT 댓글 자동화</div>
-        <div style="font-size:13px;color:var(--text-dim);margin-bottom:24px">시스템을 초기화하고 있습니다...</div>
-
-        <div id="initSteps" style="display:flex;flex-direction:column;gap:14px">
-            <div class="init-step" data-step="server" style="display:flex;align-items:center;gap:12px">
-                <div class="init-icon" style="width:22px;height:22px;border-radius:50%;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0"></div>
-                <div>
-                    <div style="font-size:14px;color:var(--text-dim)">서버 연결 확인</div>
-                    <div class="init-detail" style="font-size:11px;color:var(--text-dim);opacity:0.6">대기 중</div>
-                </div>
-            </div>
-            <div class="init-step" data-step="dashboard" style="display:flex;align-items:center;gap:12px">
-                <div class="init-icon" style="width:22px;height:22px;border-radius:50%;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0"></div>
-                <div>
-                    <div style="font-size:14px;color:var(--text-dim)">대시보드 데이터</div>
-                    <div class="init-detail" style="font-size:11px;color:var(--text-dim);opacity:0.6">대기 중</div>
-                </div>
-            </div>
-            <div class="init-step" data-step="tasks" style="display:flex;align-items:center;gap:12px">
-                <div class="init-icon" style="width:22px;height:22px;border-radius:50%;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0"></div>
-                <div>
-                    <div style="font-size:14px;color:var(--text-dim)">작업 목록 (노션 DB)</div>
-                    <div class="init-detail" style="font-size:11px;color:var(--text-dim);opacity:0.6">대기 중</div>
-                </div>
-            </div>
-        </div>
-
-        <div style="margin-top:20px;height:4px;background:var(--border);border-radius:4px;overflow:hidden">
-            <div id="initProgressBar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent-light));transition:width 0.4s ease;border-radius:4px"></div>
-        </div>
-    </div>
-</div>
-
-<style>
-    @keyframes initSpin {
-        to { transform: rotate(360deg); }
-    }
-    .init-spinner {
-        width:22px;height:22px;border-radius:50%;
-        border:2px solid var(--border);border-top-color:var(--accent);
-        animation: initSpin 0.8s linear infinite;
-    }
-</style>
-
 
 </body>
 </html>
