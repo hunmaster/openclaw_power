@@ -28,6 +28,7 @@ from src.proxy_manager import ProxyManager
 from src.fingerprint import FingerprintManager
 from src.safety_rules import SafetyRules
 from src.smm_client import SMMClient
+from src.adb_ip_changer import ADBIPChanger
 
 app = Flask(__name__)
 
@@ -672,6 +673,9 @@ def api_get_settings():
         "SAME_VIDEO_INTERVAL_MIN": os.getenv("SAME_VIDEO_INTERVAL_MIN", "30"),
         "HEADLESS": os.getenv("HEADLESS", "false"),
         "USE_PROXY": os.getenv("USE_PROXY", "false"),
+        "ADB_IP_CHANGE_ENABLED": os.getenv("ADB_IP_CHANGE_ENABLED", "false"),
+        "ADB_PATH": os.getenv("ADB_PATH", "adb"),
+        "ADB_AIRPLANE_WAIT": os.getenv("ADB_AIRPLANE_WAIT", "4"),
     })
 
 
@@ -689,6 +693,7 @@ def api_save_settings():
             "SMM_API_KEY", "SMM_ENABLED", "SMM_LIKE_SERVICE_ID", "SMM_LIKE_QUANTITY",
             "MAX_COMMENTS_PER_DAY", "COMMENT_INTERVAL_SEC", "SAME_VIDEO_INTERVAL_MIN",
             "HEADLESS", "USE_PROXY",
+            "ADB_IP_CHANGE_ENABLED", "ADB_PATH", "ADB_AIRPLANE_WAIT",
         }
 
         env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
@@ -790,7 +795,26 @@ def api_check_connections():
     else:
         results["accounts"] = {"ok": False, "message": "등록된 계정이 없습니다"}
 
-    # 5. 프록시 상태
+    # 5. ADB IP 변경 상태
+    adb_enabled = os.getenv("ADB_IP_CHANGE_ENABLED", "false").lower() == "true"
+    if not adb_enabled:
+        results["adb"] = {"ok": None, "message": "ADB IP 변경 비활성 (ADB_IP_CHANGE_ENABLED=false)"}
+    else:
+        try:
+            adb_changer = ADBIPChanger()
+            connected, info = adb_changer.check_device()
+            if connected:
+                ip = adb_changer.get_current_ip()
+                msg = f"디바이스 연결됨: {info}"
+                if ip:
+                    msg += f" (IP: {ip})"
+                results["adb"] = {"ok": True, "message": msg}
+            else:
+                results["adb"] = {"ok": False, "message": info}
+        except Exception as e:
+            results["adb"] = {"ok": False, "message": f"ADB 오류: {str(e)}"}
+
+    # 6. 프록시 상태
     use_proxy = os.getenv("USE_PROXY", "false").lower() == "true"
     if not use_proxy:
         results["proxy"] = {"ok": None, "message": "프록시 비활성 (USE_PROXY=false)"}
@@ -1176,8 +1200,19 @@ def _run_automation(limit=0, selected_ids=None):
 
             # 대기 시간
             if prev_account_label and prev_account_label != current_label:
-                add_log(f"계정 전환: {prev_account_label} → {current_label} (IP 변경 {delay_ip_change}초 대기)", "info")
-                time.sleep(delay_ip_change)
+                # ADB 비행기모드로 IP 변경
+                adb_changer = ADBIPChanger()
+                if adb_changer.enabled:
+                    add_log(f"계정 전환: {prev_account_label} → {current_label} (ADB IP 변경 중...)", "info")
+                    automation_state["current_task"] = f"[IP 변경] 비행기모드 토글 중..."
+                    success, msg = adb_changer.toggle_airplane_mode()
+                    if success:
+                        add_log(f"IP 변경 완료: {msg}", "success")
+                    else:
+                        add_log(f"IP 변경 실패: {msg} (계속 진행)", "warning")
+                else:
+                    add_log(f"계정 전환: {prev_account_label} → {current_label} (IP 변경 {delay_ip_change}초 대기)", "info")
+                    time.sleep(delay_ip_change)
             elif prev_account_label == current_label and i > 0:
                 add_log(f"같은 계정 연속 - {comment_interval}초 대기", "info")
                 time.sleep(comment_interval)

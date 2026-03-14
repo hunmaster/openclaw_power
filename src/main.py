@@ -42,6 +42,7 @@ from src.youtube_bot import YouTubeBot
 from src.fingerprint import FingerprintManager
 from src.safety_rules import SafetyRules
 from src.smm_client import SMMClient
+from src.adb_ip_changer import ADBIPChanger
 
 console = Console()
 
@@ -266,15 +267,24 @@ def run():
 
         current_label = account.get("label", account.get("email"))
 
-        # 계정 전환 시 IP 변경 대기 (비행기모드 시뮬레이션)
+        # 계정 전환 시 IP 변경 (ADB 비행기모드 or 대기)
         if prev_account_label and prev_account_label != current_label:
             console.print(
                 f"[yellow]계정 전환: {prev_account_label} → {current_label}[/yellow]"
             )
-            console.print(
-                f"[yellow]IP 변경 대기 중... ({delay_ip_change}초)[/yellow]"
-            )
-            time.sleep(delay_ip_change)
+            adb_changer = ADBIPChanger()
+            if adb_changer.enabled:
+                console.print("[yellow]ADB 비행기모드로 IP 변경 중...[/yellow]")
+                success, msg = adb_changer.toggle_airplane_mode()
+                if success:
+                    console.print(f"[green]{msg}[/green]")
+                else:
+                    console.print(f"[red]IP 변경 실패: {msg} (계속 진행)[/red]")
+            else:
+                console.print(
+                    f"[yellow]IP 변경 대기 중... ({delay_ip_change}초)[/yellow]"
+                )
+                time.sleep(delay_ip_change)
         elif prev_account_label == current_label and i > 1:
             # 같은 계정 연속 사용 시 댓글 간격 대기 (1계정 20개, 시간 간격 두고 작업)
             console.print(

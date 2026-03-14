@@ -689,6 +689,28 @@
                         </select>
                     </div>
                 </div>
+                <div>
+                    <h3 style="margin-bottom:16px;font-size:15px">ADB IP 변경 (비행기모드)</h3>
+                    <div class="form-group">
+                        <label>ADB IP 변경</label>
+                        <select id="setAdbEnabled">
+                            <option value="false">비활성</option>
+                            <option value="true">활성</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>ADB 경로</label>
+                        <input type="text" id="setAdbPath" value="adb" placeholder="adb 또는 D:\platform-tools\adb.exe">
+                    </div>
+                    <div class="form-group">
+                        <label>비행기모드 대기 (초)</label>
+                        <input type="number" id="setAdbWait" value="4" min="2" max="15">
+                    </div>
+                    <div style="margin-top:8px">
+                        <button class="btn btn-sm btn-secondary" onclick="testAdbConnection()">ADB 연결 테스트</button>
+                        <span id="adbTestMsg" style="font-size:12px;margin-left:8px"></span>
+                    </div>
+                </div>
             </div>
             <div style="margin-top:20px;display:flex;align-items:center;gap:12px">
                 <button class="btn btn-primary" onclick="saveSettings()">설정 저장</button>
@@ -1430,6 +1452,32 @@
         document.getElementById('setCommentInterval').value = data.COMMENT_INTERVAL_SEC;
         document.getElementById('setSameVideoInterval').value = data.SAME_VIDEO_INTERVAL_MIN;
         document.getElementById('setHeadless').value = data.HEADLESS;
+        document.getElementById('setAdbEnabled').value = data.ADB_IP_CHANGE_ENABLED || 'false';
+        document.getElementById('setAdbPath').value = data.ADB_PATH || 'adb';
+        document.getElementById('setAdbWait').value = data.ADB_AIRPLANE_WAIT || '4';
+    }
+
+    // ─── ADB 연결 테스트 ───
+    async function testAdbConnection() {
+        const msgEl = document.getElementById('adbTestMsg');
+        msgEl.innerHTML = '<span style="color:var(--text-dim)">테스트 중...</span>';
+        try {
+            const res = await api('/api/check-connections');
+            const data = await res.json();
+            if (data.adb) {
+                if (data.adb.ok === true) {
+                    msgEl.innerHTML = `<span style="color:var(--green)">✓ ${data.adb.message}</span>`;
+                } else if (data.adb.ok === false) {
+                    msgEl.innerHTML = `<span style="color:var(--red)">✗ ${data.adb.message}</span>`;
+                } else {
+                    msgEl.innerHTML = `<span style="color:var(--text-dim)">${data.adb.message}</span>`;
+                }
+            } else {
+                msgEl.innerHTML = '<span style="color:var(--red)">ADB 상태 확인 실패</span>';
+            }
+        } catch (e) {
+            msgEl.innerHTML = `<span style="color:var(--red)">오류: ${e.message}</span>`;
+        }
     }
 
     // ─── 설정 저장 ───
@@ -1446,6 +1494,9 @@
             COMMENT_INTERVAL_SEC: document.getElementById('setCommentInterval').value,
             SAME_VIDEO_INTERVAL_MIN: document.getElementById('setSameVideoInterval').value,
             HEADLESS: document.getElementById('setHeadless').value,
+            ADB_IP_CHANGE_ENABLED: document.getElementById('setAdbEnabled').value,
+            ADB_PATH: document.getElementById('setAdbPath').value,
+            ADB_AIRPLANE_WAIT: document.getElementById('setAdbWait').value,
         };
 
         const res = await api('/api/settings', {
@@ -1478,6 +1529,7 @@
             notion: 'Notion API',
             smm: 'SMM Kings API',
             accounts: '계정 파일',
+            adb: 'ADB IP 변경',
             proxy: '프록시',
         };
 
