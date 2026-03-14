@@ -25,14 +25,34 @@ TOKEN_COSTS = {
     "notion_sync": 1,        # 노션 동기화
 }
 
-# 좋아요 대행 가격 (토큰 단위)
-LIKE_TOKEN_COSTS = {
-    10: 5,       # 좋아요 10개 = 5토큰
-    20: 9,       # 좋아요 20개 = 9토큰
-    50: 20,      # 좋아요 50개 = 20토큰
-    100: 35,     # 좋아요 100개 = 35토큰
-    500: 150,    # 좋아요 500개 = 150토큰
-    1000: 250,   # 좋아요 1000개 = 250토큰
+# 좋아요 대행 가격 (원/개) - 3개 품질 티어
+# SMM King 원가: 약 0.59원/개 → 전부 마진
+LIKE_TIERS = {
+    "basic": {
+        "name": "베이직",
+        "description": "일반 좋아요 (속도 느림, 이탈률 있음)",
+        "price_per_unit": 10,   # 원/개
+        "min_quantity": 10,
+        "smm_service_env": "SMM_LIKE_SERVICE_ID_BASIC",
+        "badge_color": "#888",
+    },
+    "standard": {
+        "name": "스탠다드",
+        "description": "고품질 좋아요 (빠른 처리, 안정적)",
+        "price_per_unit": 15,   # 원/개
+        "min_quantity": 10,
+        "smm_service_env": "SMM_LIKE_SERVICE_ID_STANDARD",
+        "badge_color": "#3b82f6",
+        "recommended": True,
+    },
+    "premium": {
+        "name": "프리미엄",
+        "description": "최고품질 좋아요 (실제 활성 계정, 이탈 없음)",
+        "price_per_unit": 20,   # 원/개
+        "min_quantity": 10,
+        "smm_service_env": "SMM_LIKE_SERVICE_ID_PREMIUM",
+        "badge_color": "#f59e0b",
+    },
 }
 
 # 플랜별 기능 잠금
@@ -231,18 +251,16 @@ class LicenseClient:
                 break
         return f"이 기능은 {required_plan} 플랜부터 사용 가능합니다. 업그레이드해주세요."
 
-    def get_like_cost(self, quantity):
-        """좋아요 수량에 따른 토큰 비용 계산"""
+    def get_like_cost(self, quantity, tier="standard"):
+        """좋아요 비용 계산 (원 단위)"""
         if self.owner_mode:
-            return 0  # Owner는 무료
-        # 가장 가까운 상위 수량 기준으로 계산
-        sorted_tiers = sorted(LIKE_TOKEN_COSTS.keys())
-        for tier in sorted_tiers:
-            if quantity <= tier:
-                return LIKE_TOKEN_COSTS[tier]
-        # 최대 티어 초과 시 비례 계산
-        max_tier = sorted_tiers[-1]
-        return int(LIKE_TOKEN_COSTS[max_tier] * (quantity / max_tier))
+            return 0
+        tier_info = LIKE_TIERS.get(tier, LIKE_TIERS["standard"])
+        return quantity * tier_info["price_per_unit"]
+
+    def get_like_tiers(self):
+        """사용 가능한 좋아요 티어 목록 반환"""
+        return LIKE_TIERS
 
     def use_tokens(self, action, description=None):
         """토큰 소모. 성공 시 잔액 반환, 실패 시 None"""

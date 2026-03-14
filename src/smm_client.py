@@ -26,6 +26,13 @@ class SMMClient:
         self.like_quantity = int(os.getenv("SMM_LIKE_QUANTITY", "20"))
         self.enabled = os.getenv("SMM_ENABLED", "false").lower() == "true"
 
+        # 3개 티어별 서비스 ID
+        self.tier_service_ids = {
+            "basic": os.getenv("SMM_LIKE_SERVICE_ID_BASIC", self.service_id),
+            "standard": os.getenv("SMM_LIKE_SERVICE_ID_STANDARD", self.service_id),
+            "premium": os.getenv("SMM_LIKE_SERVICE_ID_PREMIUM", self.service_id),
+        }
+
         if self.enabled and not self.api_key:
             console.print("[red]SMM_API_KEY가 설정되지 않았습니다.[/red]")
             self.enabled = False
@@ -100,13 +107,14 @@ class SMMClient:
 
         return youtube_like_services
 
-    def order_likes(self, comment_url, quantity=None):
+    def order_likes(self, comment_url, quantity=None, tier="standard"):
         """
         댓글 좋아요를 주문합니다.
 
         Args:
             comment_url: 좋아요를 달 댓글 URL
-            quantity: 좋아요 수 (None이면 기본값 사용)
+            quantity: 좋아요 수 (None이면 기본값 사용, 최소 10개)
+            tier: 품질 티어 ("basic", "standard", "premium")
 
         Returns:
             dict: {"order_id": int, "success": bool, "error": str}
@@ -114,22 +122,27 @@ class SMMClient:
         if not self.enabled:
             return {"success": False, "error": "SMM 서비스 비활성화"}
 
-        if not self.service_id:
-            return {"success": False, "error": "SMM_LIKE_SERVICE_ID 미설정"}
+        # 티어별 서비스 ID 선택
+        service_id = self.tier_service_ids.get(tier, self.service_id)
+        if not service_id:
+            return {"success": False, "error": f"서비스 ID 미설정 (티어: {tier})"}
 
         if not comment_url:
             return {"success": False, "error": "댓글 URL이 없습니다"}
 
         qty = quantity or self.like_quantity
+        if qty < 10:
+            return {"success": False, "error": "최소 구매 수량은 10개입니다."}
 
+        tier_names = {"basic": "베이직", "standard": "스탠다드", "premium": "프리미엄"}
         console.print(
-            f"[blue]좋아요 주문: {comment_url[:60]}... | "
+            f"[blue]좋아요 주문 [{tier_names.get(tier, tier)}]: {comment_url[:60]}... | "
             f"수량: {qty}개[/blue]"
         )
 
         result = self._request({
             "action": "add",
-            "service": self.service_id,
+            "service": service_id,
             "link": comment_url,
             "quantity": qty,
         })
