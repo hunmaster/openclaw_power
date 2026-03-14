@@ -1,6 +1,10 @@
 """
 라이선스 클라이언트 - 프로그램에서 라이선스 서버와 통신
 프로그램 시작 시 검증, 작업 수행 시 토큰 소모
+
+LICENSE_MODE 환경변수:
+  - "owner": 개발자 모드 (모든 기능 무제한, 라이선스 검증 스킵)
+  - "client": 고객 모드 (기본값, 라이선스 검증 필수)
 """
 
 import os
@@ -21,7 +25,78 @@ TOKEN_COSTS = {
     "notion_sync": 1,        # 노션 동기화
 }
 
+# 좋아요 대행 가격 (토큰 단위)
+LIKE_TOKEN_COSTS = {
+    10: 5,       # 좋아요 10개 = 5토큰
+    20: 9,       # 좋아요 20개 = 9토큰
+    50: 20,      # 좋아요 50개 = 20토큰
+    100: 35,     # 좋아요 100개 = 35토큰
+    500: 150,    # 좋아요 500개 = 150토큰
+    1000: 250,   # 좋아요 1000개 = 250토큰
+}
+
+# 플랜별 기능 잠금
+PLAN_FEATURES = {
+    "starter": {
+        "comment_post": True,
+        "exposure_check_manual": True,
+        "notion_sync": True,
+        "auto_repost": False,          # Business부터
+        "rank_check": False,           # Business부터
+        "duplicate_scan": False,       # Business부터
+        "auto_exposure_schedule": False,  # Agency부터
+        "multi_account_parallel": False,  # Agency부터
+        "task_scheduling": False,      # Agency부터
+        "like_boost": False,           # Business부터
+        "api_access": False,           # Enterprise만
+    },
+    "business": {
+        "comment_post": True,
+        "exposure_check_manual": True,
+        "notion_sync": True,
+        "auto_repost": True,
+        "rank_check": True,
+        "duplicate_scan": True,
+        "auto_exposure_schedule": False,
+        "multi_account_parallel": True,   # 2계정
+        "task_scheduling": False,
+        "like_boost": True,
+        "api_access": False,
+    },
+    "agency": {
+        "comment_post": True,
+        "exposure_check_manual": True,
+        "notion_sync": True,
+        "auto_repost": True,
+        "rank_check": True,
+        "duplicate_scan": True,
+        "auto_exposure_schedule": True,
+        "multi_account_parallel": True,   # 5계정
+        "task_scheduling": True,
+        "like_boost": True,
+        "api_access": False,
+    },
+    "enterprise": {
+        "comment_post": True,
+        "exposure_check_manual": True,
+        "notion_sync": True,
+        "auto_repost": True,
+        "rank_check": True,
+        "duplicate_scan": True,
+        "auto_exposure_schedule": True,
+        "multi_account_parallel": True,
+        "task_scheduling": True,
+        "like_boost": True,
+        "api_access": True,
+    },
+}
+
 LICENSE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config", ".license")
+
+
+def is_owner_mode():
+    """개발자(owner) 모드인지 확인"""
+    return os.environ.get("LICENSE_MODE", "client").lower() == "owner"
 
 
 class LicenseClient:
@@ -35,6 +110,18 @@ class LicenseClient:
         self.token_balance = 0
         self._heartbeat_thread = None
         self._running = False
+        self.owner_mode = is_owner_mode()
+
+        if self.owner_mode:
+            # Owner 모드: 무제한 설정
+            self.license_info = {
+                "plan": "Owner",
+                "plan_name": "owner",
+                "is_permanent": True,
+                "max_accounts": 9999,
+                "max_devices": 9999,
+            }
+            self.token_balance = 999999999
 
     @staticmethod
     def _generate_hardware_id():
@@ -74,6 +161,8 @@ class LicenseClient:
 
     def activate(self, license_key):
         """라이선스 키로 활성화"""
+        if self.owner_mode:
+            return {"valid": True, "message": "Owner 모드"}
         self.license_key = license_key.strip()
         result = self.verify()
         if result.get("valid"):
@@ -83,6 +172,8 @@ class LicenseClient:
 
     def verify(self):
         """라이선스 서버에 검증 요청"""
+        if self.owner_mode:
+            return {"valid": True, "message": "Owner 모드"}
         if not self.license_key:
             return {"valid": False, "error": "라이선스 키가 설정되지 않았습니다."}
 
@@ -110,6 +201,8 @@ class LicenseClient:
 
     def auto_verify(self):
         """저장된 키로 자동 검증 시도"""
+        if self.owner_mode:
+            return {"valid": True, "message": "Owner 모드"}
         saved_key = self._load_key()
         if saved_key:
             self.license_key = saved_key
@@ -119,8 +212,43 @@ class LicenseClient:
             return result
         return {"valid": False, "error": "저장된 라이선스 키가 없습니다."}
 
+    def can_use_feature(self, feature_name):
+        """현재 플랜에서 해당 기능을 사용할 수 있는지 확인"""
+        if self.owner_mode:
+            return True
+        if not self.license_info:
+            return False
+        plan_name = self.license_info.get("plan_name", "starter").lower()
+        features = PLAN_FEATURES.get(plan_name, PLAN_FEATURES["starter"])
+        return features.get(feature_name, False)
+
+    def get_upgrade_message(self, feature_name):
+        """기능 잠금 시 업그레이드 안내 메시지 반환"""
+        required_plan = "Business"
+        for plan in ["business", "agency", "enterprise"]:
+            if PLAN_FEATURES[plan].get(feature_name):
+                required_plan = plan.capitalize()
+                break
+        return f"이 기능은 {required_plan} 플랜부터 사용 가능합니다. 업그레이드해주세요."
+
+    def get_like_cost(self, quantity):
+        """좋아요 수량에 따른 토큰 비용 계산"""
+        if self.owner_mode:
+            return 0  # Owner는 무료
+        # 가장 가까운 상위 수량 기준으로 계산
+        sorted_tiers = sorted(LIKE_TOKEN_COSTS.keys())
+        for tier in sorted_tiers:
+            if quantity <= tier:
+                return LIKE_TOKEN_COSTS[tier]
+        # 최대 티어 초과 시 비례 계산
+        max_tier = sorted_tiers[-1]
+        return int(LIKE_TOKEN_COSTS[max_tier] * (quantity / max_tier))
+
     def use_tokens(self, action, description=None):
         """토큰 소모. 성공 시 잔액 반환, 실패 시 None"""
+        if self.owner_mode:
+            return 999999999
+
         tokens = TOKEN_COSTS.get(action, 0)
         if tokens == 0:
             return self.token_balance  # 무료 작업
@@ -156,6 +284,8 @@ class LicenseClient:
 
     def get_balance(self):
         """토큰 잔액 조회"""
+        if self.owner_mode:
+            return 999999999
         if not self.license_key:
             return 0
         try:
