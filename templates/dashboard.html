@@ -1462,8 +1462,7 @@
         const msgEl = document.getElementById('adbTestMsg');
         msgEl.innerHTML = '<span style="color:var(--text-dim)">테스트 중...</span>';
         try {
-            const res = await api('/api/check-connections');
-            const data = await res.json();
+            const data = await api('/api/check-connections');
             if (data.adb) {
                 if (data.adb.ok === true) {
                     msgEl.innerHTML = `<span style="color:var(--green)">✓ ${data.adb.message}</span>`;
