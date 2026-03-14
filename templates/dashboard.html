@@ -383,22 +383,32 @@
     <!-- ━━━ 작업 목록 탭 ━━━ -->
     <div class="tab-content" id="tab-tasks">
         <!-- 상태 필터 탭 -->
-        <div style="display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:0">
+        <div style="display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:0;flex-wrap:wrap">
             <button class="tab task-filter active" data-status="댓글작업전" onclick="switchTaskFilter('댓글작업전', this)">댓글작업전</button>
-            <button class="tab task-filter" data-status="댓글완료" onclick="switchTaskFilter('댓글완료', this)">댓글완료 (대댓글 대기)</button>
-            <button class="tab task-filter" data-status="대댓글완료" onclick="switchTaskFilter('대댓글완료', this)">대댓글완료 (좋아요 대기)</button>
+            <button class="tab task-filter" data-status="댓글완료" onclick="switchTaskFilter('댓글완료', this)">댓글완료</button>
+            <button class="tab task-filter" data-status="대댓글완료" onclick="switchTaskFilter('대댓글완료', this)">대댓글완료</button>
             <button class="tab task-filter" data-status="좋아요작업완료" onclick="switchTaskFilter('좋아요작업완료', this)">좋아요 완료</button>
             <button class="tab task-filter" data-status="중복" onclick="switchTaskFilter('중복', this)">중복</button>
             <button class="tab task-filter" data-status="에러" onclick="switchTaskFilter('에러', this)">에러</button>
+            <button class="tab task-filter" data-status="전체" onclick="switchTaskFilter('전체', this)" style="border-left:2px solid var(--border);margin-left:4px">전체 리스트</button>
         </div>
 
-        <!-- 날짜 필터 -->
-        <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px">
-            <span style="font-size:13px;color:var(--text-dim)">날짜:</span>
-            <button class="btn btn-sm date-filter active" onclick="setDateFilter(null, this)">전체</button>
-            <button class="btn btn-sm date-filter" onclick="setDateFilter('today', this)">오늘</button>
-            <button class="btn btn-sm date-filter" onclick="setDateFilter('yesterday', this)">어제</button>
-            <input type="date" id="taskDatePicker" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:13px" onchange="setDateFilter(this.value, null)">
+        <!-- 검색 + 날짜 필터 -->
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:200px">
+                <input type="text" id="taskSearchInput" placeholder="영상 URL, 제목, 댓글, 계정으로 검색..."
+                       style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 12px;font-size:13px;flex:1"
+                       onkeydown="if(event.key==='Enter')fetchNotionTasks()">
+                <button class="btn btn-sm btn-primary" onclick="fetchNotionTasks()" style="white-space:nowrap">검색</button>
+                <button class="btn btn-sm btn-secondary" onclick="document.getElementById('taskSearchInput').value='';fetchNotionTasks()" style="white-space:nowrap">초기화</button>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center">
+                <span style="font-size:13px;color:var(--text-dim)">날짜:</span>
+                <button class="btn btn-sm date-filter active" onclick="setDateFilter(null, this)">전체</button>
+                <button class="btn btn-sm date-filter" onclick="setDateFilter('today', this)">오늘</button>
+                <button class="btn btn-sm date-filter" onclick="setDateFilter('yesterday', this)">어제</button>
+                <input type="date" id="taskDatePicker" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:13px" onchange="setDateFilter(this.value, null)">
+            </div>
         </div>
 
         <div class="table-wrap">
@@ -429,6 +439,13 @@
                     <tr><td colspan="9" style="text-align:center;color:var(--text-dim)">상태를 선택하고 불러오기를 클릭하세요</td></tr>
                 </tbody>
             </table>
+            <!-- 페이지네이션 -->
+            <div id="taskPagination" style="display:none;padding:12px;display:flex;justify-content:center;align-items:center;gap:8px;border-top:1px solid var(--border)">
+                <button class="btn btn-sm btn-secondary" id="btnPrevPage" onclick="goTaskPage(-1)">이전</button>
+                <span id="pageInfo" style="font-size:13px;color:var(--text-dim)">1 / 1</span>
+                <button class="btn btn-sm btn-secondary" id="btnNextPage" onclick="goTaskPage(1)">다음</button>
+                <span style="font-size:12px;color:var(--text-dim);margin-left:12px" id="totalCountInfo"></span>
+            </div>
         </div>
 
         <!-- DB 구조 디버그 결과 -->
@@ -715,6 +732,8 @@
     // ─── 현재 선택된 상태/날짜 필터 ───
     let currentTaskStatus = '댓글작업전';
     let currentDateFilter = null; // null=전체, 'YYYY-MM-DD'=특정 날짜
+    let currentTaskPage = 1;
+    let totalTaskPages = 1;
 
     function setDateFilter(value, btn) {
         const picker = document.getElementById('taskDatePicker');
@@ -739,7 +758,9 @@
     }
 
     // ─── 작업 목록 로드 ───
-    async function fetchNotionTasks() {
+    async function fetchNotionTasks(page) {
+        if (page !== undefined) currentTaskPage = page;
+        else currentTaskPage = 1;
         const msgEl = document.getElementById('taskFetchMsg');
         const tbody = document.getElementById('taskTableBody');
         msgEl.textContent = '노션에서 불러오는 중...';
@@ -750,20 +771,28 @@
 
     function switchTaskFilter(status, btn) {
         currentTaskStatus = status;
+        currentTaskPage = 1;
         document.querySelectorAll('.task-filter').forEach(b => b.classList.remove('active'));
         if (btn) btn.classList.add('active');
-        document.getElementById('taskTableTitle').textContent = `노션 DB 작업 (${status})`;
+        document.getElementById('taskTableTitle').textContent = status === '전체' ? '노션 DB 전체 리스트' : `노션 DB 작업 (${status})`;
         fetchNotionTasks();
+    }
+
+    function goTaskPage(delta) {
+        const newPage = currentTaskPage + delta;
+        if (newPage < 1 || newPage > totalTaskPages) return;
+        currentTaskPage = newPage;
+        fetchNotionTasks(newPage);
     }
 
     function goToTasks(status) {
         switchTab('tasks');
-        // 해당 필터 탭 활성화
         document.querySelectorAll('.task-filter').forEach(b => {
             b.classList.toggle('active', b.dataset.status === status);
         });
         currentTaskStatus = status;
-        document.getElementById('taskTableTitle').textContent = `노션 DB 작업 (${status})`;
+        currentTaskPage = 1;
+        document.getElementById('taskTableTitle').textContent = status === '전체' ? '노션 DB 전체 리스트' : `노션 DB 작업 (${status})`;
         fetchNotionTasks();
     }
 
@@ -841,27 +870,40 @@
 
     async function loadTasks(status) {
         const statusParam = status || currentTaskStatus;
-        let url = `/api/tasks?status=${encodeURIComponent(statusParam)}`;
+        const searchQuery = document.getElementById('taskSearchInput').value.trim();
+        let url = `/api/tasks?status=${encodeURIComponent(statusParam)}&page=${currentTaskPage}`;
         if (currentDateFilter) url += `&date=${currentDateFilter}`;
+        if (searchQuery) url += `&search=${encodeURIComponent(searchQuery)}`;
+
         const data = await api(url);
         const tbody = document.getElementById('taskTableBody');
         const msgEl = document.getElementById('taskFetchMsg');
+        const paginationEl = document.getElementById('taskPagination');
 
         if (!data || data.error) {
             tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--red)">${data?.error || '작업 목록 조회 실패'}</td></tr>`;
             if (msgEl) msgEl.innerHTML = `<span style="color:var(--red)">${data?.error || '조회 실패'}</span>`;
+            paginationEl.style.display = 'none';
             return;
         }
 
-        // 대시보드 카운터는 dashboard API의 pending_count(전체 개수)를 사용하므로 여기서 덮어쓰지 않음
+        // 페이지 정보 업데이트
+        totalTaskPages = data.total_pages || 1;
+        currentTaskPage = data.page || 1;
+        const totalCount = data.total_count || data.count || 0;
+
         const dateLabel = currentDateFilter ? ` (${currentDateFilter})` : '';
-        if (msgEl && data.count >= 0) msgEl.innerHTML = `<span style="color:var(--green)">${data.count}개 작업 로드됨${dateLabel}</span>`;
+        const searchLabel = searchQuery ? ` [검색: "${searchQuery}"]` : '';
+        if (msgEl) msgEl.innerHTML = `<span style="color:var(--green)">전체 ${totalCount}개${dateLabel}${searchLabel}</span>`;
 
         if (data.tasks.length === 0) {
-            const emptyMsg = currentDateFilter
-                ? `'${statusParam}' 상태의 ${currentDateFilter} 작업이 없습니다`
-                : `'${statusParam}' 상태의 작업이 없습니다`;
+            const emptyMsg = searchQuery
+                ? `검색 결과가 없습니다: "${searchQuery}"`
+                : currentDateFilter
+                    ? `'${statusParam}' 상태의 ${currentDateFilter} 작업이 없습니다`
+                    : `'${statusParam}' 상태의 작업이 없습니다`;
             tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text-dim)">${emptyMsg}</td></tr>`;
+            paginationEl.style.display = 'none';
             return;
         }
 
@@ -870,12 +912,11 @@
             '대댓글완료': 'badge-blue', '좋아요작업완료': 'badge-green',
             '중복': 'badge-orange', '에러': 'badge-red',
         };
-        const badgeClass = statusColors[statusParam] || 'badge-yellow';
+        const startIdx = (currentTaskPage - 1) * 100;
 
         tbody.innerHTML = data.tasks.map((task, i) => {
             const taskUrl = task.youtube_url || '';
             const urlDisplay = taskUrl ? `<a href="${taskUrl}" target="_blank" style="color:var(--blue);text-decoration:none">${taskUrl.substring(0, 40)}...</a>` : '-';
-            // 편집일 포맷
             let editDate = '-';
             if (task.last_edited) {
                 const d = new Date(task.last_edited);
@@ -883,19 +924,32 @@
             }
             const pageId = task.page_id || '';
             const isSelectable = (statusParam === '댓글작업전');
+            const taskStatus = task.status || statusParam;
+            const badgeClass = statusColors[taskStatus] || 'badge-yellow';
             return `
             <tr>
                 <td>${isSelectable ? `<input type="checkbox" class="task-checkbox" data-page-id="${pageId}" onchange="updateSelectedCount()">` : ''}</td>
-                <td>${i + 1}</td>
+                <td>${startIdx + i + 1}</td>
                 <td>${task.video_title ? task.video_title.substring(0, 30) + (task.video_title.length > 30 ? '...' : '') : '-'}</td>
                 <td>${urlDisplay}</td>
                 <td>${task.comment_text ? task.comment_text.substring(0, 30) + (task.comment_text.length > 30 ? '...' : '') : '-'}</td>
                 <td>${task.account || '-'}</td>
                 <td>${task.brand || '-'}</td>
                 <td style="font-size:12px;color:var(--text-dim);white-space:nowrap">${editDate}</td>
-                <td><span class="badge ${badgeClass}">${task.status || statusParam}</span></td>
+                <td><span class="badge ${badgeClass}">${taskStatus}</span></td>
             </tr>`;
         }).join('');
+
+        // 페이지네이션 표시
+        if (totalTaskPages > 1) {
+            paginationEl.style.display = 'flex';
+            document.getElementById('pageInfo').textContent = `${currentTaskPage} / ${totalTaskPages}`;
+            document.getElementById('btnPrevPage').disabled = currentTaskPage <= 1;
+            document.getElementById('btnNextPage').disabled = currentTaskPage >= totalTaskPages;
+            document.getElementById('totalCountInfo').textContent = `전체 ${totalCount}건`;
+        } else {
+            paginationEl.style.display = 'none';
+        }
 
         // 선택 실행 버튼 표시 (댓글작업전 상태일 때만)
         const btnRunSelected = document.getElementById('btnRunSelected');

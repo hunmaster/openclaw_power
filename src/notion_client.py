@@ -198,81 +198,98 @@ class NotionManager:
         return count
 
     def get_tasks_by_status(self, status_value, date_filter=None):
-        """지정된 상태의 작업 목록을 가져옵니다. date_filter: 'YYYY-MM-DD' 형식 날짜."""
+        """지정된 상태의 작업 목록을 페이지네이션으로 전부 가져옵니다."""
         console.print(f"[blue]노션 DB 조회 (상태: '{status_value}', 날짜: {date_filter or '전체'})[/blue]")
 
         # 상태 필터 구성
-        status_filter = {"property": self.col_status, "select": {"equals": status_value}}
-
-        # 날짜 필터가 있으면 AND 조건으로 결합
-        if date_filter:
-            query_filter = {
-                "and": [
-                    status_filter,
-                    {
-                        "timestamp": "last_edited_time",
-                        "last_edited_time": {"on_or_after": f"{date_filter}T00:00:00+09:00"},
-                    },
-                    {
-                        "timestamp": "last_edited_time",
-                        "last_edited_time": {"before": f"{date_filter}T23:59:59+09:00"},
-                    },
-                ]
-            }
-        else:
-            query_filter = status_filter
-
-        try:
-            response = self.client.databases.query(
-                database_id=self.database_id,
-                page_size=100,
-                filter=query_filter,
-            )
-            console.print(f"[green]select 필터 성공: {len(response.get('results', []))}건[/green]")
-        except Exception as e1:
-            console.print(f"[yellow]select 필터 실패: {e1}[/yellow]")
-            # status 타입으로 재시도
+        def build_filter(use_status_type=False):
+            st = "status" if use_status_type else "select"
+            sf = {"property": self.col_status, st: {"equals": status_value}}
             if date_filter:
-                status_filter = {"property": self.col_status, "status": {"equals": status_value}}
-                query_filter = {
+                return {
                     "and": [
-                        status_filter,
+                        sf,
                         {"timestamp": "last_edited_time", "last_edited_time": {"on_or_after": f"{date_filter}T00:00:00+09:00"}},
                         {"timestamp": "last_edited_time", "last_edited_time": {"before": f"{date_filter}T23:59:59+09:00"}},
                     ]
                 }
-            else:
-                query_filter = {"property": self.col_status, "status": {"equals": status_value}}
-            try:
-                response = self.client.databases.query(
-                    database_id=self.database_id,
-                    page_size=100,
-                    filter=query_filter,
-                )
-                console.print(f"[green]status 필터 성공: {len(response.get('results', []))}건[/green]")
-            except Exception as e2:
-                console.print(f"[yellow]status 필터도 실패: {e2}[/yellow]")
-                console.print("[yellow]필터 없이 전체 데이터를 가져옵니다.[/yellow]")
-                response = self.client.databases.query(database_id=self.database_id, page_size=100)
+            return sf
 
-        results = response.get("results", [])
-        console.print(f"[blue]조회된 결과: {len(results)}건[/blue]")
-        console.print(f"[dim]  사용 중인 컬럼명: youtube_url='{self.col_youtube_url}', comment='{self.col_comment_text}', account='{self.col_account}', result_url='{self.col_result_url}'[/dim]")
+        # 페이지네이션으로 전체 조회
+        all_results = []
+        has_more = True
+        start_cursor = None
+        use_status_type = False
+
+        while has_more:
+            try:
+                kwargs = {"database_id": self.database_id, "page_size": 100, "filter": build_filter(use_status_type)}
+                if start_cursor:
+                    kwargs["start_cursor"] = start_cursor
+                response = self.client.databases.query(**kwargs)
+            except Exception:
+                if not use_status_type:
+                    use_status_type = True
+                    try:
+                        kwargs["filter"] = build_filter(use_status_type)
+                        if start_cursor:
+                            kwargs["start_cursor"] = start_cursor
+                        response = self.client.databases.query(**kwargs)
+                    except Exception as e2:
+                        console.print(f"[red]노션 조회 실패: {e2}[/red]")
+                        break
+                else:
+                    break
+
+            all_results.extend(response.get("results", []))
+            has_more = response.get("has_more", False)
+            start_cursor = response.get("next_cursor")
+
+            if has_more:
+                console.print(f"[dim]  {len(all_results)}건 로드, 추가 데이터 있음...[/dim]")
+
+        console.print(f"[blue]전체 조회 완료: {len(all_results)}건[/blue]")
 
         tasks = []
-        for idx, page in enumerate(results):
+        for idx, page in enumerate(all_results):
             task = self._parse_page(page, debug=(idx == 0))
-            if idx < 3:
-                console.print(
-                    f"[dim]  [{idx}] youtube_url={bool(task.get('youtube_url'))}, "
-                    f"comment_text={bool(task.get('comment_text'))}, "
-                    f"status={task.get('status')}, "
-                    f"url={str(task.get('youtube_url', ''))[:50]}[/dim]"
-                )
             if task:
                 tasks.append(task)
 
         console.print(f"[green]'{status_value}' 작업: {len(tasks)}개[/green]")
+        return tasks
+
+    def get_all_tasks(self):
+        """전체 리스트: 상태 무관하게 DB의 모든 작업을 페이지네이션으로 가져옵니다."""
+        console.print("[blue]노션 DB 전체 리스트 조회[/blue]")
+
+        all_results = []
+        has_more = True
+        start_cursor = None
+
+        while has_more:
+            try:
+                kwargs = {"database_id": self.database_id, "page_size": 100}
+                if start_cursor:
+                    kwargs["start_cursor"] = start_cursor
+                response = self.client.databases.query(**kwargs)
+                all_results.extend(response.get("results", []))
+                has_more = response.get("has_more", False)
+                start_cursor = response.get("next_cursor")
+                if has_more:
+                    console.print(f"[dim]  {len(all_results)}건 로드, 추가 데이터 있음...[/dim]")
+            except Exception as e:
+                console.print(f"[red]전체 리스트 조회 실패: {e}[/red]")
+                break
+
+        console.print(f"[blue]전체 리스트: {len(all_results)}건[/blue]")
+
+        tasks = []
+        for page in all_results:
+            task = self._parse_page(page)
+            if task:
+                tasks.append(task)
+
         return tasks
 
     def _parse_page(self, page, debug=False):
@@ -590,32 +607,45 @@ class NotionManager:
         return match.group(1) if match else url  # ID 추출 실패 시 URL 자체 반환
 
     def check_duplicates(self, tasks):
-        """작업 목록에서 이미 댓글 완료된 영상을 찾아 중복 표시합니다.
-        중복 기준: 전체 DB에서 해당 영상 링크에 댓글 완료(체크박스 또는 상태)가 이미 있는 경우
-        같은 배치 내 동일 영상은 다른 계정/댓글일 수 있으므로 중복으로 처리하지 않음
+        """작업 목록에서 중복 영상을 찾아 표시합니다.
+        중복 기준 (2단계):
+        1) 전체 DB에서 이미 댓글 완료된 영상 (체크박스/상태 기준)
+        2) 대기 목록 내 같은 영상이 2건 이상 등록된 경우 (첫 번째만 유지)
         Returns:
             (clean_tasks, duplicate_tasks): 중복이 아닌 작업 / 중복 작업 리스트
         """
         completed_ids = self.get_completed_video_urls()
-        if not completed_ids:
-            console.print("[dim]완료된 영상이 없어 중복 체크 건너뜀[/dim]")
-            return tasks, []
 
         clean_tasks = []
         duplicate_tasks = []
+        seen_in_batch = set()  # 대기 목록 내 중복 체크
 
         for task in tasks:
             vid = self._extract_video_id(task.get("youtube_url", ""))
+            is_duplicate = False
+            reason = ""
 
+            # 1) 이미 댓글 완료된 영상인지 체크
             if vid and vid in completed_ids:
+                is_duplicate = True
+                reason = "이미 댓글 완료"
+
+            # 2) 대기 목록 내에서 같은 영상이 중복 등록된 경우 (첫 번째만 유지)
+            elif vid and vid in seen_in_batch:
+                is_duplicate = True
+                reason = "대기 목록 내 중복"
+
+            if is_duplicate:
                 duplicate_tasks.append(task)
-                console.print(f"[yellow]중복 감지 → {task['youtube_url'][:60]}[/yellow]")
+                console.print(f"[yellow]중복 감지({reason}) → {task['youtube_url'][:60]}[/yellow]")
                 try:
                     self.update_task_status(task["page_id"], "중복")
                 except Exception as e:
                     console.print(f"[red]중복 상태 변경 실패: {e}[/red]")
             else:
                 clean_tasks.append(task)
+                if vid:
+                    seen_in_batch.add(vid)
 
         if duplicate_tasks:
             console.print(f"[yellow]중복 영상 {len(duplicate_tasks)}건 발견 → 상태를 '중복'으로 변경[/yellow]")

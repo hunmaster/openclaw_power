@@ -140,13 +140,49 @@ def api_dashboard():
 
 @app.route("/api/tasks")
 def api_tasks():
-    """노션 DB에서 작업 목록을 가져옵니다. ?status=&date=YYYY-MM-DD 파라미터 지원."""
+    """노션 DB에서 작업 목록을 가져옵니다. ?status=&date=YYYY-MM-DD&page=1 파라미터 지원."""
     try:
         notion = NotionManager()
         status_filter = request.args.get("status", "댓글작업전")
-        date_filter = request.args.get("date", None)  # YYYY-MM-DD 또는 None(전체)
-        tasks = notion.get_tasks_by_status(status_filter, date_filter=date_filter)
-        return jsonify({"tasks": tasks, "count": len(tasks), "status": status_filter, "date": date_filter})
+        date_filter = request.args.get("date", None)
+        search_query = request.args.get("search", "").strip()
+        page = int(request.args.get("page", 1))
+        page_size = 100
+
+        # 전체리스트 또는 상태별 조회
+        if status_filter == "전체":
+            tasks = notion.get_all_tasks()
+        else:
+            tasks = notion.get_tasks_by_status(status_filter, date_filter=date_filter)
+
+        # 검색 필터 적용
+        if search_query:
+            q = search_query.lower()
+            tasks = [t for t in tasks if
+                     q in (t.get("youtube_url") or "").lower() or
+                     q in (t.get("comment_text") or "").lower() or
+                     q in (t.get("video_title") or "").lower() or
+                     q in (t.get("account") or "").lower() or
+                     q in (t.get("brand") or "").lower()]
+
+        # 페이지네이션
+        total_count = len(tasks)
+        total_pages = max(1, (total_count + page_size - 1) // page_size)
+        page = max(1, min(page, total_pages))
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        paged_tasks = tasks[start_idx:end_idx]
+
+        return jsonify({
+            "tasks": paged_tasks,
+            "count": len(paged_tasks),
+            "total_count": total_count,
+            "page": page,
+            "total_pages": total_pages,
+            "status": status_filter,
+            "date": date_filter,
+            "search": search_query,
+        })
     except Exception as e:
         return jsonify({"error": str(e), "tasks": [], "count": 0}), 500
 
