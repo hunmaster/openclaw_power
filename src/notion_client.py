@@ -268,10 +268,96 @@ class NotionManager:
                     break
         return count
 
+    # 체크박스 기반 AND 필터링 매핑
+    # 실제 작업 흐름: 댓글 → 좋아요(즉시) → (나중에) 대댓글
+    # 탭 이름 → (체크=True 컬럼 attr, 체크=False 컬럼 attr)
+    CHECKBOX_FILTER_MAP = {
+        "댓글완료":      ("col_checkbox",       "col_reply_checkbox"),    # 댓글✓ AND 대댓글✗ (대댓글 대기)
+        "대댓글완료":    ("col_reply_checkbox",  None),                   # 대댓글✓ (모든 작업 완료)
+        "좋아요작업완료": ("col_like_checkbox",   None),                   # 좋아요✓ (좋아요 주문 확인)
+    }
+
+    def _is_checkbox_filterable(self, status_value):
+        """해당 상태값이 체크박스 기반 필터링이 가능한지 확인합니다."""
+        if status_value not in self.CHECKBOX_FILTER_MAP:
+            return False
+        true_attr, _ = self.CHECKBOX_FILTER_MAP[status_value]
+        return getattr(self, true_attr, None) is not None
+
+    def get_tasks_by_checkbox(self, status_value, date_filter=None, progress_callback=None):
+        """체크박스 AND 로직으로 작업 목록을 필터링합니다.
+        - 댓글완료: 댓글완료✓ AND 대댓글완료✗
+        - 대댓글완료: 대댓글완료✓ AND 좋아요완료✗
+        - 좋아요작업완료: 좋아요완료✓
+        """
+        true_attr, false_attr = self.CHECKBOX_FILTER_MAP[status_value]
+        true_col = getattr(self, true_attr)
+        false_col = getattr(self, false_attr, None) if false_attr else None
+
+        console.print(f"[blue]노션 DB 체크박스 조회 ('{status_value}': {true_col}=✓"
+                      f"{f', {false_col}=✗' if false_col else ''}"
+                      f", 날짜: {date_filter or '전체'})[/blue]")
+
+        def build_filter():
+            conditions = [{"property": true_col, "checkbox": {"equals": True}}]
+            if false_col:
+                conditions.append({"property": false_col, "checkbox": {"equals": False}})
+            if date_filter:
+                if date_filter.startswith("since:"):
+                    since_date = date_filter.split(":", 1)[1]
+                    conditions.append({"timestamp": "last_edited_time", "last_edited_time": {"on_or_after": f"{since_date}T00:00:00+09:00"}})
+                else:
+                    conditions.append({"timestamp": "last_edited_time", "last_edited_time": {"on_or_after": f"{date_filter}T00:00:00+09:00"}})
+                    conditions.append({"timestamp": "last_edited_time", "last_edited_time": {"before": f"{date_filter}T23:59:59+09:00"}})
+            return {"and": conditions} if len(conditions) > 1 else conditions[0]
+
+        # 페이지네이션으로 전체 조회
+        all_results = []
+        has_more = True
+        start_cursor = None
+
+        while has_more:
+            try:
+                kwargs = {"database_id": self.database_id, "page_size": 100, "filter": build_filter()}
+                if start_cursor:
+                    kwargs["start_cursor"] = start_cursor
+                response = self.client.databases.query(**kwargs)
+            except Exception as e:
+                console.print(f"[red]체크박스 조회 실패: {e}[/red]")
+                console.print(f"[yellow]상태 컬럼 기반으로 폴백합니다.[/yellow]")
+                return self.get_tasks_by_status(status_value, date_filter, progress_callback)
+
+            all_results.extend(response.get("results", []))
+            has_more = response.get("has_more", False)
+            start_cursor = response.get("next_cursor")
+
+            if has_more:
+                console.print(f"[dim]  {len(all_results)}건 로드, 추가 데이터 있음...[/dim]")
+            if progress_callback:
+                progress_callback(len(all_results), f"{len(all_results)}건 로드 중...")
+
+        console.print(f"[blue]체크박스 조회 완료: {len(all_results)}건[/blue]")
+
+        tasks = []
+        for idx, page in enumerate(all_results):
+            task = self._parse_page(page, debug=(idx == 0))
+            if task:
+                tasks.append(task)
+
+        if progress_callback:
+            progress_callback(len(tasks), f"완료: {len(tasks)}건")
+        console.print(f"[green]'{status_value}' 체크박스 필터 작업: {len(tasks)}개[/green]")
+        return tasks
+
     def get_tasks_by_status(self, status_value, date_filter=None, progress_callback=None):
         """지정된 상태의 작업 목록을 페이지네이션으로 전부 가져옵니다.
+        체크박스 컬럼이 있는 경우 체크박스 AND 로직으로 자동 전환됩니다.
         date_filter: 'YYYY-MM-DD' (특정 일자) 또는 'since:YYYY-MM-DD' (이후 전체)
         """
+        # 체크박스 기반 필터링이 가능한 상태면 자동 전환
+        if self._is_checkbox_filterable(status_value):
+            return self.get_tasks_by_checkbox(status_value, date_filter, progress_callback)
+
         console.print(f"[blue]노션 DB 조회 (상태: '{status_value}', 날짜: {date_filter or '전체'})[/blue]")
 
         # 상태 필터 구성
@@ -450,6 +536,17 @@ class NotionManager:
         # 브랜드 추출
         brand_prop = props.get("브랜드", {})
         task["brand"] = self._extract_text(brand_prop)
+
+        # 체크박스 상태 추출
+        if self.col_checkbox:
+            cb_prop = props.get(self.col_checkbox, {})
+            task["comment_done"] = cb_prop.get("checkbox", False) if cb_prop.get("type") == "checkbox" else False
+        if self.col_reply_checkbox:
+            cb_prop = props.get(self.col_reply_checkbox, {})
+            task["reply_done"] = cb_prop.get("checkbox", False) if cb_prop.get("type") == "checkbox" else False
+        if self.col_like_checkbox:
+            cb_prop = props.get(self.col_like_checkbox, {})
+            task["like_done"] = cb_prop.get("checkbox", False) if cb_prop.get("type") == "checkbox" else False
 
         # 최종 편집 일시 추출
         task["last_edited"] = page.get("last_edited_time", "")

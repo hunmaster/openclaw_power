@@ -1093,7 +1093,14 @@
                 <td>${task.account || '-'}</td>
                 <td>${task.brand || '-'}</td>
                 <td style="font-size:12px;color:var(--text-dim);white-space:nowrap">${editDate}</td>
-                <td><span class="badge ${badgeClass}">${taskStatus}</span></td>
+                <td>
+                    <span class="badge ${badgeClass}">${taskStatus}</span>
+                    <div style="font-size:11px;margin-top:2px;color:var(--text-dim)">
+                        ${task.comment_done ? '<span style="color:var(--green)">댓글&#10003;</span>' : ''}
+                        ${task.reply_done ? ' <span style="color:var(--blue)">대댓글&#10003;</span>' : ''}
+                        ${task.like_done ? ' <span style="color:var(--green)">좋아요&#10003;</span>' : ''}
+                    </div>
+                </td>
             </tr>`;
         }).join('');
 
