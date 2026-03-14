@@ -404,7 +404,9 @@
             </div>
             <div style="display:flex;gap:6px;align-items:center">
                 <span style="font-size:13px;color:var(--text-dim)">날짜:</span>
-                <button class="btn btn-sm date-filter active" onclick="setDateFilter(null, this)">전체</button>
+                <button class="btn btn-sm date-filter" onclick="setDateFilter(null, this)">전체</button>
+                <button class="btn btn-sm date-filter active" id="btnDate1m" onclick="setDateFilter('1month', this)">1달</button>
+                <button class="btn btn-sm date-filter" onclick="setDateFilter('2weeks', this)">2주</button>
                 <button class="btn btn-sm date-filter" onclick="setDateFilter('today', this)">오늘</button>
                 <button class="btn btn-sm date-filter" onclick="setDateFilter('yesterday', this)">어제</button>
                 <input type="date" id="taskDatePicker" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:13px" onchange="setDateFilter(this.value, null)">
@@ -731,7 +733,7 @@
 
     // ─── 현재 선택된 상태/날짜 필터 ───
     let currentTaskStatus = '댓글작업전';
-    let currentDateFilter = null; // null=전체, 'YYYY-MM-DD'=특정 날짜
+    let currentDateFilter = 'since:' + (() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return d.toISOString().split('T')[0]; })(); // 기본값: 최근 1달
     let currentTaskPage = 1;
     let totalTaskPages = 1;
 
@@ -744,6 +746,14 @@
             const d = new Date(); d.setDate(d.getDate() - 1);
             currentDateFilter = d.toISOString().split('T')[0];
             picker.value = currentDateFilter;
+        } else if (value === '2weeks') {
+            const d = new Date(); d.setDate(d.getDate() - 14);
+            currentDateFilter = 'since:' + d.toISOString().split('T')[0];
+            picker.value = '';
+        } else if (value === '1month') {
+            const d = new Date(); d.setMonth(d.getMonth() - 1);
+            currentDateFilter = 'since:' + d.toISOString().split('T')[0];
+            picker.value = '';
         } else if (value === null) {
             currentDateFilter = null;
             picker.value = '';
@@ -754,7 +764,7 @@
         document.querySelectorAll('.date-filter').forEach(b => b.classList.remove('active'));
         if (btn) btn.classList.add('active');
         else if (value === null) document.querySelector('.date-filter').classList.add('active');
-        fetchNotionTasks(1, true); // 날짜 변경 시 새로 가져옴
+        fetchNotionTasks(1, false); // 날짜 변경 시 캐시 우선, 없으면 새로 가져옴
     }
 
     // ─── 작업 목록 로드 ───
@@ -912,7 +922,7 @@
         const searchQuery = document.getElementById('taskSearchInput').value.trim();
         let url = `/api/tasks?status=${encodeURIComponent(statusParam)}&page=${currentTaskPage}`;
         if (_taskRefresh) url += '&refresh=1';
-        if (currentDateFilter) url += `&date=${currentDateFilter}`;
+        if (currentDateFilter) url += `&date=${encodeURIComponent(currentDateFilter)}`;
         if (searchQuery) url += `&search=${encodeURIComponent(searchQuery)}`;
 
         const data = await api(url);

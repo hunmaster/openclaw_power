@@ -173,6 +173,9 @@ def api_tasks():
     try:
         status_filter = request.args.get("status", "댓글작업전")
         date_filter = request.args.get("date", None)
+        # 전체 리스트는 날짜 필터 무시
+        if status_filter == "전체":
+            date_filter = None
         search_query = request.args.get("search", "").strip()
         page = int(request.args.get("page", 1))
         force_refresh = request.args.get("refresh", "0") == "1"

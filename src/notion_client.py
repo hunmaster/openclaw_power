@@ -198,7 +198,9 @@ class NotionManager:
         return count
 
     def get_tasks_by_status(self, status_value, date_filter=None, progress_callback=None):
-        """지정된 상태의 작업 목록을 페이지네이션으로 전부 가져옵니다."""
+        """지정된 상태의 작업 목록을 페이지네이션으로 전부 가져옵니다.
+        date_filter: 'YYYY-MM-DD' (특정 일자) 또는 'since:YYYY-MM-DD' (이후 전체)
+        """
         console.print(f"[blue]노션 DB 조회 (상태: '{status_value}', 날짜: {date_filter or '전체'})[/blue]")
 
         # 상태 필터 구성
@@ -206,13 +208,24 @@ class NotionManager:
             st = "status" if use_status_type else "select"
             sf = {"property": self.col_status, st: {"equals": status_value}}
             if date_filter:
-                return {
-                    "and": [
-                        sf,
-                        {"timestamp": "last_edited_time", "last_edited_time": {"on_or_after": f"{date_filter}T00:00:00+09:00"}},
-                        {"timestamp": "last_edited_time", "last_edited_time": {"before": f"{date_filter}T23:59:59+09:00"}},
-                    ]
-                }
+                if date_filter.startswith("since:"):
+                    # 범위 필터: since:YYYY-MM-DD → 해당 날짜 이후 전체
+                    since_date = date_filter.split(":", 1)[1]
+                    return {
+                        "and": [
+                            sf,
+                            {"timestamp": "last_edited_time", "last_edited_time": {"on_or_after": f"{since_date}T00:00:00+09:00"}},
+                        ]
+                    }
+                else:
+                    # 특정 일자 필터
+                    return {
+                        "and": [
+                            sf,
+                            {"timestamp": "last_edited_time", "last_edited_time": {"on_or_after": f"{date_filter}T00:00:00+09:00"}},
+                            {"timestamp": "last_edited_time", "last_edited_time": {"before": f"{date_filter}T23:59:59+09:00"}},
+                        ]
+                    }
             return sf
 
         # 페이지네이션으로 전체 조회
