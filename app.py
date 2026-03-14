@@ -44,6 +44,15 @@ automation_state = {
 }
 automation_lock = threading.Lock()
 
+# 작업 목록 캐시 (매번 노션 API 전체 조회 방지)
+_task_cache = {
+    "key": None,        # "status:date" 형태의 캐시 키
+    "tasks": [],        # 캐시된 작업 목록
+    "fetched_at": 0,    # 캐시 시간 (timestamp)
+    "ttl": 120,         # 캐시 유효 시간 (초)
+}
+_task_cache_lock = threading.Lock()
+
 
 def add_log(message, level="info"):
     """로그 메시지를 추가합니다."""
@@ -140,22 +149,45 @@ def api_dashboard():
 
 @app.route("/api/tasks")
 def api_tasks():
-    """노션 DB에서 작업 목록을 가져옵니다. ?status=&date=YYYY-MM-DD&page=1 파라미터 지원."""
+    """노션 DB에서 작업 목록을 가져옵니다.
+    ?status=&date=YYYY-MM-DD&page=1&search=&refresh=1 파라미터 지원.
+    캐시를 사용하여 페이지 이동 시 즉시 응답합니다.
+    """
     try:
-        notion = NotionManager()
         status_filter = request.args.get("status", "댓글작업전")
         date_filter = request.args.get("date", None)
         search_query = request.args.get("search", "").strip()
         page = int(request.args.get("page", 1))
+        force_refresh = request.args.get("refresh", "0") == "1"
         page_size = 100
 
-        # 전체리스트 또는 상태별 조회
-        if status_filter == "전체":
-            tasks = notion.get_all_tasks()
-        else:
-            tasks = notion.get_tasks_by_status(status_filter, date_filter=date_filter)
+        # 캐시 키 생성
+        cache_key = f"{status_filter}:{date_filter or ''}"
 
-        # 검색 필터 적용
+        # 캐시 확인 (유효한 캐시가 있으면 노션 API 호출 생략)
+        tasks = None
+        with _task_cache_lock:
+            if (not force_refresh
+                    and _task_cache["key"] == cache_key
+                    and _task_cache["tasks"]
+                    and (time.time() - _task_cache["fetched_at"]) < _task_cache["ttl"]):
+                tasks = _task_cache["tasks"]
+
+        # 캐시 미스 → 노션에서 가져오기
+        if tasks is None:
+            notion = NotionManager()
+            if status_filter == "전체":
+                tasks = notion.get_all_tasks()
+            else:
+                tasks = notion.get_tasks_by_status(status_filter, date_filter=date_filter)
+
+            # 캐시 저장
+            with _task_cache_lock:
+                _task_cache["key"] = cache_key
+                _task_cache["tasks"] = tasks
+                _task_cache["fetched_at"] = time.time()
+
+        # 검색 필터 적용 (캐시된 데이터에서 필터링)
         if search_query:
             q = search_query.lower()
             tasks = [t for t in tasks if

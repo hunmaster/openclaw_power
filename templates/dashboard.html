@@ -398,9 +398,9 @@
             <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:200px">
                 <input type="text" id="taskSearchInput" placeholder="영상 URL, 제목, 댓글, 계정으로 검색..."
                        style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 12px;font-size:13px;flex:1"
-                       onkeydown="if(event.key==='Enter')fetchNotionTasks()">
-                <button class="btn btn-sm btn-primary" onclick="fetchNotionTasks()" style="white-space:nowrap">검색</button>
-                <button class="btn btn-sm btn-secondary" onclick="document.getElementById('taskSearchInput').value='';fetchNotionTasks()" style="white-space:nowrap">초기화</button>
+                       onkeydown="if(event.key==='Enter')fetchNotionTasks(1, false)">
+                <button class="btn btn-sm btn-primary" onclick="fetchNotionTasks(1, false)" style="white-space:nowrap">검색</button>
+                <button class="btn btn-sm btn-secondary" onclick="document.getElementById('taskSearchInput').value='';fetchNotionTasks(1, false)" style="white-space:nowrap">초기화</button>
             </div>
             <div style="display:flex;gap:6px;align-items:center">
                 <span style="font-size:13px;color:var(--text-dim)">날짜:</span>
@@ -415,7 +415,7 @@
             <div class="table-title">
                 <span id="taskTableTitle">노션 DB 작업 목록</span>
                 <div style="display:flex;gap:8px;align-items:center">
-                    <button class="btn btn-sm btn-primary" onclick="fetchNotionTasks()">불러오기</button>
+                    <button class="btn btn-sm btn-primary" onclick="fetchNotionTasks(1, true)">불러오기</button>
                     <button class="btn btn-sm btn-green" id="btnRunSelected" onclick="runSelectedTasks()" style="display:none;background:var(--green);color:#fff">선택 실행 (<span id="selectedCount">0</span>건)</button>
                     <button class="btn btn-sm btn-secondary" onclick="debugNotionDB()">DB 구조 확인</button>
                     <span id="taskFetchMsg" style="font-size:12px;line-height:28px;color:var(--text-dim)"></span>
@@ -754,35 +754,40 @@
         document.querySelectorAll('.date-filter').forEach(b => b.classList.remove('active'));
         if (btn) btn.classList.add('active');
         else if (value === null) document.querySelector('.date-filter').classList.add('active');
-        fetchNotionTasks();
+        fetchNotionTasks(1, true); // 날짜 변경 시 새로 가져옴
     }
 
     // ─── 작업 목록 로드 ───
-    async function fetchNotionTasks(page) {
+    let _taskRefresh = true; // true면 노션에서 새로 가져옴, false면 캐시 사용
+
+    async function fetchNotionTasks(page, forceRefresh) {
         if (page !== undefined) currentTaskPage = page;
         else currentTaskPage = 1;
+        if (forceRefresh !== undefined) _taskRefresh = forceRefresh;
         const msgEl = document.getElementById('taskFetchMsg');
         const tbody = document.getElementById('taskTableBody');
-        msgEl.textContent = '노션에서 불러오는 중...';
-        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-dim)">노션 DB 조회 중...</td></tr>';
+        msgEl.textContent = _taskRefresh ? '노션에서 불러오는 중...' : '페이지 로딩 중...';
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-dim)">조회 중...</td></tr>';
         await loadTasks(currentTaskStatus);
         msgEl.textContent = '';
+        _taskRefresh = false; // 이후 페이지 이동은 캐시 사용
     }
 
     function switchTaskFilter(status, btn) {
         currentTaskStatus = status;
         currentTaskPage = 1;
+        _taskRefresh = true; // 탭 전환 시 새로 가져옴
         document.querySelectorAll('.task-filter').forEach(b => b.classList.remove('active'));
         if (btn) btn.classList.add('active');
         document.getElementById('taskTableTitle').textContent = status === '전체' ? '노션 DB 전체 리스트' : `노션 DB 작업 (${status})`;
-        fetchNotionTasks();
+        fetchNotionTasks(1, true);
     }
 
     function goTaskPage(delta) {
         const newPage = currentTaskPage + delta;
         if (newPage < 1 || newPage > totalTaskPages) return;
         currentTaskPage = newPage;
-        fetchNotionTasks(newPage);
+        fetchNotionTasks(newPage, false); // 페이지 이동은 캐시 사용
     }
 
     function goToTasks(status) {
@@ -872,6 +877,7 @@
         const statusParam = status || currentTaskStatus;
         const searchQuery = document.getElementById('taskSearchInput').value.trim();
         let url = `/api/tasks?status=${encodeURIComponent(statusParam)}&page=${currentTaskPage}`;
+        if (_taskRefresh) url += '&refresh=1';
         if (currentDateFilter) url += `&date=${currentDateFilter}`;
         if (searchQuery) url += `&search=${encodeURIComponent(searchQuery)}`;
 
