@@ -254,16 +254,9 @@ class CommentTracker:
             # 2) 첫 번째 댓글 텍스트가 우리 댓글과 일치하는지 확인
             # → 둘 다 아니면 블라인드 판정
 
-            # 방법 1: "하이라이트된 댓글" 헤더/배지 존재 확인
-            # YouTube는 lc= 로 접속 시 해당 댓글에 특별한 속성/배지를 부여함
-            # 블라인드 댓글이면 이 요소들이 존재하지 않음
-            highlight_header = self.page.query_selector(
-                'ytd-comment-thread-renderer[is-showing-linked-comment], '
-                '#linked-comment-badge, '
-                'yt-formatted-string#linked-comment-badge, '
-                '#header-author ytd-comment-renderer[is-linked-comment]'
-            )
-            console.print(f"[dim]  하이라이트 배지 존재: {bool(highlight_header)}[/dim]")
+            # 판별 전략: 텍스트 매칭만 신뢰
+            # YouTube 배지(linked-comment-badge)는 블라인드 댓글에서도 나타날 수 있어 신뢰 불가
+            # → 페이지에서 찾은 댓글 텍스트가 우리 댓글과 일치하는지만으로 판정
 
             highlighted_selectors = [
                 "ytd-comment-thread-renderer.ytd-item-section-renderer #content-text",
@@ -273,28 +266,24 @@ class CommentTracker:
             for selector in highlighted_selectors:
                 elements = self.page.query_selector_all(selector)
                 if elements:
-                    first_text = elements[0].inner_text().strip()
-                    if first_text:
-                        found_text = first_text
+                    # 모든 댓글을 순회하며 우리 댓글 텍스트와 매칭
+                    for el in elements:
+                        el_text = el.inner_text().strip()
+                        if not el_text:
+                            continue
 
-                        # 텍스트 매칭으로 우리 댓글인지 확인
                         is_our_comment = False
                         if comment_text:
-                            # 앞부분 40자 이상 일치하면 우리 댓글로 판정
                             match_len = min(40, len(comment_text))
                             our_prefix = comment_text[:match_len].strip()
-                            found_prefix = first_text[:match_len].strip()
-                            if our_prefix and found_prefix and our_prefix in first_text:
+                            if our_prefix and our_prefix in el_text:
                                 is_our_comment = True
-                            elif found_prefix and found_prefix in comment_text:
+                            elif el_text[:match_len].strip() in comment_text and len(el_text) > 10:
                                 is_our_comment = True
-
-                        # 하이라이트 헤더가 있으면 lc= 가 정상 동작한 것
-                        if highlight_header:
-                            is_our_comment = True
 
                         if is_our_comment:
                             alive = True
+                            found_text = el_text
 
                             # 댓글 텍스트가 비어있었다면 채워넣기 (수동 등록 시)
                             if not comment_text and found_text:
@@ -302,7 +291,7 @@ class CommentTracker:
 
                             # 좋아요 수 추출
                             try:
-                                parent = elements[0].evaluate_handle(
+                                parent = el.evaluate_handle(
                                     "el => el.closest('ytd-comment-renderer')"
                                 )
                                 like_el = parent.as_element().query_selector(
@@ -313,13 +302,19 @@ class CommentTracker:
                                     likes = self._parse_like_count(like_text)
                             except Exception:
                                 pass
-                        else:
-                            console.print(
-                                f"[yellow]텍스트 불일치 → 블라인드 판정[/yellow]\n"
-                                f"  기대: {comment_text[:60]}...\n"
-                                f"  발견: {first_text[:60]}..."
-                            )
-                        break
+                            break
+
+                    if alive:
+                        console.print(f"[green]  텍스트 매칭 성공: {found_text[:50]}...[/green]")
+                    else:
+                        # 첫 번째 댓글 텍스트를 로그로 남김 (디버그용)
+                        sample = elements[0].inner_text().strip()[:60] if elements else "없음"
+                        console.print(
+                            f"[yellow]  텍스트 불일치 → 블라인드 판정[/yellow]\n"
+                            f"    기대: {comment_text[:60]}...\n"
+                            f"    페이지 첫댓글: {sample}..."
+                        )
+                    break
 
             # ── 2단계: 영상 전체 댓글에서 위치 확인 ──
             position = -1
