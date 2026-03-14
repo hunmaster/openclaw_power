@@ -80,6 +80,19 @@ class CommentTracker:
         self.browser = None
         self.context = None
         self.page = None
+        self._log_callback = None  # 외부 로그 콜백 (app.py add_log 연결용)
+
+    def set_log_callback(self, callback):
+        """대시보드 실행로그에 연결할 콜백을 설정합니다."""
+        self._log_callback = callback
+
+    def _log(self, message, level="info"):
+        """콘솔 + 대시보드 실행로그에 동시 출력"""
+        color_map = {"info": "blue", "warning": "yellow", "error": "red", "debug": "dim"}
+        color = color_map.get(level, "white")
+        console.print(f"[{color}]{message}[/{color}]")
+        if self._log_callback:
+            self._log_callback(f"[트래킹] {message}", level)
 
     def _load_history(self):
         if os.path.exists(self.history_file):
@@ -232,6 +245,7 @@ class CommentTracker:
             self._start_browser()
 
             # ── 1단계: lc= URL로 직접 접속하여 댓글 생존 확인 ──
+            self._log(f"1단계 시작: lc= URL 접속 → {comment_url[:80]}...", "debug")
             self.page.goto(comment_url, wait_until="domcontentloaded")
             time.sleep(3)
             self._dismiss_consent()
@@ -265,6 +279,7 @@ class CommentTracker:
 
             for selector in highlighted_selectors:
                 elements = self.page.query_selector_all(selector)
+                self._log(f"1단계 셀렉터 '{selector}' → {len(elements)}개 요소 발견", "debug")
                 if elements:
                     # 모든 댓글을 순회하며 우리 댓글 텍스트와 매칭
                     for el in elements:
@@ -315,14 +330,14 @@ class CommentTracker:
                             break
 
                     if alive:
-                        console.print(f"[green]  텍스트 매칭 성공: {found_text[:50]}...[/green]")
+                        self._log(f"1단계 결과: 텍스트 매칭 성공, 좋아요={likes}, found_text={found_text[:60]}", "info")
                     else:
                         # 첫 번째 댓글 텍스트를 로그로 남김 (디버그용)
                         sample = elements[0].inner_text().strip()[:60] if elements else "없음"
-                        console.print(
-                            f"[yellow]  텍스트 불일치 → 블라인드 판정[/yellow]\n"
+                        self._log(
+                            f"1단계 결과: 텍스트 불일치 → 블라인드 판정\n"
                             f"    기대: {comment_text[:60]}...\n"
-                            f"    페이지 첫댓글: {sample}..."
+                            f"    페이지 첫댓글: {sample}...", "warning"
                         )
                     break
 
@@ -333,21 +348,42 @@ class CommentTracker:
             if alive:
                 # 영상 페이지로 이동 (인기순 정렬 기본)
                 if video_url and video_url != comment_url:
+                    self._log(f"2단계 시작: 영상 페이지 이동 → {video_url}", "debug")
                     self.page.goto(video_url, wait_until="domcontentloaded")
                     time.sleep(3)
                     self._dismiss_consent()
+                else:
+                    self._log(f"2단계: video_url='{video_url}', comment_url과 동일하여 페이지 이동 안함", "warning")
+
+                # 현재 페이지 URL 확인
+                current_url = self.page.url
+                self._log(f"2단계 현재 페이지: {current_url}", "debug")
+
+                # 댓글 섹션 요소 존재 여부 확인
+                has_comments_section = self.page.evaluate("""
+                    (() => {
+                        const el = document.querySelector('ytd-comments#comments, #comments');
+                        return el ? el.tagName + ' found' : 'NOT found';
+                    })()
+                """)
+                self._log(f"2단계 댓글 섹션 요소: {has_comments_section}", "debug")
 
                 # 댓글 섹션까지 스크롤하여 로드 트리거
                 # YouTube 댓글은 뷰포트에 들어와야 lazy-load 됨
                 # 1) 댓글 섹션 요소로 직접 스크롤 시도
-                self.page.evaluate("""
-                    const comments = document.querySelector('ytd-comments#comments, #comments');
-                    if (comments) {
-                        comments.scrollIntoView({behavior: 'instant', block: 'start'});
-                    } else {
-                        window.scrollTo(0, 800);
-                    }
+                scroll_result = self.page.evaluate("""
+                    (() => {
+                        const comments = document.querySelector('ytd-comments#comments, #comments');
+                        if (comments) {
+                            comments.scrollIntoView({behavior: 'instant', block: 'start'});
+                            return 'scrollIntoView 실행됨';
+                        } else {
+                            window.scrollTo(0, 800);
+                            return 'comments 요소 없음 → fallback scrollTo(0, 800)';
+                        }
+                    })()
                 """)
+                self._log(f"2단계 스크롤: {scroll_result}", "debug")
                 time.sleep(3)
 
                 # 2) 댓글이 아직 안 보이면 점진적으로 더 스크롤
@@ -359,14 +395,36 @@ class CommentTracker:
                             timeout=5000
                         )
                         comments_loaded = True
+                        self._log(f"2단계 댓글 로드 성공 (시도 {scroll_try + 1}회)", "debug")
                         break
                     except PlaywrightTimeout:
-                        # 더 아래로 스크롤
-                        self.page.evaluate(f"window.scrollBy(0, {800 + scroll_try * 500})")
+                        scroll_amount = 800 + scroll_try * 500
+                        self._log(f"2단계 댓글 미로드 → 추가 스크롤 {scroll_amount}px (시도 {scroll_try + 1}/3)", "debug")
+                        self.page.evaluate(f"window.scrollBy(0, {scroll_amount})")
                         time.sleep(2)
 
                 if not comments_loaded:
-                    console.print("[yellow]  댓글 로드 대기 타임아웃[/yellow]")
+                    self._log("2단계 실패: 댓글 로드 타임아웃 (3회 스크롤 시도 후에도 댓글 없음)", "warning")
+                    # 페이지 HTML 일부를 로그에 남김
+                    page_info = self.page.evaluate("""
+                        (() => {
+                            const body = document.body;
+                            const title = document.title;
+                            const commentSections = document.querySelectorAll('[id*="comment"], [class*="comment"]');
+                            const sectionInfo = Array.from(commentSections).slice(0, 5).map(
+                                el => el.tagName + '#' + el.id + '.' + el.className.split(' ')[0]
+                            );
+                            return {
+                                title: title,
+                                url: location.href,
+                                bodyLen: body.innerHTML.length,
+                                commentSections: sectionInfo
+                            };
+                        })()
+                    """)
+                    self._log(f"2단계 페이지 진단: title={page_info.get('title', '?')[:50]}, "
+                              f"bodyLen={page_info.get('bodyLen', 0)}, "
+                              f"comment요소={page_info.get('commentSections', [])}", "warning")
 
                 # 댓글 더 로드 (최대 10번 스크롤, 충분히 로드)
                 prev_count = 0
@@ -380,7 +438,7 @@ class CommentTracker:
                         break  # 더 이상 새 댓글 로드 안 됨
                     prev_count = cur_count
 
-                console.print(f"[dim]  댓글 {prev_count}개 로드됨[/dim]")
+                self._log(f"2단계 댓글 {prev_count}개 로드됨", "debug")
 
                 # 댓글 목록에서 위치 찾기
                 comment_elements = self.page.query_selector_all(
@@ -388,9 +446,18 @@ class CommentTracker:
                 )
 
                 search_text = found_text or comment_text
+                self._log(f"2단계 텍스트 매칭: 검색어='{search_text[:50] if search_text else '(없음)'}', "
+                          f"댓글요소={len(comment_elements)}개", "debug")
+
                 if search_text:
                     match_len = min(40, len(search_text))
                     match_prefix = search_text[:match_len].strip()
+
+                    # 처음 5개 댓글 텍스트 로그 (디버그용)
+                    for dbg_idx, dbg_el in enumerate(comment_elements[:5]):
+                        dbg_text = dbg_el.inner_text().strip()[:60]
+                        self._log(f"  댓글[{dbg_idx}]: {dbg_text}", "debug")
+
                     for idx, el in enumerate(comment_elements):
                         el_text = el.inner_text().strip()
                         if match_prefix and match_prefix in el_text:
@@ -414,18 +481,20 @@ class CommentTracker:
                                     like_el = parent_el.query_selector(like_sel)
                                     if like_el:
                                         like_text = like_el.inner_text().strip()
+                                        self._log(f"2단계 좋아요 셀렉터 '{like_sel}' → '{like_text}'", "debug")
                                         if like_text:
                                             parsed = self._parse_like_count(like_text)
                                             if parsed > likes:
                                                 likes = parsed
                                             break
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                self._log(f"2단계 좋아요 추출 오류: {e}", "warning")
                             break
 
-                console.print(
-                    f"[dim]  위치 확인 결과: {position}위, 좋아요: {likes}[/dim]"
-                )
+                    if position == -1:
+                        self._log(f"2단계 실패: '{match_prefix}' 텍스트가 {len(comment_elements)}개 댓글에서 미발견", "warning")
+
+                self._log(f"2단계 최종 결과: 위치={position}, 좋아요={likes}", "info")
 
             # ── 결과 기록 ──
             check_result = {
@@ -445,12 +514,10 @@ class CommentTracker:
                     comment_data["last_position"] = position
                     if comment_data["best_position"] is None or position < comment_data["best_position"]:
                         comment_data["best_position"] = position
-                console.print(f"[green]✓ 정상노출 확인 (좋아요:{likes}, 위치:{position})[/green]")
+                self._log(f"✓ 정상노출 확인 (좋아요:{likes}, 위치:{position})", "info")
             else:
                 comment_data["status"] = "hidden"
-                console.print(
-                    f"[red]✗ 숨김/블라인드 판정: {comment_text[:40]}...[/red]"
-                )
+                self._log(f"✗ 숨김/블라인드 판정: {comment_text[:40]}...", "warning")
 
             self._save_history()
 

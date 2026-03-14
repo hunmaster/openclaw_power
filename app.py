@@ -172,6 +172,10 @@ def add_log(message, level="info"):
         automation_state["logs"] = automation_state["logs"][-200:]
 
 
+# 트래커에 대시보드 로그 콜백 연결
+comment_tracker.set_log_callback(add_log)
+
+
 def load_accounts():
     """계정 파일 로드."""
     accounts_file = os.getenv("ACCOUNTS_FILE", "config/accounts.json")
