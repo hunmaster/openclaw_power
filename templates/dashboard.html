@@ -700,7 +700,7 @@
                     </div>
                     <div class="form-group">
                         <label>ADB 경로</label>
-                        <input type="text" id="setAdbPath" value="adb" placeholder="adb 또는 D:\platform-tools\adb.exe">
+                        <input type="text" id="setAdbPath" value="adb" placeholder="예: D:\platform-tools\adb.exe">
                     </div>
                     <div class="form-group">
                         <label>비행기모드 대기 (초)</label>
@@ -781,7 +781,18 @@
         </div>
 
         <div style="margin-top:16px;text-align:right">
-            <button onclick="document.getElementById('initOverlay').style.display='none'" style="background:none;border:1px solid var(--border);color:var(--text-dim);padding:6px 16px;border-radius:8px;font-size:12px;cursor:pointer">건너뛰기</button>
+            <button onclick="skipInit()" style="background:none;border:1px solid var(--border);color:var(--text-dim);padding:6px 16px;border-radius:8px;font-size:12px;cursor:pointer">건너뛰기</button>
+        </div>
+    </div>
+</div>
+
+<!-- 건너뛰기 후 미니 진행 표시 (우측 상단) -->
+<div id="initMiniToast" style="display:none;position:fixed;top:16px;right:16px;z-index:9999;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 18px;box-shadow:0 4px 20px rgba(0,0,0,0.4);min-width:220px;transition:opacity 0.4s ease,transform 0.4s ease;transform:translateY(-8px);opacity:0">
+    <div style="display:flex;align-items:center;gap:10px">
+        <div id="miniToastIcon" class="init-spinner" style="width:18px;height:18px;border-radius:50%;border:2px solid var(--border);border-top-color:var(--accent);flex-shrink:0"></div>
+        <div>
+            <div style="font-size:12px;font-weight:600;color:var(--text)" id="miniToastTitle">초기 셋업 진행 중</div>
+            <div style="font-size:11px;color:var(--text-dim)" id="miniToastDetail">데이터 로딩 중...</div>
         </div>
     </div>
 </div>
@@ -2012,11 +2023,65 @@
     }
 
     // ─── 초기화 오버레이 함수 ───
+    let _initSkipped = false;
+
+    function skipInit() {
+        document.getElementById('initOverlay').style.display = 'none';
+        _initSkipped = true;
+        // 미니 토스트 표시
+        const toast = document.getElementById('initMiniToast');
+        toast.style.display = 'block';
+        requestAnimationFrame(() => {
+            toast.style.opacity = '1';
+            toast.style.transform = 'translateY(0)';
+        });
+    }
+
+    function updateMiniToast(message, done) {
+        if (!_initSkipped) return;
+        const toast = document.getElementById('initMiniToast');
+        const detail = document.getElementById('miniToastDetail');
+        const title = document.getElementById('miniToastTitle');
+        const icon = document.getElementById('miniToastIcon');
+        detail.textContent = message;
+
+        if (done) {
+            title.textContent = '초기화 완료';
+            icon.className = '';
+            icon.style.border = 'none';
+            icon.style.background = 'var(--green)';
+            icon.style.color = '#fff';
+            icon.style.display = 'flex';
+            icon.style.alignItems = 'center';
+            icon.style.justifyContent = 'center';
+            icon.style.fontSize = '11px';
+            icon.style.fontWeight = 'bold';
+            icon.innerHTML = '&#10003;';
+            detail.style.color = 'var(--green)';
+            // 3초 후 자동 사라짐
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(-8px)';
+                setTimeout(() => { toast.style.display = 'none'; }, 400);
+            }, 3000);
+        }
+    }
+
     function showInitOverlay(show) {
+        if (_initSkipped && !show) {
+            // 초기화 완료 시 미니 토스트에 완료 알림
+            updateMiniToast('모든 데이터 로드 완료!', true);
+            return;
+        }
         document.getElementById('initOverlay').style.display = show ? 'flex' : 'none';
     }
 
     function updateInitStep(stepName, state, detail) {
+        const stepLabels = { server: '서버 연결 확인', dashboard: '대시보드 데이터', tasks: '작업 목록 로딩' };
+        if (_initSkipped && state === 'loading') {
+            updateMiniToast(stepLabels[stepName] || detail);
+        }
+
         const steps = ['server', 'dashboard', 'tasks', 'done'];
         const stepIdx = steps.indexOf(stepName);
         const progress = state === 'done' ? Math.min(100, ((stepIdx + 1) / 3) * 100) : (stepIdx / 3) * 100;

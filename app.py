@@ -855,7 +855,8 @@ def api_adb_test():
             steps.append({"step": "ADB 실행 확인", "ok": False, "message": "ADB 실행 실패"})
             return jsonify({"steps": steps})
     except FileNotFoundError:
-        steps.append({"step": "ADB 실행 확인", "ok": False, "message": f"ADB를 찾을 수 없습니다: {adb_path}"})
+        hint = "ADB 경로를 전체 경로로 입력하세요 (예: D:\\platform-tools\\adb.exe)"
+        steps.append({"step": "ADB 실행 확인", "ok": False, "message": f"ADB를 찾을 수 없습니다: {adb_path} → {hint}"})
         return jsonify({"steps": steps})
     except Exception as e:
         steps.append({"step": "ADB 실행 확인", "ok": False, "message": str(e)})
