@@ -227,7 +227,7 @@ def api_dashboard():
             "max_comments_per_day": int(os.getenv("MAX_COMMENTS_PER_DAY", "20")),
             "comment_interval_sec": int(os.getenv("COMMENT_INTERVAL_SEC", "180")),
             "same_video_interval_min": int(os.getenv("SAME_VIDEO_INTERVAL_MIN", "30")),
-            "smm_like_quantity": int(os.getenv("SMM_LIKE_QUANTITY", "10")),
+            "smm_like_quantity": int(os.getenv("SMM_LIKE_QUANTITY", "20")),
         },
     })
 
@@ -693,8 +693,8 @@ def api_get_settings():
         "NOTION_DATABASE_ID": os.getenv("NOTION_DATABASE_ID", ""),
         "SMM_API_KEY": _mask_key(os.getenv("SMM_API_KEY", "")),
         "SMM_ENABLED": os.getenv("SMM_ENABLED", "false"),
-        "SMM_LIKE_SERVICE_ID": os.getenv("SMM_LIKE_SERVICE_ID", ""),
-        "SMM_LIKE_QUANTITY": os.getenv("SMM_LIKE_QUANTITY", "10"),
+        "SMM_LIKE_SERVICE_ID": os.getenv("SMM_LIKE_SERVICE_ID", "4001"),
+        "SMM_LIKE_QUANTITY": os.getenv("SMM_LIKE_QUANTITY", "20"),
         "MAX_COMMENTS_PER_DAY": os.getenv("MAX_COMMENTS_PER_DAY", "20"),
         "COMMENT_INTERVAL_SEC": os.getenv("COMMENT_INTERVAL_SEC", "180"),
         "SAME_VIDEO_INTERVAL_MIN": os.getenv("SAME_VIDEO_INTERVAL_MIN", "30"),

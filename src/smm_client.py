@@ -22,8 +22,8 @@ class SMMClient:
     def __init__(self):
         load_dotenv(override=True)
         self.api_key = os.getenv("SMM_API_KEY", "")
-        self.service_id = os.getenv("SMM_LIKE_SERVICE_ID", "")
-        self.like_quantity = int(os.getenv("SMM_LIKE_QUANTITY", "10"))
+        self.service_id = os.getenv("SMM_LIKE_SERVICE_ID", "4001")
+        self.like_quantity = int(os.getenv("SMM_LIKE_QUANTITY", "20"))
         self.enabled = os.getenv("SMM_ENABLED", "false").lower() == "true"
 
         if self.enabled and not self.api_key:
