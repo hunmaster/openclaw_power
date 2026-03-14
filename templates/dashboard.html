@@ -29,6 +29,18 @@
             min-height: 100vh;
         }
 
+        /* ─── 복제 방지 (클라이언트 모드) ─── */
+        {% if not is_owner %}
+        body {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            -webkit-user-drag: none;
+        }
+        img, a { -webkit-user-drag: none; user-select: none; }
+        {% endif %}
+
         /* ─── 헤더 ─── */
         .header {
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
@@ -1220,6 +1232,38 @@
 <script>
     // ─── Owner 모드 플래그 (서버에서 주입) ───
     const IS_OWNER = {{ 'true' if is_owner else 'false' }};
+
+    // ─── 복제 방지 (클라이언트 모드) ───
+    if (!IS_OWNER) {
+        // 우클릭 차단
+        document.addEventListener('contextmenu', e => e.preventDefault());
+
+        // 드래그 차단
+        document.addEventListener('dragstart', e => e.preventDefault());
+        document.addEventListener('drop', e => e.preventDefault());
+
+        // 개발자 도구 & 소스보기 & 복사 단축키 차단
+        document.addEventListener('keydown', function(e) {
+            // F12
+            if (e.key === 'F12') { e.preventDefault(); return; }
+            // Ctrl+Shift+I (개발자도구), Ctrl+Shift+J (콘솔), Ctrl+Shift+C (요소선택)
+            if (e.ctrlKey && e.shiftKey && ['I','J','C'].includes(e.key.toUpperCase())) {
+                e.preventDefault(); return;
+            }
+            // Ctrl+U (소스보기)
+            if (e.ctrlKey && e.key.toUpperCase() === 'U') { e.preventDefault(); return; }
+            // Ctrl+S (페이지 저장)
+            if (e.ctrlKey && e.key.toUpperCase() === 'S') { e.preventDefault(); return; }
+            // Ctrl+C (복사), Ctrl+A (전체선택)
+            if (e.ctrlKey && ['C','A'].includes(e.key.toUpperCase())) { e.preventDefault(); return; }
+            // Ctrl+P (인쇄)
+            if (e.ctrlKey && e.key.toUpperCase() === 'P') { e.preventDefault(); return; }
+        });
+
+        // 복사/붙여넣기 이벤트 차단
+        document.addEventListener('copy', e => e.preventDefault());
+        document.addEventListener('cut', e => e.preventDefault());
+    }
 
     // ─── 초기 셋업 완료 플래그 ───
     let _initDone = false;

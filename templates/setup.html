@@ -14,6 +14,10 @@
             display: flex;
             align-items: center;
             justify-content: center;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
         }
 
         .setup-container {
@@ -393,6 +397,17 @@
         </div>
     </div>
 
+    <script>
+    // 복제 방지
+    document.addEventListener('contextmenu', e => e.preventDefault());
+    document.addEventListener('dragstart', e => e.preventDefault());
+    document.addEventListener('copy', e => e.preventDefault());
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'F12') { e.preventDefault(); return; }
+        if (e.ctrlKey && e.shiftKey && ['I','J','C'].includes(e.key.toUpperCase())) { e.preventDefault(); return; }
+        if (e.ctrlKey && ['U','S','C','A','P'].includes(e.key.toUpperCase())) { e.preventDefault(); return; }
+    });
+    </script>
     <script>
         let currentStep = 1;
         let setupData = {
