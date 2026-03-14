@@ -594,7 +594,7 @@ class YouTubeBot:
             comments = []
             for item in raw:
                 likes = self._parse_like_count(item.get("likes_text", ""))
-                text = item.get("comment_text", "")[:100]  # 최대 100자
+                text = item.get("comment_text", "")[:200]  # 최대 200자
                 comments.append({"text": text, "likes": likes})
 
             comments.sort(key=lambda x: x["likes"], reverse=True)

@@ -2274,15 +2274,18 @@
             </div>
             ${(item.top_comments && item.top_comments.length > 0) ? `
             <div style="margin-bottom:10px;background:var(--card);border-radius:6px;padding:8px 10px;font-size:11px">
-                <div style="color:var(--text-dim);margin-bottom:6px;font-weight:600">상위 댓글 미리보기</div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                    <span style="color:var(--text-dim);font-weight:600">상위 댓글 미리보기</span>
+                    <span onclick="toggleCommentExpand(this)" style="color:var(--blue);cursor:pointer;font-size:10px;user-select:none" data-expanded="false">더보기 ▼</span>
+                </div>
                 ${item.top_comments.map((c, idx) => {
                     const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉';
                     const likeCnt = (c.likes || 0).toLocaleString();
-                    const txt = c.text || '';
-                    const truncated = txt.length > 80 ? txt.substring(0, 80) + '...' : txt;
+                    const txt = (c.text || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                    const isLong = txt.length > 50;
                     return `<div style="display:flex;align-items:flex-start;gap:6px;margin-bottom:4px;padding:4px 6px;border-radius:4px;background:rgba(255,255,255,0.03)">
                         <span style="flex-shrink:0">${medal}</span>
-                        <span style="color:var(--text);line-height:1.4;word-break:break-all">${truncated}</span>
+                        <span class="comment-preview-text" style="color:var(--text);line-height:1.4;word-break:break-all;overflow:hidden;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical" data-full="${txt}">${txt}</span>
                         <span style="flex-shrink:0;color:var(--text-dim);font-size:10px;margin-left:auto;white-space:nowrap">♥ ${likeCnt}</span>
                     </div>`;
                 }).join('')}
@@ -2296,6 +2299,30 @@
                 </button>
             </div>
         </div>`;
+    }
+
+    function toggleCommentExpand(btn) {
+        const wrap = btn.closest('div').parentElement;
+        const texts = wrap.querySelectorAll('.comment-preview-text');
+        const expanded = btn.dataset.expanded === 'true';
+        if (expanded) {
+            texts.forEach(el => {
+                el.style.display = '-webkit-box';
+                el.style.webkitLineClamp = '1';
+                el.style.webkitBoxOrient = 'vertical';
+                el.style.overflow = 'hidden';
+            });
+            btn.textContent = '더보기 ▼';
+            btn.dataset.expanded = 'false';
+        } else {
+            texts.forEach(el => {
+                el.style.display = 'block';
+                el.style.webkitLineClamp = 'unset';
+                el.style.overflow = 'visible';
+            });
+            btn.textContent = '접기 ▲';
+            btn.dataset.expanded = 'true';
+        }
     }
 
     async function pollLikePending() {
