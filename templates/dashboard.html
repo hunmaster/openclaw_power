@@ -324,7 +324,7 @@
             </div>
             <div class="card" style="cursor:pointer" onclick="goToTasks('대댓글완료')">
                 <div class="card-label">좋아요 대기</div>
-                <div class="card-value blue" id="likePendingCount">-</div>
+                <div class="card-value blue" id="likeWaitCount">-</div>
             </div>
             <div class="card">
                 <div class="card-label">오늘 성공</div>
@@ -411,6 +411,25 @@
             <div id="replyPreviewBody" style="display:none;margin-top:12px;max-height:200px;overflow-y:auto"></div>
         </div>
 
+        <!-- ━━━ 좋아요 승인 대기 (대시보드) ━━━ -->
+        <div class="card like-approval-section" id="likeApprovalDashboard" style="margin-bottom:24px;border:2px solid var(--yellow);display:none">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+                <div style="display:flex;align-items:center;gap:10px">
+                    <span style="font-size:18px">&#9888;&#65039;</span>
+                    <span style="font-size:15px;font-weight:700;color:var(--yellow)">좋아요 승인 대기</span>
+                    <span class="like-approval-count" style="background:var(--yellow);color:#000;font-size:12px;font-weight:700;padding:2px 10px;border-radius:10px">0</span>
+                </div>
+                <div style="display:flex;gap:8px">
+                    <button onclick="approveAllLikes()" class="btn btn-sm" style="background:var(--green);color:#fff;font-weight:700">전체 승인</button>
+                    <button onclick="dismissAllLikes()" class="btn btn-sm btn-secondary">전체 무시</button>
+                </div>
+            </div>
+            <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;padding:8px 12px;background:rgba(255,217,61,0.06);border-radius:8px">
+                MAX(<span class="like-max-val">500</span>)개를 초과하는 좋아요 주문입니다. 기본 수량은 이미 주문되었으며, 아래 수량으로 추가 주문하려면 승인하세요.
+            </div>
+            <div class="like-approval-items"></div>
+        </div>
+
         <!-- 계정 현황 -->
         <div class="table-wrap">
             <div class="table-title">
@@ -446,6 +465,22 @@
             <button class="tab task-filter" data-status="좋아요작업완료" onclick="switchTaskFilter('좋아요작업완료', this)">좋아요 완료 <span class="tab-count" id="tabCount-좋아요작업완료"></span></button>
             <button class="tab task-filter" data-status="중복" onclick="switchTaskFilter('중복', this)">중복 <span class="tab-count" id="tabCount-중복"></span></button>
             <button class="tab task-filter" data-status="에러" onclick="switchTaskFilter('에러', this)">에러 <span class="tab-count" id="tabCount-에러"></span></button>
+        </div>
+
+        <!-- ━━━ 좋아요 승인 대기 (작업목록) ━━━ -->
+        <div class="card like-approval-section" id="likeApprovalTasks" style="margin-bottom:16px;border:2px solid var(--yellow);display:none">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+                <div style="display:flex;align-items:center;gap:10px">
+                    <span style="font-size:18px">&#9888;&#65039;</span>
+                    <span style="font-size:15px;font-weight:700;color:var(--yellow)">좋아요 승인 대기</span>
+                    <span class="like-approval-count" style="background:var(--yellow);color:#000;font-size:12px;font-weight:700;padding:2px 10px;border-radius:10px">0</span>
+                </div>
+                <div style="display:flex;gap:8px">
+                    <button onclick="approveAllLikes()" class="btn btn-sm" style="background:var(--green);color:#fff;font-weight:700">전체 승인</button>
+                    <button onclick="dismissAllLikes()" class="btn btn-sm btn-secondary">전체 무시</button>
+                </div>
+            </div>
+            <div class="like-approval-items"></div>
         </div>
 
         <!-- 검색 + 날짜 필터 -->
@@ -907,25 +942,7 @@
     </div>
 </div>
 
-<!-- 좋아요 승인 대기 배너 (논블로킹) -->
-<div id="likePendingBanner" style="display:none;position:fixed;top:16px;right:16px;z-index:9000;max-width:460px;width:100%">
-    <div style="background:var(--card);border:2px solid var(--yellow);border-radius:14px;box-shadow:0 8px 32px rgba(0,0,0,0.4);overflow:hidden">
-        <!-- 헤더 -->
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:rgba(255,217,61,0.08);border-bottom:1px solid rgba(255,217,61,0.15)">
-            <div style="display:flex;align-items:center;gap:10px">
-                <span style="font-size:20px">&#9888;&#65039;</span>
-                <span style="font-weight:700;color:var(--yellow);font-size:15px">좋아요 승인 대기</span>
-                <span id="likePendingCount" style="background:var(--yellow);color:#000;font-size:12px;font-weight:700;padding:2px 8px;border-radius:10px">0</span>
-            </div>
-            <div style="display:flex;gap:8px">
-                <button onclick="approveAllLikes()" style="padding:6px 14px;background:var(--green);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer" title="전체 승인">전체 승인</button>
-                <button onclick="dismissAllLikes()" style="padding:6px 14px;background:var(--border);color:var(--text-dim);border:none;border-radius:8px;font-size:12px;cursor:pointer" title="전체 무시">전체 무시</button>
-            </div>
-        </div>
-        <!-- 리스트 -->
-        <div id="likePendingItems" style="max-height:360px;overflow-y:auto;padding:8px"></div>
-    </div>
-</div>
+<!-- 좋아요 승인 대기 리스트는 대시보드/작업목록 탭 내부에 인라인으로 표시됨 -->
 
 <!-- 페이지 초기화 오버레이 -->
 <div id="initOverlay" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(10,10,18,0.85);z-index:10000;display:flex;justify-content:center;align-items:center">
@@ -1095,7 +1112,7 @@
         // 상태별 카운트 (서버에서 한 번에 반환)
         document.getElementById('pendingCount').textContent = data.pending_count || 0;
         document.getElementById('replyPendingCount').textContent = data.reply_done_count || 0;
-        document.getElementById('likePendingCount').textContent = data.like_pending_count || 0;
+        document.getElementById('likeWaitCount').textContent = data.like_pending_count || 0;
 
         // 계정 테이블
         const tbody = document.getElementById('accountTableBody');
@@ -2195,51 +2212,69 @@
     }
 
     // ─── 상태 폴링 ───
-    // ── 좋아요 승인 대기 리스트 ──
+    // ── 좋아요 승인 대기 리스트 (인라인) ──
+    function renderLikeApprovalItem(item) {
+        const topStr = item.top_likes.map(n => n.toLocaleString()).join(', ');
+        const cost = (item.qty * 1.12 / 1000 * 1450).toFixed(0);
+        const extraQty = item.qty - (item.default_qty || 0);
+        return `
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                <div style="display:flex;align-items:center;gap:10px">
+                    <div style="background:rgba(255,217,61,0.12);border:1px solid rgba(255,217,61,0.3);border-radius:8px;padding:6px 12px;text-align:center">
+                        <div style="font-size:20px;font-weight:800;color:var(--yellow)">${item.qty.toLocaleString()}</div>
+                        <div style="font-size:10px;color:var(--text-dim)">목표</div>
+                    </div>
+                    <div>
+                        <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:2px;max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${item.video_title}">
+                            ${item.video_title || '제목 없음'}
+                        </div>
+                        <div style="font-size:11px;color:var(--text-dim)">
+                            ${item.account} &middot; ${item.created_at} &middot; 예상 <span style="color:var(--yellow)">~${Number(cost).toLocaleString()}원</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div style="display:flex;gap:12px;margin-bottom:10px;font-size:12px">
+                <div style="flex:1;background:var(--card);border-radius:6px;padding:8px 10px">
+                    <div style="color:var(--text-dim);margin-bottom:2px">상위 댓글 좋아요</div>
+                    <div style="color:var(--text);font-weight:600">${topStr || '-'}</div>
+                </div>
+                <div style="background:var(--card);border-radius:6px;padding:8px 10px;text-align:center;min-width:80px">
+                    <div style="color:var(--text-dim);margin-bottom:2px">기본 주문</div>
+                    <div style="color:var(--green);font-weight:600">${(item.default_qty || 0).toLocaleString()}개</div>
+                </div>
+                <div style="background:var(--card);border-radius:6px;padding:8px 10px;text-align:center;min-width:80px">
+                    <div style="color:var(--text-dim);margin-bottom:2px">추가분</div>
+                    <div style="color:var(--yellow);font-weight:700">${extraQty > 0 ? '+' + extraQty.toLocaleString() : '-'}개</div>
+                </div>
+            </div>
+            <div style="display:flex;gap:8px">
+                <button onclick="approveSingleLike('${item.id}')" style="flex:1;padding:10px 0;background:var(--green);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;transition:opacity 0.2s" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+                    승인 (${item.qty.toLocaleString()}개 주문)
+                </button>
+                <button onclick="dismissSingleLike('${item.id}')" style="padding:10px 20px;background:var(--border);color:var(--text-dim);border:none;border-radius:8px;font-size:13px;cursor:pointer;transition:opacity 0.2s" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+                    무시
+                </button>
+            </div>
+        </div>`;
+    }
+
     async function pollLikePending() {
         const data = await api('/api/likes/pending');
         if (!data) return;
-        const banner = document.getElementById('likePendingBanner');
-        const container = document.getElementById('likePendingItems');
-        const countEl = document.getElementById('likePendingCount');
         const items = data.items || [];
 
-        if (items.length === 0) {
-            banner.style.display = 'none';
-            return;
-        }
-
-        banner.style.display = 'block';
-        countEl.textContent = items.length;
-
-        container.innerHTML = items.map(item => {
-            const topStr = item.top_likes.map(n => n.toLocaleString()).join(', ');
-            const cost = (item.qty * 1.12 / 1000 * 1450).toFixed(0);
-            return `
-            <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:6px">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-                    <div style="display:flex;align-items:center;gap:8px">
-                        <span style="color:var(--yellow);font-weight:700;font-size:18px">${item.qty.toLocaleString()}개</span>
-                        <span style="color:var(--text-dim);font-size:11px">~${cost}원</span>
-                    </div>
-                    <span style="color:var(--text-dim);font-size:11px">${item.created_at} | ${item.account}</span>
-                </div>
-                <div style="font-size:12px;color:var(--text-dim);margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${item.video_title}">
-                    ${item.video_title || item.video_url.substring(0, 50)}
-                </div>
-                <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">
-                    상위 댓글: <span style="color:var(--text)">${topStr}</span>
-                </div>
-                <div style="display:flex;gap:8px">
-                    <button onclick="approveSingleLike('${item.id}')" style="flex:1;padding:8px 0;background:var(--green);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">
-                        승인 (${item.qty.toLocaleString()}개 주문)
-                    </button>
-                    <button onclick="dismissSingleLike('${item.id}')" style="padding:8px 16px;background:var(--border);color:var(--text-dim);border:none;border-radius:8px;font-size:12px;cursor:pointer">
-                        무시
-                    </button>
-                </div>
-            </div>`;
-        }).join('');
+        // 모든 인라인 섹션 업데이트
+        document.querySelectorAll('.like-approval-section').forEach(section => {
+            if (items.length === 0) {
+                section.style.display = 'none';
+                return;
+            }
+            section.style.display = 'block';
+            section.querySelector('.like-approval-count').textContent = items.length;
+            section.querySelector('.like-approval-items').innerHTML = items.map(renderLikeApprovalItem).join('');
+        });
     }
 
     function postJson(url, body) {
