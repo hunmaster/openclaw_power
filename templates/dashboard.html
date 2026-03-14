@@ -361,6 +361,29 @@
             <div style="height:12px;background:var(--border);border-radius:6px;overflow:hidden;margin-bottom:12px">
                 <div id="progressFill" style="height:100%;border-radius:6px;background:var(--border);transition:width 0.5s ease;width:0%"></div>
             </div>
+            <!-- ETA 정보 패널 -->
+            <div id="etaPanel" style="display:none;margin-bottom:12px;padding:10px 14px;background:rgba(116,185,255,0.06);border:1px solid rgba(116,185,255,0.15);border-radius:8px">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+                    <div style="display:flex;gap:20px;align-items:center">
+                        <div>
+                            <div style="font-size:10px;color:var(--text-dim);margin-bottom:2px">경과시간</div>
+                            <div style="font-size:15px;font-weight:700;color:var(--text)" id="etaElapsed">-</div>
+                        </div>
+                        <div>
+                            <div style="font-size:10px;color:var(--text-dim);margin-bottom:2px">작업당 평균</div>
+                            <div style="font-size:15px;font-weight:700;color:var(--blue)" id="etaAvg">-</div>
+                        </div>
+                        <div>
+                            <div style="font-size:10px;color:var(--text-dim);margin-bottom:2px">남은시간</div>
+                            <div style="font-size:15px;font-weight:700;color:var(--yellow)" id="etaRemaining">-</div>
+                        </div>
+                    </div>
+                    <div style="text-align:right">
+                        <div style="font-size:10px;color:var(--text-dim);margin-bottom:2px">예상 종료</div>
+                        <div style="font-size:20px;font-weight:800;color:var(--green)" id="etaFinish">-</div>
+                    </div>
+                </div>
+            </div>
             <div style="display:flex;justify-content:space-between;align-items:center">
                 <span style="font-size:13px;color:var(--text-dim)" id="progressLabel">상단 [실행] 버튼을 눌러 자동화를 시작하세요</span>
                 <div style="display:flex;gap:16px;font-size:12px">
@@ -2297,11 +2320,51 @@
         if (res) pollLikePending();
     }
 
+    // ETA 시간 포맷 헬퍼
+    function fmtDuration(sec) {
+        if (!sec || sec <= 0) return '-';
+        const h = Math.floor(sec / 3600);
+        const m = Math.floor((sec % 3600) / 60);
+        const s = Math.floor(sec % 60);
+        if (h > 0) return `${h}시간 ${m}분`;
+        if (m > 0) return `${m}분 ${s}초`;
+        return `${s}초`;
+    }
+
+    // 대시보드 카운트 자동 갱신 (작업 진행에 따라)
+    let _lastProgress = 0;
+    function checkAutoRefreshDashboard(data) {
+        if (data.running && data.progress > _lastProgress && data.progress > 0) {
+            _lastProgress = data.progress;
+            // 매 5건 완료 시 또는 처음 1건 완료 시 대시보드 갱신
+            if (data.progress === 1 || data.progress % 5 === 0) {
+                loadDashboard();
+            }
+            // 성공 카운트는 매번 즉시 갱신
+            const el = document.getElementById('successCount');
+            if (el) el.textContent = data.results.success;
+            // 댓글 대기 카운트 = 전체 - 진행완료
+            const pendingEl = document.getElementById('pendingCount');
+            if (pendingEl && data.total > 0) {
+                const remaining = data.total - data.progress;
+                pendingEl.textContent = remaining >= 0 ? remaining : '-';
+            }
+        }
+        if (!data.running && _lastProgress > 0) {
+            // 자동화 종료 시 전체 갱신
+            _lastProgress = 0;
+            loadDashboard();
+        }
+    }
+
     async function pollStatus() {
         pollLikePending();
         pollReplyStatus();
         const data = await api('/api/status');
         if (!data) return;
+
+        // 대시보드 카운트 실시간 갱신
+        checkAutoRefreshDashboard(data);
 
         // 버튼 상태
         document.getElementById('btnStart').disabled = data.running;
@@ -2326,6 +2389,36 @@
             const dupCount = data.results.duplicate || 0;
             dupEl.textContent = `중복 ${dupCount}`;
             dupEl.style.display = dupCount > 0 ? '' : 'none';
+        }
+
+        // ETA 패널
+        const etaPanel = document.getElementById('etaPanel');
+        if (data.running && data.eta && data.eta.avg_sec > 0) {
+            etaPanel.style.display = 'block';
+            document.getElementById('etaElapsed').textContent = fmtDuration(data.eta.elapsed_sec);
+            document.getElementById('etaAvg').textContent = fmtDuration(data.eta.avg_sec);
+            document.getElementById('etaRemaining').textContent = fmtDuration(data.eta.remaining_sec);
+            document.getElementById('etaFinish').textContent = data.eta.eta_time || '-';
+        } else if (!data.running) {
+            // 완료 후에도 결과 표시
+            if (data.eta && data.eta.elapsed_sec > 0) {
+                etaPanel.style.display = 'block';
+                document.getElementById('etaElapsed').textContent = fmtDuration(data.eta.elapsed_sec);
+                document.getElementById('etaAvg').textContent = fmtDuration(data.eta.avg_sec);
+                document.getElementById('etaRemaining').textContent = '완료';
+                document.getElementById('etaFinish').textContent = '완료';
+                document.getElementById('etaFinish').style.color = 'var(--green)';
+            } else {
+                etaPanel.style.display = 'none';
+            }
+        } else {
+            etaPanel.style.display = data.running ? 'block' : 'none';
+            if (data.running) {
+                document.getElementById('etaElapsed').textContent = fmtDuration(data.eta?.elapsed_sec || 0);
+                document.getElementById('etaAvg').textContent = '계산 중...';
+                document.getElementById('etaRemaining').textContent = '-';
+                document.getElementById('etaFinish').textContent = '-';
+            }
         }
 
         const isTest = data.test_mode;

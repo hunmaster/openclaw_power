@@ -14,9 +14,10 @@ import sys
 import json
 import time
 import uuid
+import random
 import threading
 from collections import defaultdict, deque
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from flask import Flask, render_template, jsonify, request
 from dotenv import load_dotenv
@@ -46,6 +47,13 @@ automation_state = {
     "test_mode": False,
     "limit": 0,
     "full_auto": False,
+}
+
+# ETA 추적용
+eta_tracker = {
+    "task_times": [],          # 최근 작업별 소요시간 (초)
+    "current_task_start": 0,   # 현재 작업 시작 시각 (time.time())
+    "started_at": 0,           # 전체 자동화 시작 시각
 }
 automation_lock = threading.Lock()
 
@@ -196,8 +204,34 @@ def api_loading_status():
 
 @app.route("/api/status")
 def api_status():
-    """현재 자동화 상태를 반환합니다."""
-    return jsonify(automation_state)
+    """현재 자동화 상태를 반환합니다 (ETA 포함)."""
+    state = dict(automation_state)
+
+    # ETA 계산
+    eta = {"avg_sec": 0, "remaining_sec": 0, "eta_time": None, "elapsed_sec": 0}
+    if state["running"] and state["total"] > 0:
+        elapsed_total = time.time() - eta_tracker["started_at"] if eta_tracker["started_at"] else 0
+        eta["elapsed_sec"] = int(elapsed_total)
+
+        task_times = eta_tracker["task_times"]
+        if task_times:
+            avg = sum(task_times) / len(task_times)
+            eta["avg_sec"] = round(avg, 1)
+            remaining_tasks = state["total"] - state["progress"]
+            eta["remaining_sec"] = int(avg * remaining_tasks)
+            finish_time = datetime.now() + timedelta(seconds=eta["remaining_sec"])
+            eta["eta_time"] = finish_time.strftime("%H:%M")
+        elif state["progress"] > 0 and elapsed_total > 0:
+            # task_times가 아직 없지만 progress가 있으면 전체 경과로 추정
+            avg = elapsed_total / state["progress"]
+            eta["avg_sec"] = round(avg, 1)
+            remaining_tasks = state["total"] - state["progress"]
+            eta["remaining_sec"] = int(avg * remaining_tasks)
+            finish_time = datetime.now() + timedelta(seconds=eta["remaining_sec"])
+            eta["eta_time"] = finish_time.strftime("%H:%M")
+
+    state["eta"] = eta
+    return jsonify(state)
 
 
 @app.route("/api/dashboard")
@@ -532,6 +566,11 @@ def api_run():
         automation_state["logs"] = []
         automation_state["results"] = {"success": 0, "fail": 0, "skip": 0, "likes": 0, "duplicate": 0}
 
+        # ETA 초기화
+        eta_tracker["task_times"] = []
+        eta_tracker["current_task_start"] = 0
+        eta_tracker["started_at"] = time.time()
+
     data = request.get_json(silent=True) or {}
     limit = data.get("limit", 0)  # 0 = 전체, 1~N = 테스트 건수
     selected_ids = data.get("selected_ids", [])  # 선택된 page_id 목록
@@ -786,7 +825,11 @@ def api_likes_dismiss():
 def _calculate_dynamic_likes(top_likes, default_qty):
     """
     상위 댓글 좋아요 수를 기반으로 동적 좋아요 수량을 계산합니다.
-    중간값 x 1.1 기준, 최소 기본 수량 보장.
+
+    전략: 1등 댓글 좋아요 + 10~20개 (랜덤)
+    - 1등보다 살짝 높게 설정하여 상위 노출
+    - MAX(500) 초과 시 → 대기 리스트로 이동 (호출측에서 처리)
+    - 최소: 기본 수량 보장
     """
     if not top_likes:
         return default_qty
@@ -795,9 +838,9 @@ def _calculate_dynamic_likes(top_likes, default_qty):
     if not nonzero:
         return default_qty
 
-    nonzero.sort()
-    median_likes = nonzero[len(nonzero) // 2]
-    target = int(median_likes * 1.1)
+    top1 = max(nonzero)  # 1등 댓글 좋아요 수
+    extra = random.randint(10, 20)
+    target = top1 + extra
     return max(target, default_qty)
 
 
@@ -1461,6 +1504,7 @@ def _run_automation(limit=0, selected_ids=None):
                 break
 
             automation_state["progress"] = i + 1
+            eta_tracker["current_task_start"] = time.time()
             task_url_short = task.get("youtube_url", "")[:50]
             automation_state["current_task"] = task_url_short
 
@@ -1670,6 +1714,13 @@ def _run_automation(limit=0, selected_ids=None):
                 prev_task_success = False
                 add_log(f"오류: {str(e)}", "error")
             finally:
+                # ETA: 작업 소요시간 기록
+                if eta_tracker["current_task_start"] > 0:
+                    elapsed = time.time() - eta_tracker["current_task_start"]
+                    eta_tracker["task_times"].append(elapsed)
+                    # 최근 20건만 유지 (이동평균)
+                    if len(eta_tracker["task_times"]) > 20:
+                        eta_tracker["task_times"] = eta_tracker["task_times"][-20:]
                 bot.close_browser()
                 prev_account_label = current_label
 
