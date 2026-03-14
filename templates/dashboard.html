@@ -1012,7 +1012,14 @@
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
         document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
 
-        event.target.classList.add('active');
+        // 해당 탭 버튼 활성화 (프로그래밍 호출에서도 동작)
+        const tabs = document.querySelectorAll('.tab');
+        tabs.forEach(t => {
+            if (t.textContent.trim() === {
+                'dashboard': '대시보드', 'tasks': '작업 목록', 'accounts': '계정 관리',
+                'tracking': '댓글 트래킹', 'smm': 'SMM 좋아요', 'settings': '설정', 'logs': '실행 로그'
+            }[tabName]) t.classList.add('active');
+        });
         document.getElementById('tab-' + tabName).classList.add('active');
 
         // tasks 탭: 이미 초기화 시 로드됨, 탭 전환만으로 재조회 안 함
@@ -2023,6 +2030,7 @@
             document.getElementById('progressWrap').style.display = 'block';
             const label = isFullAuto ? 'Full Auto' : isTest ? `테스트 ${limit}건` : null;
             updateStatusIndicator(true, label);
+            switchTab('dashboard');
         } else {
             btnStart.disabled = false;
             alert(res?.error || '실행 실패');
@@ -2085,6 +2093,7 @@
         if (res && !res.error) {
             document.getElementById('btnReplyStart').disabled = true;
             document.getElementById('btnReplyStop').disabled = false;
+            switchTab('dashboard');
         } else if (res && res.error) {
             alert(res.error);
         }
@@ -2629,6 +2638,7 @@
         });
 
         if (data && data.ok) {
+            switchTab('dashboard');
             // 폴링으로 완료 대기
             const pollRepost = setInterval(async () => {
                 const st = await api('/api/repost/status');
