@@ -706,9 +706,10 @@
                         <label>비행기모드 대기 (초)</label>
                         <input type="number" id="setAdbWait" value="4" min="2" max="15">
                     </div>
-                    <div style="margin-top:8px">
+                    <div style="margin-top:12px">
                         <button class="btn btn-sm btn-secondary" onclick="testAdbConnection()">ADB 연결 테스트</button>
-                        <span id="adbTestMsg" style="font-size:12px;margin-left:8px"></span>
+                    </div>
+                    <div id="adbTestResults" style="margin-top:12px;display:none">
                     </div>
                 </div>
             </div>
@@ -1463,23 +1464,43 @@
 
     // ─── ADB 연결 테스트 ───
     async function testAdbConnection() {
-        const msgEl = document.getElementById('adbTestMsg');
-        msgEl.innerHTML = '<span style="color:var(--text-dim)">테스트 중...</span>';
+        const container = document.getElementById('adbTestResults');
+        container.style.display = 'block';
+        container.innerHTML = '<div style="font-size:12px;color:var(--text-dim)">테스트 진행 중...</div>';
+
         try {
-            const data = await api('/api/check-connections');
-            if (data.adb) {
-                if (data.adb.ok === true) {
-                    msgEl.innerHTML = `<span style="color:var(--green)">✓ ${data.adb.message}</span>`;
-                } else if (data.adb.ok === false) {
-                    msgEl.innerHTML = `<span style="color:var(--red)">✗ ${data.adb.message}</span>`;
-                } else {
-                    msgEl.innerHTML = `<span style="color:var(--text-dim)">${data.adb.message}</span>`;
-                }
-            } else {
-                msgEl.innerHTML = '<span style="color:var(--red)">ADB 상태 확인 실패</span>';
+            const adbPath = document.getElementById('setAdbPath').value || 'adb';
+            const data = await api('/api/adb/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ adb_path: adbPath }),
+            });
+
+            if (!data.steps || !data.steps.length) {
+                container.innerHTML = '<div style="font-size:12px;color:var(--red)">테스트 결과 없음</div>';
+                return;
             }
+
+            let html = '';
+            for (const s of data.steps) {
+                const icon = s.ok === true ? '&#10004;' : s.ok === false ? '&#10008;' : '&#9644;';
+                const color = s.ok === true ? 'var(--green)' : s.ok === false ? 'var(--red)' : 'var(--text-dim)';
+                const bg = s.ok === true ? 'rgba(0,184,148,0.08)' : s.ok === false ? 'rgba(255,107,107,0.08)' : 'rgba(136,136,160,0.08)';
+                html += `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:${bg};border-radius:8px;border:1px solid ${color}22;margin-bottom:6px">`;
+                html += `<span style="color:${color};font-size:15px;font-weight:bold;min-width:18px">${icon}</span>`;
+                html += `<div><div style="font-size:12px;font-weight:600;color:var(--text)">${s.step}</div>`;
+                html += `<div style="font-size:11px;color:${color}">${s.message}</div></div>`;
+                html += '</div>';
+            }
+
+            const allOk = data.steps.every(s => s.ok === true);
+            if (allOk) {
+                html += '<div style="font-size:12px;color:var(--green);margin-top:8px;font-weight:600">모든 테스트 통과 — ADB IP 변경 사용 가능</div>';
+            }
+
+            container.innerHTML = html;
         } catch (e) {
-            msgEl.innerHTML = `<span style="color:var(--red)">오류: ${e.message}</span>`;
+            container.innerHTML = `<div style="font-size:12px;color:var(--red)">오류: ${e.message}</div>`;
         }
     }
 

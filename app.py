@@ -829,6 +829,64 @@ def api_check_connections():
     return jsonify(results)
 
 
+@app.route("/api/adb/test", methods=["POST"])
+def api_adb_test():
+    """ADB 연결을 단계별로 테스트합니다 (활성 여부 무관)."""
+    steps = []
+
+    # UI에서 전달된 ADB 경로 사용 (저장 전이라도 테스트 가능)
+    data = request.get_json() or {}
+    adb_path = data.get("adb_path", os.getenv("ADB_PATH", "adb"))
+
+    changer = ADBIPChanger()
+    changer.adb_path = adb_path
+    changer.enabled = True  # 테스트는 항상 활성 상태로
+
+    # 1단계: ADB 실행 가능 여부
+    import subprocess
+    try:
+        result = subprocess.run(
+            [adb_path, "version"], capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            version = result.stdout.strip().split("\n")[0]
+            steps.append({"step": "ADB 실행 확인", "ok": True, "message": version})
+        else:
+            steps.append({"step": "ADB 실행 확인", "ok": False, "message": "ADB 실행 실패"})
+            return jsonify({"steps": steps})
+    except FileNotFoundError:
+        steps.append({"step": "ADB 실행 확인", "ok": False, "message": f"ADB를 찾을 수 없습니다: {adb_path}"})
+        return jsonify({"steps": steps})
+    except Exception as e:
+        steps.append({"step": "ADB 실행 확인", "ok": False, "message": str(e)})
+        return jsonify({"steps": steps})
+
+    # 2단계: 디바이스 연결 확인
+    connected, info = changer.check_device()
+    if connected:
+        steps.append({"step": "디바이스 연결", "ok": True, "message": f"연결됨: {info}"})
+    else:
+        steps.append({"step": "디바이스 연결", "ok": False, "message": info})
+        return jsonify({"steps": steps})
+
+    # 3단계: 현재 IP 확인
+    ip = changer.get_current_ip()
+    if ip:
+        steps.append({"step": "현재 IP 확인", "ok": True, "message": f"IP: {ip}"})
+    else:
+        steps.append({"step": "현재 IP 확인", "ok": None, "message": "IP 확인 불가 (비행기모드 토글은 가능)"})
+
+    # 4단계: 비행기모드 설정 접근 확인
+    output, code = changer._run_adb("shell", "settings get global airplane_mode_on")
+    if code == 0:
+        mode = output.strip()
+        steps.append({"step": "비행기모드 접근", "ok": True, "message": f"현재 비행기모드: {'ON' if mode == '1' else 'OFF'}"})
+    else:
+        steps.append({"step": "비행기모드 접근", "ok": False, "message": "비행기모드 설정 접근 실패"})
+
+    return jsonify({"steps": steps})
+
+
 @app.route("/api/accounts", methods=["GET"])
 def api_get_accounts():
     """계정 목록을 반환합니다."""
