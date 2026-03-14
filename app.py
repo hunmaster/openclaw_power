@@ -61,6 +61,41 @@ _task_cache = {}
 _task_cache_ttl = 300  # 5분 (탭 전환 캐시용)
 _task_cache_lock = threading.Lock()
 
+
+def _filter_tasks_from_cache(all_tasks, status_filter, date_filter=None):
+    """'전체' 캐시 데이터에서 개별 탭용 데이터를 파생합니다."""
+    from datetime import datetime, timezone, timedelta
+    KST = timezone(timedelta(hours=9))
+
+    # 체크박스 기반 필터링 (AND 로직)
+    checkbox_filters = {
+        "댓글완료":      lambda t: t.get("comment_done") and not t.get("reply_done"),
+        "대댓글완료":    lambda t: t.get("reply_done"),
+        "좋아요작업완료": lambda t: t.get("like_done"),
+    }
+
+    if status_filter in checkbox_filters:
+        tasks = [t for t in all_tasks if checkbox_filters[status_filter](t)]
+    else:
+        # 상태 컬럼 기반 필터링
+        tasks = [t for t in all_tasks if t.get("status") == status_filter]
+
+    # 날짜 필터 적용
+    if date_filter and tasks:
+        if date_filter.startswith("since:"):
+            since_str = date_filter.split(":", 1)[1]
+            since_dt = datetime.strptime(since_str, "%Y-%m-%d").replace(tzinfo=KST)
+            tasks = [t for t in tasks if t.get("last_edited") and
+                     datetime.fromisoformat(t["last_edited"].replace("Z", "+00:00")) >= since_dt]
+        else:
+            day_start = datetime.strptime(date_filter, "%Y-%m-%d").replace(tzinfo=KST)
+            day_end = day_start + timedelta(days=1)
+            tasks = [t for t in tasks if t.get("last_edited") and
+                     day_start <= datetime.fromisoformat(t["last_edited"].replace("Z", "+00:00")) < day_end]
+
+    return tasks
+
+
 # 작업 목록 로딩 진행 상태 (UI 프로그레스 바용)
 _loading_state = {
     "active": False,
@@ -211,6 +246,17 @@ def api_tasks():
                 cached_ago = int(time.time() - entry["fetched_at"])
                 from_cache = True
 
+            # "전체" 캐시에서 개별 탭 데이터 파생 (불필요한 재수집 방지)
+            if tasks is None and not force_refresh and status_filter != "전체":
+                all_key = "전체:"
+                all_entry = _task_cache.get(all_key)
+                if (all_entry and all_entry["tasks"]
+                        and (time.time() - all_entry["fetched_at"]) < _task_cache_ttl):
+                    all_tasks = all_entry["tasks"]
+                    tasks = _filter_tasks_from_cache(all_tasks, status_filter, date_filter)
+                    cached_ago = int(time.time() - all_entry["fetched_at"])
+                    from_cache = True
+
         # 캐시 미스 → 노션에서 가져오기
         if tasks is None:
             # 로딩 상태 시작
@@ -241,6 +287,14 @@ def api_tasks():
             now = time.time()
             with _task_cache_lock:
                 _task_cache[cache_key] = {"tasks": tasks, "fetched_at": now}
+                # "전체" 로드 시 개별 탭 캐시도 자동 생성 (재수집 방지)
+                if status_filter == "전체" and tasks:
+                    for st in ["댓글작업전", "댓글완료", "대댓글완료", "좋아요작업완료", "중복", "에러"]:
+                        derived_key = f"{st}:"
+                        _task_cache[derived_key] = {
+                            "tasks": _filter_tasks_from_cache(tasks, st),
+                            "fetched_at": now,
+                        }
                 # 오래된 캐시 정리 (10개 초과 시 가장 오래된 것 제거)
                 if len(_task_cache) > 10:
                     oldest_key = min(_task_cache, key=lambda k: _task_cache[k]["fetched_at"])
@@ -279,6 +333,33 @@ def api_tasks():
         })
     except Exception as e:
         return jsonify({"error": str(e), "tasks": [], "count": 0}), 500
+
+
+@app.route("/api/tasks/counts")
+def api_task_counts():
+    """각 탭별 작업 개수를 반환합니다 (캐시 기반, "전체" 캐시에서 파생)."""
+    try:
+        statuses = ["댓글작업전", "댓글완료", "대댓글완료", "좋아요작업완료", "중복", "에러"]
+        counts = {}
+
+        with _task_cache_lock:
+            # "전체" 캐시가 있으면 거기서 파생
+            all_entry = _task_cache.get("전체:")
+            if all_entry and all_entry["tasks"] and (time.time() - all_entry["fetched_at"]) < _task_cache_ttl:
+                all_tasks = all_entry["tasks"]
+                counts["전체"] = len(all_tasks)
+                for st in statuses:
+                    counts[st] = len(_filter_tasks_from_cache(all_tasks, st))
+            else:
+                # 개별 캐시에서 수집
+                for st in statuses:
+                    entry = _task_cache.get(f"{st}:")
+                    if entry and entry["tasks"] and (time.time() - entry["fetched_at"]) < _task_cache_ttl:
+                        counts[st] = len(entry["tasks"])
+
+        return jsonify({"counts": counts})
+    except Exception as e:
+        return jsonify({"counts": {}, "error": str(e)})
 
 
 @app.route("/api/notion/debug")
