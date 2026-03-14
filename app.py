@@ -305,6 +305,40 @@ def api_stop():
     return jsonify({"message": "중지 요청이 전송되었습니다."})
 
 
+@app.route("/api/duplicate-scan", methods=["POST"])
+def api_duplicate_scan():
+    """사전 중복 스캔: 대기 작업의 영상 링크를 전체 DB 완료 목록과 비교합니다."""
+    try:
+        notion = NotionManager()
+        tasks = notion.get_pending_tasks()
+        if not tasks:
+            return jsonify({"duplicates": [], "clean_count": 0, "message": "대기 작업이 없습니다."})
+
+        clean_tasks, duplicate_tasks = notion.check_duplicates(tasks)
+
+        # 중복 목록 상세 정보
+        dup_details = []
+        for t in duplicate_tasks:
+            dup_details.append({
+                "page_id": t.get("page_id", ""),
+                "youtube_url": t.get("youtube_url", ""),
+                "video_title": t.get("video_title", ""),
+                "account": t.get("account", ""),
+                "comment_preview": (t.get("comment_text", "")[:40] + "...") if len(t.get("comment_text", "")) > 40 else t.get("comment_text", ""),
+            })
+
+        return jsonify({
+            "duplicates": dup_details,
+            "duplicate_count": len(duplicate_tasks),
+            "clean_count": len(clean_tasks),
+            "total_count": len(tasks),
+            "message": f"스캔 완료: 전체 {len(tasks)}건 중 중복 {len(duplicate_tasks)}건 발견"
+                       + (f" → '중복' 상태로 변경됨" if duplicate_tasks else " (중복 없음)"),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/smm/services")
 def api_smm_services():
     """SMM 서비스 목록을 조회합니다."""
