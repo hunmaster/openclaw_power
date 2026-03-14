@@ -245,6 +245,18 @@ def run():
     # 현황 표시
     display_status(tasks, proxy_manager, safety_rules, accounts, smm_client)
 
+    # ADB IP 변경 활성 시 유선 인터넷 비활성화
+    adb_changer = ADBIPChanger()
+    _ethernet_disabled = False
+    if adb_changer.enabled and adb_changer.auto_ethernet:
+        console.print("[yellow]유선 인터넷 비활성화 → USB 테더링으로 전환 중...[/yellow]")
+        ok, msg = adb_changer.disable_ethernet()
+        if ok:
+            _ethernet_disabled = True
+            console.print(f"[green]{msg}[/green]")
+        else:
+            console.print(f"[red]유선 비활성화 실패: {msg}[/red]")
+
     # 작업 실행
     delay_ip_change = int(os.getenv("DELAY_AFTER_IP_CHANGE", "3"))
     comment_interval = int(os.getenv("COMMENT_INTERVAL_SEC", "180"))
@@ -339,6 +351,15 @@ def run():
     ]
     if smm_client.enabled:
         summary_lines.append(f"좋아요 대량주문: [blue]{like_order_count}[/blue]건")
+
+    # 유선 인터넷 복원
+    if _ethernet_disabled:
+        console.print("[yellow]유선 인터넷 복원 중...[/yellow]")
+        ok, msg = adb_changer.enable_ethernet()
+        if ok:
+            console.print(f"[green]{msg}[/green]")
+        else:
+            console.print(f"[red]유선 복원 실패: {msg}[/red]")
 
     console.print(Panel(
         "\n".join(summary_lines),

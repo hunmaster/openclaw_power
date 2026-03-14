@@ -676,6 +676,8 @@ def api_get_settings():
         "ADB_IP_CHANGE_ENABLED": os.getenv("ADB_IP_CHANGE_ENABLED", "false"),
         "ADB_PATH": os.getenv("ADB_PATH", "adb"),
         "ADB_AIRPLANE_WAIT": os.getenv("ADB_AIRPLANE_WAIT", "4"),
+        "ADB_AUTO_ETHERNET": os.getenv("ADB_AUTO_ETHERNET", "true"),
+        "ADB_ETHERNET_NAME": os.getenv("ADB_ETHERNET_NAME", "이더넷"),
     })
 
 
@@ -694,6 +696,7 @@ def api_save_settings():
             "MAX_COMMENTS_PER_DAY", "COMMENT_INTERVAL_SEC", "SAME_VIDEO_INTERVAL_MIN",
             "HEADLESS", "USE_PROXY",
             "ADB_IP_CHANGE_ENABLED", "ADB_PATH", "ADB_AIRPLANE_WAIT",
+            "ADB_AUTO_ETHERNET", "ADB_ETHERNET_NAME",
         }
 
         env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
@@ -877,13 +880,18 @@ def api_adb_test():
     else:
         steps.append({"step": "현재 IP 확인", "ok": None, "message": "IP 확인 불가 (비행기모드 토글은 가능)"})
 
-    # 4단계: 비행기모드 설정 접근 확인
-    output, code = changer._run_adb("shell", "settings get global airplane_mode_on")
+    # 4단계: 비행기모드 제어 확인 (cmd connectivity 방식)
+    output, code = changer._run_adb("shell", "cmd connectivity airplane-mode")
     if code == 0:
         mode = output.strip()
-        steps.append({"step": "비행기모드 접근", "ok": True, "message": f"현재 비행기모드: {'ON' if mode == '1' else 'OFF'}"})
+        steps.append({"step": "비행기모드 제어", "ok": True, "message": f"cmd connectivity 지원됨 (현재: {mode})"})
     else:
-        steps.append({"step": "비행기모드 접근", "ok": False, "message": "비행기모드 설정 접근 실패"})
+        # fallback: settings 방식 확인
+        output2, code2 = changer._run_adb("shell", "settings get global airplane_mode_on")
+        if code2 == 0:
+            steps.append({"step": "비행기모드 제어", "ok": True, "message": f"settings 방식 사용 가능"})
+        else:
+            steps.append({"step": "비행기모드 제어", "ok": False, "message": "비행기모드 제어 접근 실패"})
 
     return jsonify({"steps": steps})
 
@@ -1189,6 +1197,20 @@ def _run_automation(limit=0, selected_ids=None):
         smm_client = SMMClient()
         accounts = load_accounts()
 
+        # ADB IP 변경 활성 시 유선 인터넷 비활성화 (USB 테더링으로 전환)
+        # Full Auto 모드에서는 _run_full_auto에서 관리하므로 건너뜀
+        adb_changer = ADBIPChanger()
+        _ethernet_disabled = False
+        if adb_changer.enabled and adb_changer.auto_ethernet and not automation_state.get("full_auto"):
+            automation_state["current_task"] = "[준비] 유선 인터넷 비활성화 중..."
+            add_log("유선 인터넷 비활성화 → USB 테더링으로 전환 중...", "info")
+            ok, msg = adb_changer.disable_ethernet()
+            if ok:
+                _ethernet_disabled = True
+                add_log(f"유선 비활성화 완료: {msg}", "success")
+            else:
+                add_log(f"유선 비활성화 실패: {msg} (관리자 권한으로 실행 필요)", "warning")
+
         if not accounts:
             add_log("계정이 없습니다. config/accounts.json을 확인하세요.", "error")
             automation_state["running"] = False
@@ -1387,6 +1409,15 @@ def _run_automation(limit=0, selected_ids=None):
     except Exception as e:
         add_log(f"치명적 오류: {str(e)}", "error")
     finally:
+        # ADB IP 변경 사용 시 유선 인터넷 복원
+        if _ethernet_disabled:
+            add_log("유선 인터넷 복원 중...", "info")
+            ok, msg = adb_changer.enable_ethernet()
+            if ok:
+                add_log(f"유선 인터넷 복원 완료: {msg}", "success")
+            else:
+                add_log(f"유선 복원 실패: {msg} (수동으로 복원 필요)", "warning")
+
         # Full Auto 모드에서는 _run_full_auto가 running을 관리하므로 여기서 끄지 않음
         if not automation_state.get("full_auto"):
             automation_state["running"] = False
@@ -1402,6 +1433,18 @@ def _run_full_auto():
     total_fail = 0
     total_skip = 0
     total_likes = 0
+
+    # Full Auto 모드에서는 여기서 유선 제어 (라운드별 반복 방지)
+    adb_changer = ADBIPChanger()
+    _fa_ethernet_disabled = False
+    if adb_changer.enabled and adb_changer.auto_ethernet:
+        add_log("유선 인터넷 비활성화 → USB 테더링으로 전환 중...", "info")
+        ok, msg = adb_changer.disable_ethernet()
+        if ok:
+            _fa_ethernet_disabled = True
+            add_log(f"유선 비활성화 완료: {msg}", "success")
+        else:
+            add_log(f"유선 비활성화 실패: {msg}", "warning")
 
     try:
         add_log("=== Full Auto 모드 시작 ===", "info")
@@ -1465,6 +1508,15 @@ def _run_full_auto():
     except Exception as e:
         add_log(f"Full Auto 오류: {str(e)}", "error")
     finally:
+        # Full Auto 종료 시 유선 복원
+        if _fa_ethernet_disabled:
+            add_log("유선 인터넷 복원 중...", "info")
+            ok, msg = adb_changer.enable_ethernet()
+            if ok:
+                add_log(f"유선 인터넷 복원 완료: {msg}", "success")
+            else:
+                add_log(f"유선 복원 실패: {msg}", "warning")
+
         automation_state["running"] = False
         automation_state["full_auto"] = False
         automation_state["current_task"] = None

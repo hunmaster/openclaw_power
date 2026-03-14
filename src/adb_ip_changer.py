@@ -1,15 +1,17 @@
 """
 ADB를 이용한 IP 변경 모듈
 
-모바일 핫스팟/테더링 환경에서 비행기모드 ON→OFF로 LTE IP를 변경합니다.
+모바일 USB 테더링 환경에서 비행기모드 ON→OFF로 LTE IP를 변경합니다.
 - 계정 전환 시 자동 호출
 - 1계정 = 1IP 원칙 준수
+- 자동화 시작/종료 시 유선 인터넷 비활성화/활성화
 """
 
 import os
 import subprocess
 import time
 import re
+import platform
 
 from rich.console import Console
 
@@ -21,6 +23,8 @@ class ADBIPChanger:
         self.adb_path = os.getenv("ADB_PATH", "adb")
         self.airplane_wait = int(os.getenv("ADB_AIRPLANE_WAIT", "4"))
         self.enabled = os.getenv("ADB_IP_CHANGE_ENABLED", "false").lower() == "true"
+        self.ethernet_name = os.getenv("ADB_ETHERNET_NAME", "이더넷")
+        self.auto_ethernet = os.getenv("ADB_AUTO_ETHERNET", "true").lower() == "true"
 
     def _run_adb(self, *args):
         """ADB 명령어를 실행하고 결과를 반환합니다."""
@@ -32,10 +36,20 @@ class ADBIPChanger:
             return result.stdout.strip(), result.returncode
         except FileNotFoundError:
             console.print(f"[red]ADB를 찾을 수 없습니다: {self.adb_path}[/red]")
-            console.print("[yellow]ADB_PATH 환경변수를 설정하거나 PATH에 추가하세요.[/yellow]")
             return "", 1
         except subprocess.TimeoutExpired:
             console.print("[red]ADB 명령 시간 초과[/red]")
+            return "", 1
+
+    def _run_cmd(self, cmd_str):
+        """시스템 명령어를 실행합니다 (유선 인터넷 제어용)."""
+        try:
+            result = subprocess.run(
+                cmd_str, capture_output=True, text=True, timeout=10, shell=True
+            )
+            return result.stdout.strip(), result.returncode
+        except Exception as e:
+            console.print(f"[red]명령 실행 실패: {e}[/red]")
             return "", 1
 
     def check_device(self):
@@ -46,7 +60,7 @@ class ADBIPChanger:
 
         lines = output.strip().split("\n")
         devices = []
-        for line in lines[1:]:  # 첫 줄은 "List of devices attached"
+        for line in lines[1:]:
             parts = line.strip().split("\t")
             if len(parts) == 2:
                 serial, status = parts
@@ -65,31 +79,60 @@ class ADBIPChanger:
         return False, f"디바이스 상태 이상: {devices}"
 
     def get_current_ip(self):
-        """현재 모바일 IP를 확인합니다."""
-        # 방법 1: ifconfig로 rmnet (LTE) IP 확인
-        output, code = self._run_adb("shell", "ifconfig rmnet_data0 2>/dev/null || ifconfig rmnet0 2>/dev/null")
-        if code == 0 and output:
-            match = re.search(r"inet addr:(\d+\.\d+\.\d+\.\d+)", output)
-            if match:
-                return match.group(1)
-
-        # 방법 2: ip addr로 확인
-        output, code = self._run_adb("shell", "ip addr show 2>/dev/null | grep 'inet ' | grep -v '127.0.0.1'")
-        if code == 0 and output:
-            match = re.search(r"inet (\d+\.\d+\.\d+\.\d+)", output)
-            if match:
-                return match.group(1)
-
-        # 방법 3: curl로 외부 IP 확인
-        output, code = self._run_adb("shell", "curl -s --max-time 5 https://api.ipify.org 2>/dev/null")
-        if code == 0 and output and re.match(r"\d+\.\d+\.\d+\.\d+", output):
-            return output.strip()
+        """현재 모바일 IP를 확인합니다 (PC에서 curl로 확인)."""
+        # PC에서 curl로 외부 IP 확인 (USB 테더링 상태에서 = 폰 LTE IP)
+        try:
+            result = subprocess.run(
+                ["curl", "-s", "--max-time", "5", "https://api.ipify.org"],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0 and re.match(r"\d+\.\d+\.\d+\.\d+", result.stdout.strip()):
+                return result.stdout.strip()
+        except Exception:
+            pass
 
         return None
+
+    def disable_ethernet(self):
+        """유선 인터넷을 비활성화합니다 (USB 테더링으로 전환)."""
+        if not self.auto_ethernet:
+            return True, "유선 자동 제어 비활성"
+
+        if platform.system() != "Windows":
+            console.print("[yellow]유선 인터넷 제어는 Windows에서만 지원됩니다[/yellow]")
+            return False, "Windows 전용 기능"
+
+        console.print(f"[yellow]유선 인터넷 비활성화 중: {self.ethernet_name}[/yellow]")
+        _, code = self._run_cmd(f'netsh interface set interface "{self.ethernet_name}" disable')
+        if code == 0:
+            time.sleep(2)  # 네트워크 전환 대기
+            console.print("[green]유선 인터넷 비활성화 완료 → USB 테더링으로 전환됨[/green]")
+            return True, "유선 비활성화 완료"
+        else:
+            console.print(f"[red]유선 비활성화 실패 (관리자 권한 필요)[/red]")
+            return False, "유선 비활성화 실패 (관리자 권한으로 실행 필요)"
+
+    def enable_ethernet(self):
+        """유선 인터넷을 다시 활성화합니다."""
+        if not self.auto_ethernet:
+            return True, "유선 자동 제어 비활성"
+
+        if platform.system() != "Windows":
+            return False, "Windows 전용 기능"
+
+        console.print(f"[yellow]유선 인터넷 복원 중: {self.ethernet_name}[/yellow]")
+        _, code = self._run_cmd(f'netsh interface set interface "{self.ethernet_name}" enable')
+        if code == 0:
+            console.print("[green]유선 인터넷 복원 완료[/green]")
+            return True, "유선 활성화 완료"
+        else:
+            console.print("[red]유선 활성화 실패[/red]")
+            return False, "유선 활성화 실패"
 
     def toggle_airplane_mode(self):
         """
         비행기모드 ON → OFF로 IP를 변경합니다.
+        cmd connectivity 방식 사용 (최신 Android/Samsung 호환)
 
         Returns:
             (bool, str): (성공여부, 메시지)
@@ -105,16 +148,14 @@ class ADBIPChanger:
         old_ip = self.get_current_ip()
         console.print(f"[blue]현재 IP: {old_ip or '확인 불가'}[/blue]")
 
-        # 비행기모드 ON
+        # 비행기모드 ON (cmd connectivity 방식)
         console.print("[yellow]비행기모드 ON...[/yellow]")
-        self._run_adb("shell", "settings put global airplane_mode_on 1")
-        self._run_adb("shell", "am broadcast -a android.intent.action.AIRPLANE_MODE --ez state true")
+        self._run_adb("shell", "cmd connectivity airplane-mode enable")
         time.sleep(self.airplane_wait)
 
         # 비행기모드 OFF
         console.print("[yellow]비행기모드 OFF...[/yellow]")
-        self._run_adb("shell", "settings put global airplane_mode_on 0")
-        self._run_adb("shell", "am broadcast -a android.intent.action.AIRPLANE_MODE --ez state false")
+        self._run_adb("shell", "cmd connectivity airplane-mode disable")
 
         # 네트워크 재연결 대기
         console.print("[yellow]네트워크 재연결 대기 중...[/yellow]")

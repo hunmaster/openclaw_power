@@ -706,6 +706,17 @@
                         <label>비행기모드 대기 (초)</label>
                         <input type="number" id="setAdbWait" value="4" min="2" max="15">
                     </div>
+                    <div class="form-group">
+                        <label>유선 인터넷 자동 제어</label>
+                        <select id="setAdbAutoEthernet">
+                            <option value="true">자동 (실행 시 끄고, 종료 시 복원)</option>
+                            <option value="false">수동 (직접 관리)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>유선 어댑터 이름</label>
+                        <input type="text" id="setAdbEthernetName" value="이더넷" placeholder="이더넷">
+                    </div>
                     <div style="margin-top:12px">
                         <button class="btn btn-sm btn-secondary" onclick="testAdbConnection()">ADB 연결 테스트</button>
                     </div>
@@ -1471,6 +1482,8 @@
         document.getElementById('setAdbEnabled').value = data.ADB_IP_CHANGE_ENABLED || 'false';
         document.getElementById('setAdbPath').value = data.ADB_PATH || 'adb';
         document.getElementById('setAdbWait').value = data.ADB_AIRPLANE_WAIT || '4';
+        document.getElementById('setAdbAutoEthernet').value = data.ADB_AUTO_ETHERNET || 'true';
+        document.getElementById('setAdbEthernetName').value = data.ADB_ETHERNET_NAME || '이더넷';
     }
 
     // ─── ADB 연결 테스트 ───
@@ -1532,6 +1545,8 @@
             ADB_IP_CHANGE_ENABLED: document.getElementById('setAdbEnabled').value,
             ADB_PATH: document.getElementById('setAdbPath').value,
             ADB_AIRPLANE_WAIT: document.getElementById('setAdbWait').value,
+            ADB_AUTO_ETHERNET: document.getElementById('setAdbAutoEthernet').value,
+            ADB_ETHERNET_NAME: document.getElementById('setAdbEthernetName').value,
         };
 
         const res = await api('/api/settings', {
