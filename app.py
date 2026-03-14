@@ -77,9 +77,21 @@ tracking_state = {
     "running": False,
     "progress": 0,
     "total": 0,
+    "started_at": None,
     "last_result": None,
 }
 tracking_lock = threading.Lock()
+
+
+def _tracking_progress_callback(progress, total):
+    """comment_tracker에서 호출되는 진행 상태 콜백"""
+    tracking_state["progress"] = progress
+    tracking_state["total"] = total
+    if progress == 0:
+        tracking_state["started_at"] = time.time()
+
+
+comment_tracker.set_progress_callback(_tracking_progress_callback)
 
 # 리포스팅 상태
 repost_state = {
@@ -2114,9 +2126,28 @@ def api_tracking_remove(comment_id):
 
 @app.route("/api/tracking/status")
 def api_tracking_status():
-    """트래킹 실행 상태"""
+    """트래킹 실행 상태 (실시간 진행 정보 포함)"""
+    progress = tracking_state["progress"]
+    total = tracking_state["total"]
+    started_at = tracking_state.get("started_at")
+
+    # 실시간 소요 시간 + 예상 잔여 시간 계산
+    elapsed_sec = 0
+    eta_sec = 0
+    per_item_sec = 0
+    if started_at and tracking_state["running"] and progress > 0:
+        elapsed_sec = time.time() - started_at
+        per_item_sec = elapsed_sec / progress
+        remaining = total - progress
+        eta_sec = per_item_sec * remaining
+
     return jsonify({
         "running": tracking_state["running"],
+        "progress": progress,
+        "total": total,
+        "elapsed_sec": round(elapsed_sec),
+        "eta_sec": round(eta_sec),
+        "per_item_sec": round(per_item_sec, 1),
         "last_result": tracking_state.get("last_result"),
     })
 

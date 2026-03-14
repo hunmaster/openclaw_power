@@ -81,10 +81,15 @@ class CommentTracker:
         self.context = None
         self.page = None
         self._log_callback = None  # 외부 로그 콜백 (app.py add_log 연결용)
+        self._progress_callback = None  # 트래킹 진행 상태 콜백
 
     def set_log_callback(self, callback):
         """대시보드 실행로그에 연결할 콜백을 설정합니다."""
         self._log_callback = callback
+
+    def set_progress_callback(self, callback):
+        """트래킹 진행 상태 콜백을 설정합니다. callback(progress, total)"""
+        self._progress_callback = callback
 
     def _log(self, message, level="info"):
         """콘솔 + 대시보드 실행로그에 동시 출력"""
@@ -429,6 +434,10 @@ class CommentTracker:
 
         console.print(f"[blue]총 {total}개 댓글 트래킹 시작...[/blue]")
 
+        # 진행 상태 콜백 호출
+        if self._progress_callback:
+            self._progress_callback(0, total)
+
         results = []
         try:
             self._start_browser()
@@ -444,6 +453,10 @@ class CommentTracker:
                 result["comment_text"] = data["comment_text"][:50]
                 result["video_id"] = data.get("video_id", "")
                 results.append(result)
+
+                # 진행 상태 콜백 호출
+                if self._progress_callback:
+                    self._progress_callback(idx, total)
 
                 # 요청 간 간격 (rate limit 방지)
                 if idx < total:
@@ -483,6 +496,10 @@ class CommentTracker:
 
         console.print(f"[blue]선택된 {total}개 댓글 트래킹 시작...[/blue]")
 
+        # 진행 상태 콜백 호출
+        if self._progress_callback:
+            self._progress_callback(0, total)
+
         results = []
         try:
             self._start_browser()
@@ -498,6 +515,10 @@ class CommentTracker:
                 result["comment_text"] = data["comment_text"][:50]
                 result["video_id"] = data.get("video_id", "")
                 results.append(result)
+
+                # 진행 상태 콜백 호출
+                if self._progress_callback:
+                    self._progress_callback(idx, total)
 
                 if idx < total:
                     time.sleep(3)
