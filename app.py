@@ -2152,6 +2152,13 @@ def api_tracking_status():
     })
 
 
+@app.route("/api/tracking/stop", methods=["POST"])
+def api_tracking_stop():
+    """트래킹 중지"""
+    comment_tracker.stop_tracking()
+    return jsonify({"ok": True})
+
+
 # ━━━ 리포스팅 API ━━━
 
 @app.route("/api/repost", methods=["POST"])

@@ -82,6 +82,7 @@ class CommentTracker:
         self.page = None
         self._log_callback = None  # 외부 로그 콜백 (app.py add_log 연결용)
         self._progress_callback = None  # 트래킹 진행 상태 콜백
+        self._stop_requested = False  # 트래킹 중지 플래그
 
     def set_log_callback(self, callback):
         """대시보드 실행로그에 연결할 콜백을 설정합니다."""
@@ -90,6 +91,10 @@ class CommentTracker:
     def set_progress_callback(self, callback):
         """트래킹 진행 상태 콜백을 설정합니다. callback(progress, total)"""
         self._progress_callback = callback
+
+    def stop_tracking(self):
+        """진행 중인 트래킹을 중지 요청합니다."""
+        self._stop_requested = True
 
     def _log(self, message, level="info"):
         """콘솔 + 대시보드 실행로그에 동시 출력"""
@@ -424,7 +429,7 @@ class CommentTracker:
 
         console.print(f"[blue]총 {total}개 댓글 트래킹 시작...[/blue]")
 
-        # 진행 상태 콜백 호출
+        self._stop_requested = False
         if self._progress_callback:
             self._progress_callback(0, total)
 
@@ -433,6 +438,10 @@ class CommentTracker:
             self._start_browser()
 
             for idx, (comment_id, data) in enumerate(active_comments.items(), 1):
+                if self._stop_requested:
+                    self._log(f"사용자에 의해 중지됨 ({idx-1}/{total} 완료)", "warning")
+                    break
+
                 console.print(
                     f"[dim]확인 중 ({idx}/{total}): "
                     f"{data['account_label']} - {data['comment_text'][:30]}...[/dim]"
@@ -444,11 +453,9 @@ class CommentTracker:
                 result["video_id"] = data.get("video_id", "")
                 results.append(result)
 
-                # 진행 상태 콜백 호출
                 if self._progress_callback:
                     self._progress_callback(idx, total)
 
-                # 요청 간 간격 (rate limit 방지)
                 if idx < total:
                     time.sleep(3)
 
@@ -486,7 +493,7 @@ class CommentTracker:
 
         console.print(f"[blue]선택된 {total}개 댓글 트래킹 시작...[/blue]")
 
-        # 진행 상태 콜백 호출
+        self._stop_requested = False
         if self._progress_callback:
             self._progress_callback(0, total)
 
@@ -495,6 +502,10 @@ class CommentTracker:
             self._start_browser()
 
             for idx, (comment_id, data) in enumerate(targets.items(), 1):
+                if self._stop_requested:
+                    self._log(f"사용자에 의해 중지됨 ({idx-1}/{total} 완료)", "warning")
+                    break
+
                 console.print(
                     f"[dim]확인 중 ({idx}/{total}): "
                     f"{data['account_label']} - {data['comment_text'][:30]}...[/dim]"
@@ -506,7 +517,6 @@ class CommentTracker:
                 result["video_id"] = data.get("video_id", "")
                 results.append(result)
 
-                # 진행 상태 콜백 호출
                 if self._progress_callback:
                     self._progress_callback(idx, total)
 

@@ -651,8 +651,11 @@
                 <div class="card-label">트래킹 상태</div>
                 <div class="card-value" id="trackStatus" style="font-size:14px">대기</div>
                 <div id="trackProgressArea" style="display:none;margin-top:8px;width:100%">
-                    <div style="background:rgba(255,255,255,0.06);border-radius:4px;height:6px;overflow:hidden;margin-bottom:4px">
-                        <div id="trackProgressBar" style="height:100%;background:var(--accent-light);border-radius:4px;transition:width 0.4s ease;width:0%"></div>
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                        <div style="flex:1;background:rgba(255,255,255,0.06);border-radius:4px;height:6px;overflow:hidden">
+                            <div id="trackProgressBar" style="height:100%;background:var(--accent-light);border-radius:4px;transition:width 0.4s ease;width:0%"></div>
+                        </div>
+                        <button id="btnTrackStop" onclick="stopTracking()" style="font-size:10px;padding:1px 8px;background:var(--error);color:#fff;border:none;border-radius:4px;cursor:pointer">중지</button>
                     </div>
                     <div id="trackProgressDetail" style="font-size:11px;color:var(--text-dim)"></div>
                 </div>
@@ -2981,15 +2984,25 @@
         return m > 0 ? `${m}분 ${s}초` : `${s}초`;
     }
 
+    async function stopTracking() {
+        await api('/api/tracking/stop', { method: 'POST' });
+        document.getElementById('btnTrackStop').disabled = true;
+        document.getElementById('btnTrackStop').textContent = '중지 중...';
+    }
+
     function startTrackingPoll(btn, originalText) {
         const statusEl = document.getElementById('trackStatus');
         const progressArea = document.getElementById('trackProgressArea');
         const progressBar = document.getElementById('trackProgressBar');
         const progressDetail = document.getElementById('trackProgressDetail');
+        const stopBtn = document.getElementById('btnTrackStop');
 
         progressArea.style.display = '';
         progressBar.style.width = '0%';
         progressBar.style.background = 'var(--accent-light)';
+        stopBtn.disabled = false;
+        stopBtn.textContent = '중지';
+        stopBtn.style.display = '';
 
         const poll = setInterval(async () => {
             const st = await api('/api/tracking/status');
@@ -3015,6 +3028,7 @@
                 clearInterval(poll);
                 btn.disabled = false;
                 btn.textContent = originalText;
+                stopBtn.style.display = 'none';
                 progressBar.style.width = '100%';
                 progressBar.style.background = '#00b894';
                 statusEl.textContent = '완료';
