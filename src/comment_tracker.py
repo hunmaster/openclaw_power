@@ -280,14 +280,7 @@ class CommentTracker:
                         if not el_text:
                             continue
 
-                        is_our_comment = False
-                        if comment_text:
-                            match_len = min(40, len(comment_text))
-                            our_prefix = comment_text[:match_len].strip()
-                            if our_prefix and our_prefix in el_text:
-                                is_our_comment = True
-                            elif el_text[:match_len].strip() in comment_text and len(el_text) > 10:
-                                is_our_comment = True
+                        is_our_comment = self._text_match(comment_text, el_text)
 
                         if is_our_comment:
                             alive = True
@@ -337,9 +330,6 @@ class CommentTracker:
 
                 search_text = found_text or comment_text
                 if search_text and comment_elements:
-                    match_len = min(40, len(search_text))
-                    match_prefix = search_text[:match_len].strip()
-
                     # 처음 5개 댓글 로그
                     for dbg_idx, dbg_el in enumerate(comment_elements[:5]):
                         dbg_text = dbg_el.inner_text().strip()[:60]
@@ -353,7 +343,7 @@ class CommentTracker:
                         if idx == 0:
                             continue  # 하이라이트 댓글 건너뜀
                         el_text = el.inner_text().strip()
-                        if match_prefix and match_prefix in el_text:
+                        if self._text_match(search_text, el_text):
                             position = idx  # 인기순 목록에서의 위치 (1-based: idx=1→1위)
                             is_highlighted = position <= 3
                             found_in_regular = True
@@ -578,4 +568,69 @@ class CommentTracker:
     def _extract_video_id(self, url):
         match = re.search(r"(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})", url)
         return match.group(1) if match else None
+
+    def _text_match(self, stored_text, page_text):
+        """
+        저장된 댓글 텍스트와 페이지에서 가져온 텍스트를 비교합니다.
+        YouTube가 렌더링 시 변경하는 패턴(대괄호 제거, 구두점 변경 등)을
+        고려하여 정규화 후 비교합니다.
+
+        3단계 매칭:
+        1) 원본 텍스트 처음 40자 포함 여부 (기존 방식)
+        2) 정규화 후 처음 30자 포함 여부
+        3) 정규화 후 핵심 키워드(한글만) 비교
+        """
+        if not stored_text or not page_text:
+            return False
+
+        # 1단계: 원본 텍스트 매칭 (기존 방식)
+        match_len = min(40, len(stored_text))
+        our_prefix = stored_text[:match_len].strip()
+        if our_prefix and our_prefix in page_text:
+            return True
+        if page_text[:match_len].strip() in stored_text and len(page_text) > 10:
+            return True
+
+        # 2단계: 정규화 후 매칭
+        norm_stored = self._normalize_text(stored_text)
+        norm_page = self._normalize_text(page_text)
+
+        norm_match_len = min(30, len(norm_stored))
+        norm_prefix = norm_stored[:norm_match_len]
+        if norm_prefix and norm_prefix in norm_page:
+            return True
+        if norm_page[:norm_match_len] in norm_stored and len(norm_page) > 10:
+            return True
+
+        # 3단계: 한글만 추출하여 비교 (숫자/구두점/특수문자 완전 무시)
+        korean_stored = re.sub(r'[^\uAC00-\uD7A3]', '', stored_text)
+        korean_page = re.sub(r'[^\uAC00-\uD7A3]', '', page_text)
+
+        # 한글 문자열의 앞 20자로 포함 여부 확인 (양방향)
+        kr_len = min(20, len(korean_stored))
+        if kr_len >= 8:
+            kr_prefix_s = korean_stored[:kr_len]
+            kr_prefix_p = korean_page[:kr_len]
+            if kr_prefix_s in korean_page or kr_prefix_p in korean_stored:
+                return True
+
+        return False
+
+    @staticmethod
+    def _normalize_text(text):
+        """
+        텍스트 매칭을 위한 정규화.
+        YouTube가 렌더링 시 변경하는 패턴을 통일합니다:
+        - 대괄호 제거: [00:24] → 00:24
+        - 구두점 제거: 쉼표, 마침표, ... 등
+        - 공백 통일: 연속 공백 → 단일 공백
+        - 앞뒤 공백 제거
+        """
+        if not text:
+            return ""
+        t = text
+        t = t.replace("[", "").replace("]", "")  # 대괄호 제거
+        t = re.sub(r'[,.\!\?\;:…·~\-–—]', '', t)  # 구두점 제거
+        t = re.sub(r'\s+', ' ', t)  # 연속 공백 통일
+        return t.strip()
 
