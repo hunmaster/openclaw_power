@@ -63,12 +63,8 @@ _task_cache_ttl = 300  # 5분 (탭 전환 캐시용)
 _task_cache_lock = threading.Lock()
 
 
-def _filter_tasks_from_cache(all_tasks, status_filter, date_filter=None):
-    """'전체' 캐시 데이터에서 개별 탭용 데이터를 파생합니다."""
-    from datetime import datetime, timezone, timedelta
-    KST = timezone(timedelta(hours=9))
-
-    # 체크박스 기반 필터링 (AND 로직)
+def _filter_tasks_from_cache(all_tasks, status_filter):
+    """'전체' 캐시 데이터에서 개별 탭용 데이터를 파생합니다 (상태만 필터링)."""
     checkbox_filters = {
         "댓글완료":      lambda t: t.get("comment_done") and not t.get("reply_done"),
         "대댓글완료":    lambda t: t.get("reply_done"),
@@ -76,25 +72,48 @@ def _filter_tasks_from_cache(all_tasks, status_filter, date_filter=None):
     }
 
     if status_filter in checkbox_filters:
-        tasks = [t for t in all_tasks if checkbox_filters[status_filter](t)]
+        return [t for t in all_tasks if checkbox_filters[status_filter](t)]
     else:
-        # 상태 컬럼 기반 필터링
-        tasks = [t for t in all_tasks if t.get("status") == status_filter]
+        return [t for t in all_tasks if t.get("status") == status_filter]
 
-    # 날짜 필터 적용
-    if date_filter and tasks:
-        if date_filter.startswith("since:"):
-            since_str = date_filter.split(":", 1)[1]
-            since_dt = datetime.strptime(since_str, "%Y-%m-%d").replace(tzinfo=KST)
-            tasks = [t for t in tasks if t.get("last_edited") and
-                     datetime.fromisoformat(t["last_edited"].replace("Z", "+00:00")) >= since_dt]
-        else:
-            day_start = datetime.strptime(date_filter, "%Y-%m-%d").replace(tzinfo=KST)
-            day_end = day_start + timedelta(days=1)
-            tasks = [t for t in tasks if t.get("last_edited") and
-                     day_start <= datetime.fromisoformat(t["last_edited"].replace("Z", "+00:00")) < day_end]
 
-    return tasks
+def _apply_date_filter(tasks, date_filter):
+    """날짜 필터를 캐시된 데이터에 적용합니다."""
+    from datetime import datetime, timezone, timedelta
+    KST = timezone(timedelta(hours=9))
+
+    if date_filter.startswith("since:"):
+        since_str = date_filter.split(":", 1)[1]
+        since_dt = datetime.strptime(since_str, "%Y-%m-%d").replace(tzinfo=KST)
+        return [t for t in tasks if t.get("last_edited") and
+                datetime.fromisoformat(t["last_edited"].replace("Z", "+00:00")) >= since_dt]
+    else:
+        day_start = datetime.strptime(date_filter, "%Y-%m-%d").replace(tzinfo=KST)
+        day_end = day_start + timedelta(days=1)
+        return [t for t in tasks if t.get("last_edited") and
+                day_start <= datetime.fromisoformat(t["last_edited"].replace("Z", "+00:00")) < day_end]
+
+
+def _apply_sort(tasks, sort_param):
+    """정렬을 적용합니다. sort_param: 'field:asc' 또는 'field:desc'"""
+    if not sort_param or not tasks:
+        return tasks
+
+    parts = sort_param.split(":")
+    field = parts[0] if parts else "last_edited"
+    direction = parts[1] if len(parts) > 1 else "desc"
+    reverse = (direction == "desc")
+
+    def sort_key(t):
+        val = t.get(field)
+        if val is None:
+            return ""
+        return str(val)
+
+    try:
+        return sorted(tasks, key=sort_key, reverse=reverse)
+    except Exception:
+        return tasks
 
 
 # 작업 목록 로딩 진행 상태 (UI 프로그레스 바용)
@@ -216,8 +235,8 @@ def api_dashboard():
 @app.route("/api/tasks")
 def api_tasks():
     """노션 DB에서 작업 목록을 가져옵니다.
-    ?status=&date=YYYY-MM-DD&page=1&search=&refresh=1 파라미터 지원.
-    캐시를 사용하여 페이지 이동 시 즉시 응답합니다.
+    ?status=&date=YYYY-MM-DD&page=1&search=&sort=last_edited:desc&refresh=1 파라미터 지원.
+    캐시: 상태별 1회 로드 → 날짜/검색/정렬은 캐시에서 즉시 처리 (노션 재호출 없음)
     """
     try:
         status_filter = request.args.get("status", "댓글작업전")
@@ -226,41 +245,40 @@ def api_tasks():
         if status_filter == "전체":
             date_filter = None
         search_query = request.args.get("search", "").strip()
+        sort_param = request.args.get("sort", "last_edited:desc")  # 기본: 최근 작업순
         page = int(request.args.get("page", 1))
         force_refresh = request.args.get("refresh", "0") == "1"
         page_size = 100
 
-        # 캐시 키 생성
-        cache_key = f"{status_filter}:{date_filter or ''}"
+        # 캐시 키: 상태만 사용 (날짜/검색/정렬은 캐시 후 필터링)
+        cache_key = status_filter
 
         # 캐시 확인 (유효한 캐시가 있으면 노션 API 호출 생략)
         tasks = None
-        cached_ago = 0  # 캐시 경과 시간 (초)
+        cached_ago = 0
         from_cache = False
         with _task_cache_lock:
             entry = _task_cache.get(cache_key)
             if (not force_refresh
                     and entry
-                    and entry["tasks"]
+                    and entry["tasks"] is not None
                     and (time.time() - entry["fetched_at"]) < _task_cache_ttl):
-                tasks = entry["tasks"]
+                tasks = list(entry["tasks"])  # 원본 보호용 복사
                 cached_ago = int(time.time() - entry["fetched_at"])
                 from_cache = True
 
             # "전체" 캐시에서 개별 탭 데이터 파생 (불필요한 재수집 방지)
             if tasks is None and not force_refresh and status_filter != "전체":
-                all_key = "전체:"
-                all_entry = _task_cache.get(all_key)
-                if (all_entry and all_entry["tasks"]
+                all_entry = _task_cache.get("전체")
+                if (all_entry and all_entry["tasks"] is not None
                         and (time.time() - all_entry["fetched_at"]) < _task_cache_ttl):
                     all_tasks = all_entry["tasks"]
-                    tasks = _filter_tasks_from_cache(all_tasks, status_filter, date_filter)
+                    tasks = _filter_tasks_from_cache(all_tasks, status_filter)
                     cached_ago = int(time.time() - all_entry["fetched_at"])
                     from_cache = True
 
         # 캐시 미스 → 노션에서 가져오기
         if tasks is None:
-            # 로딩 상태 시작
             def on_progress(loaded, message=""):
                 with _loading_lock:
                     _loading_state["active"] = True
@@ -277,32 +295,37 @@ def api_tasks():
                 if status_filter == "전체":
                     tasks = notion.get_all_tasks(progress_callback=on_progress)
                 else:
-                    tasks = notion.get_tasks_by_status(status_filter, date_filter=date_filter, progress_callback=on_progress)
+                    # 날짜 없이 전체 상태 로드 (캐시 후 날짜는 필터링)
+                    tasks = notion.get_tasks_by_status(status_filter, date_filter=None, progress_callback=on_progress)
             finally:
                 with _loading_lock:
                     _loading_state["active"] = False
                     _loading_state["loaded"] = len(tasks) if tasks else 0
                     _loading_state["message"] = ""
 
-            # 캐시 저장
+            # 캐시 저장 (상태별, 날짜 무관)
             now = time.time()
             with _task_cache_lock:
                 _task_cache[cache_key] = {"tasks": tasks, "fetched_at": now}
-                # "전체" 로드 시 개별 탭 캐시도 자동 생성 (재수집 방지)
+                # "전체" 로드 시 개별 탭 캐시도 자동 생성
                 if status_filter == "전체" and tasks:
                     for st in ["댓글작업전", "댓글완료", "대댓글완료", "좋아요작업완료", "중복", "에러"]:
-                        derived_key = f"{st}:"
-                        _task_cache[derived_key] = {
+                        _task_cache[st] = {
                             "tasks": _filter_tasks_from_cache(tasks, st),
                             "fetched_at": now,
                         }
-                # 오래된 캐시 정리 (10개 초과 시 가장 오래된 것 제거)
-                if len(_task_cache) > 10:
+                # 오래된 캐시 정리 (12개 초과 시 가장 오래된 것 제거)
+                if len(_task_cache) > 12:
                     oldest_key = min(_task_cache, key=lambda k: _task_cache[k]["fetched_at"])
                     del _task_cache[oldest_key]
             cached_ago = 0
+            tasks = list(tasks)  # 복사
 
-        # 검색 필터 적용 (캐시된 데이터에서 필터링)
+        # 날짜 필터 적용 (캐시된 데이터에서 즉시 필터링)
+        if date_filter and tasks:
+            tasks = _apply_date_filter(tasks, date_filter)
+
+        # 검색 필터 적용
         if search_query:
             q = search_query.lower()
             tasks = [t for t in tasks if
@@ -311,6 +334,9 @@ def api_tasks():
                      q in (t.get("video_title") or "").lower() or
                      q in (t.get("account") or "").lower() or
                      q in (t.get("brand") or "").lower()]
+
+        # 정렬 적용
+        tasks = _apply_sort(tasks, sort_param)
 
         # 페이지네이션
         total_count = len(tasks)
@@ -329,6 +355,7 @@ def api_tasks():
             "status": status_filter,
             "date": date_filter,
             "search": search_query,
+            "sort": sort_param,
             "from_cache": from_cache,
             "cached_ago": cached_ago,
         })
@@ -345,7 +372,7 @@ def api_task_counts():
 
         with _task_cache_lock:
             # "전체" 캐시가 있으면 거기서 파생
-            all_entry = _task_cache.get("전체:")
+            all_entry = _task_cache.get("전체")
             if all_entry and all_entry["tasks"] and (time.time() - all_entry["fetched_at"]) < _task_cache_ttl:
                 all_tasks = all_entry["tasks"]
                 counts["전체"] = len(all_tasks)
@@ -354,7 +381,7 @@ def api_task_counts():
             else:
                 # 개별 캐시에서 수집
                 for st in statuses:
-                    entry = _task_cache.get(f"{st}:")
+                    entry = _task_cache.get(st)
                     if entry and entry["tasks"] and (time.time() - entry["fetched_at"]) < _task_cache_ttl:
                         counts[st] = len(entry["tasks"])
 
@@ -1284,13 +1311,15 @@ def _run_automation(limit=0, selected_ids=None):
                 # ADB 비행기모드로 IP 변경
                 adb_changer = ADBIPChanger()
                 if adb_changer.enabled:
-                    add_log(f"계정 전환: {prev_account_label} → {current_label} (ADB IP 변경 중...)", "info")
+                    old_ip = adb_changer.get_current_ip()
+                    add_log(f"계정 전환: {prev_account_label} → {current_label} | 현재 IP: {old_ip or '확인불가'}", "info")
                     automation_state["current_task"] = f"[IP 변경] 비행기모드 토글 중..."
                     success, msg = adb_changer.toggle_airplane_mode()
+                    new_ip = adb_changer.get_current_ip()
                     if success:
-                        add_log(f"IP 변경 완료: {msg}", "success")
+                        add_log(f"IP 변경 완료: {old_ip or '?'} → {new_ip or '?'} ({msg})", "success")
                     else:
-                        add_log(f"IP 변경 실패: {msg} (계속 진행)", "warning")
+                        add_log(f"IP 변경 실패: {msg} | IP: {new_ip or '확인불가'} (계속 진행)", "warning")
                 else:
                     add_log(f"계정 전환: {prev_account_label} → {current_label} (IP 변경 {delay_ip_change}초 대기)", "info")
                     time.sleep(delay_ip_change)

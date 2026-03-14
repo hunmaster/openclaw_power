@@ -452,7 +452,7 @@
                 <button class="btn btn-sm btn-primary" onclick="fetchNotionTasks(1, false)" style="white-space:nowrap">검색</button>
                 <button class="btn btn-sm btn-secondary" onclick="document.getElementById('taskSearchInput').value='';fetchNotionTasks(1, false)" style="white-space:nowrap">초기화</button>
             </div>
-            <div style="display:flex;gap:6px;align-items:center">
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
                 <span style="font-size:13px;color:var(--text-dim)">날짜:</span>
                 <button class="btn btn-sm date-filter" onclick="setDateFilter(null, this)">전체</button>
                 <button class="btn btn-sm date-filter active" id="btnDate1m" onclick="setDateFilter('1month', this)">1달</button>
@@ -460,6 +460,15 @@
                 <button class="btn btn-sm date-filter" onclick="setDateFilter('today', this)">오늘</button>
                 <button class="btn btn-sm date-filter" onclick="setDateFilter('yesterday', this)">어제</button>
                 <input type="date" id="taskDatePicker" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:13px" onchange="setDateFilter(this.value, null)">
+                <span style="margin-left:12px;font-size:13px;color:var(--text-dim)">정렬:</span>
+                <select id="taskSortField" onchange="applySort()" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:13px">
+                    <option value="last_edited">편집일</option>
+                    <option value="video_title">영상 제목</option>
+                    <option value="account">계정</option>
+                    <option value="brand">브랜드</option>
+                    <option value="status">상태</option>
+                </select>
+                <button class="btn btn-sm" id="btnSortDir" onclick="toggleSortDir()" style="min-width:28px;font-size:16px" title="정렬 방향 변경">↓</button>
             </div>
         </div>
 
@@ -917,6 +926,26 @@
         fetchNotionTasks(1, false); // 날짜 변경 시 캐시 우선, 없으면 새로 가져옴
     }
 
+    // ─── 정렬 ───
+    let currentSort = 'last_edited:desc';  // 기본: 최근 편집순
+
+    function applySort() {
+        const field = document.getElementById('taskSortField').value;
+        const dir = currentSort.split(':')[1] || 'desc';
+        currentSort = field + ':' + dir;
+        fetchNotionTasks(1, false);
+    }
+
+    function toggleSortDir() {
+        const parts = currentSort.split(':');
+        const field = parts[0];
+        const newDir = parts[1] === 'desc' ? 'asc' : 'desc';
+        currentSort = field + ':' + newDir;
+        document.getElementById('btnSortDir').textContent = newDir === 'desc' ? '↓' : '↑';
+        document.getElementById('btnSortDir').title = newDir === 'desc' ? '내림차순 (최신순)' : '오름차순 (오래된순)';
+        fetchNotionTasks(1, false);
+    }
+
     // ─── 작업 목록 로드 ───
     let _taskRefresh = true; // true면 노션에서 새로 가져옴, false면 캐시 사용
 
@@ -1101,6 +1130,7 @@
         if (_taskRefresh) url += '&refresh=1';
         if (currentDateFilter) url += `&date=${encodeURIComponent(currentDateFilter)}`;
         if (searchQuery) url += `&search=${encodeURIComponent(searchQuery)}`;
+        url += `&sort=${encodeURIComponent(currentSort)}`;
 
         const data = await api(url);
         const tbody = document.getElementById('taskTableBody');
@@ -2024,16 +2054,19 @@
         const el_success = document.getElementById('successCount');
         if (el_success) el_success.textContent = data.results.success;
 
-        // 로그
+        // 로그 (사용자가 위로 스크롤 중이면 자동 스크롤 안 함)
         if (data.logs.length > 0) {
             const container = document.getElementById('logContainer');
+            const wasAtBottom = (container.scrollHeight - container.scrollTop - container.clientHeight) < 40;
             container.innerHTML = data.logs.map(log => `
                 <div class="log-entry">
                     <span class="log-time">${log.time}</span>
                     <span class="log-msg ${log.level}">${log.message}</span>
                 </div>
             `).join('');
-            container.scrollTop = container.scrollHeight;
+            if (wasAtBottom) {
+                container.scrollTop = container.scrollHeight;
+            }
         }
     }
 

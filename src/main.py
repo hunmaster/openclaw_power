@@ -286,12 +286,14 @@ def run():
             )
             adb_changer = ADBIPChanger()
             if adb_changer.enabled:
-                console.print("[yellow]ADB 비행기모드로 IP 변경 중...[/yellow]")
+                old_ip = adb_changer.get_current_ip()
+                console.print(f"[yellow]ADB 비행기모드로 IP 변경 중... (현재 IP: {old_ip or '확인불가'})[/yellow]")
                 success, msg = adb_changer.toggle_airplane_mode()
+                new_ip = adb_changer.get_current_ip()
                 if success:
-                    console.print(f"[green]{msg}[/green]")
+                    console.print(f"[green]IP 변경 완료: {old_ip or '?'} → {new_ip or '?'}[/green]")
                 else:
-                    console.print(f"[red]IP 변경 실패: {msg} (계속 진행)[/red]")
+                    console.print(f"[red]IP 변경 실패: {msg} | IP: {new_ip or '확인불가'} (계속 진행)[/red]")
             else:
                 console.print(
                     f"[yellow]IP 변경 대기 중... ({delay_ip_change}초)[/yellow]"
