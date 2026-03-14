@@ -175,10 +175,12 @@ def process_task(task, account, proxy_manager, fingerprint_manager, safety_rules
             console.print("[red]로그인 실패 - 다음 작업으로 넘어갑니다[/red]")
             return None, "로그인 실패"
 
-        # 5. 댓글 작성 및 URL 추출
+        # 5. 댓글 작성 및 URL 추출 (인간형 랜덤 타이핑 속도)
+        human_delay = safety_rules.get_human_delay("comment")
         comment_url = bot.post_comment(
             task["youtube_url"],
             task["comment_text"],
+            typing_delay_ms=human_delay["typing_delay_ms"],
         )
 
         if comment_url:
@@ -300,12 +302,15 @@ def run():
                 )
                 time.sleep(delay_ip_change)
         elif prev_account_label == current_label and i > 1:
-            # 같은 계정 연속 사용 시 댓글 간격 대기 (1계정 20개, 시간 간격 두고 작업)
+            # 같은 계정 연속 사용 시 인간형 랜덤 간격 대기
+            human_delay = safety_rules.get_human_delay("comment")
+            actual_delay = human_delay["delay_sec"]
             console.print(
                 f"[yellow]같은 계정 연속 사용 - "
-                f"댓글 간격 대기 중... ({comment_interval}초)[/yellow]"
+                f"🧑 {human_delay['description']} "
+                f"(타이핑 {human_delay['typing_delay_ms']}ms)[/yellow]"
             )
-            time.sleep(comment_interval)
+            time.sleep(actual_delay)
 
         # 작업 실행
         result, error_msg = process_task(

@@ -17,6 +17,7 @@ import os
 import json
 import time
 import re
+import random
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 from rich.console import Console
 
@@ -313,7 +314,7 @@ class YouTubeBot:
             console.print(f"[red]로그인 실패: {e}[/red]")
             return False
 
-    def post_comment(self, youtube_url, comment_text):
+    def post_comment(self, youtube_url, comment_text, typing_delay_ms=None):
         """
         유튜브 영상에 댓글을 작성하고 댓글 URL을 반환합니다.
 
@@ -358,10 +359,11 @@ class YouTubeBot:
                 'div[contenteditable="true"]',
                 timeout=10000,
             )
-            # 사람처럼 타이핑 (봇 탐지 우회)
+            # 사람처럼 타이핑 (봇 탐지 우회) - 랜덤 속도 적용
             comment_input.click()
-            self.page.keyboard.type(comment_text, delay=50)
-            time.sleep(1)
+            td = typing_delay_ms if typing_delay_ms else random.randint(30, 120)
+            self.page.keyboard.type(comment_text, delay=td)
+            time.sleep(random.uniform(0.5, 2.0))
 
             # 댓글 게시 버튼 클릭
             submit_button = self.page.wait_for_selector(
@@ -463,8 +465,8 @@ class YouTubeBot:
                 timeout=10000,
             )
             reply_input.click()
-            self.page.keyboard.type(reply_text, delay=50)
-            time.sleep(1)
+            self.page.keyboard.type(reply_text, delay=random.randint(30, 120))
+            time.sleep(random.uniform(0.5, 2.0))
 
             # 답글 게시 버튼 클릭
             submit_btn = self.page.wait_for_selector(

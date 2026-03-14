@@ -12,6 +12,7 @@
 import re
 import json
 import os
+import random
 from datetime import datetime, timedelta
 from rich.console import Console
 
@@ -257,6 +258,61 @@ class SafetyRules:
         """YouTube URL에서 video ID를 추출합니다."""
         match = re.search(r"(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})", url)
         return match.group(1) if match else None
+
+    def get_human_delay(self, delay_type="comment"):
+        """
+        사람처럼 불규칙한 대기 시간을 계산합니다.
+
+        사람의 행동 패턴을 모방:
+        - 기본 간격 ±30~50% 랜덤 변동
+        - 가끔 더 긴 휴식 (커피타임/화장실 시뮬레이션)
+        - 타이핑 속도도 불규칙하게
+
+        Args:
+            delay_type: "comment" (연속 댓글 간격) 또는 "same_video" (같은 영상 간격)
+
+        Returns:
+            dict: {delay_sec, typing_delay_ms, description}
+        """
+        if delay_type == "comment":
+            base = self.comment_interval
+            # ±40% 범위에서 랜덤 (정규분포 근사)
+            jitter = random.uniform(-0.4, 0.4)
+            delay = base * (1 + jitter)
+
+            # 5% 확률로 "긴 휴식" (2~4배) - 사람이 잠깐 다른 일 하는 패턴
+            if random.random() < 0.05:
+                delay *= random.uniform(2.0, 4.0)
+                desc = f"☕ 긴 휴식 ({int(delay)}초)"
+            else:
+                desc = f"대기 {int(delay)}초"
+
+            # 최소 30초는 보장
+            delay = max(30, delay)
+
+        elif delay_type == "same_video":
+            base = self.same_video_interval * 60  # 분 → 초
+            jitter = random.uniform(-0.3, 0.5)  # 약간 길어지는 쪽으로 편향
+            delay = base * (1 + jitter)
+            delay = max(300, delay)  # 최소 5분
+            desc = f"같은 영상 간격 대기 {int(delay // 60)}분 {int(delay % 60)}초"
+
+        else:
+            delay = random.uniform(60, 180)
+            desc = f"대기 {int(delay)}초"
+
+        # 타이핑 속도도 랜덤 (30~120ms, 사람마다 다름)
+        typing_delay = random.randint(30, 120)
+
+        # 가끔 빠르게, 가끔 느리게 (사람의 피로도 반영)
+        if random.random() < 0.15:
+            typing_delay = random.randint(100, 200)  # 느린 타이핑
+
+        return {
+            "delay_sec": int(delay),
+            "typing_delay_ms": typing_delay,
+            "description": desc,
+        }
 
     def get_account_status(self, account_label):
         """계정의 오늘 사용 현황을 반환합니다."""

@@ -29,6 +29,7 @@ from src.fingerprint import FingerprintManager
 from src.safety_rules import SafetyRules
 from src.smm_client import SMMClient
 from src.adb_ip_changer import ADBIPChanger
+from src.comment_tracker import CommentTracker
 
 app = Flask(__name__)
 
@@ -55,6 +56,16 @@ reply_state = {
     "results": {"success": 0, "fail": 0, "skip": 0},
 }
 reply_lock = threading.Lock()
+
+# 댓글 트래커
+comment_tracker = CommentTracker()
+tracking_state = {
+    "running": False,
+    "progress": 0,
+    "total": 0,
+    "last_result": None,
+}
+tracking_lock = threading.Lock()
 
 # 작업 목록 캐시 (매번 노션 API 전체 조회 방지) — 멀티 키 지원
 # { "status:date": {"tasks": [...], "fetched_at": timestamp}, ... }
@@ -1324,8 +1335,14 @@ def _run_automation(limit=0, selected_ids=None):
                     add_log(f"계정 전환: {prev_account_label} → {current_label} (IP 변경 {delay_ip_change}초 대기)", "info")
                     time.sleep(delay_ip_change)
             elif prev_account_label == current_label and i > 0:
-                add_log(f"같은 계정 연속 - {comment_interval}초 대기", "info")
-                time.sleep(comment_interval)
+                human_delay = safety_rules.get_human_delay("comment")
+                actual_delay = human_delay["delay_sec"]
+                add_log(
+                    f"같은 계정 연속 - 🧑 {human_delay['description']} "
+                    f"(타이핑 {human_delay['typing_delay_ms']}ms)",
+                    "info"
+                )
+                time.sleep(actual_delay)
 
             # 안전 규칙 검사 (테스트/선택 실행 모드에서는 시간 간격 규칙 건너뜀)
             skip = test_mode or bool(selected_ids)
@@ -1409,6 +1426,14 @@ def _run_automation(limit=0, selected_ids=None):
                     # 상태는 '댓글완료' 유지 (추후 대댓글 자동화에서 처리)
 
                     safety_rules.record_comment(current_label, task["youtube_url"], task["comment_text"])
+
+                    # 트래킹 자동 등록
+                    if comment_url:
+                        comment_tracker.register_comment(
+                            comment_url, task["youtube_url"],
+                            current_label, task["comment_text"]
+                        )
+
                     automation_state["results"]["success"] += 1
                     automation_state["current_task"] = f"[완료] {task_url_short}"
                     add_log(f"--- 작업 {i+1}/{len(tasks)} 완료 ---", "success")
@@ -1615,8 +1640,14 @@ def _run_reply_automation(limit=0):
                 add_log(f"[대댓글] 계정 전환: {prev_account_label} → {current_label} ({delay_ip_change}초 대기)", "info")
                 time.sleep(delay_ip_change)
             elif prev_account_label == current_label and i > 0:
-                add_log(f"[대댓글] 같은 계정 연속 - {comment_interval}초 대기", "info")
-                time.sleep(comment_interval)
+                human_delay = safety_rules.get_human_delay("comment")
+                actual_delay = human_delay["delay_sec"]
+                add_log(
+                    f"[대댓글] 같은 계정 연속 - 🧑 {human_delay['description']} "
+                    f"(타이핑 {human_delay['typing_delay_ms']}ms)",
+                    "info"
+                )
+                time.sleep(actual_delay)
 
             # 프록시 설정
             proxy_config = None
@@ -1685,6 +1716,97 @@ def _run_reply_automation(limit=0):
     finally:
         reply_state["running"] = False
         reply_state["current_task"] = None
+
+
+# ━━━ 댓글 트래킹 API ━━━
+
+@app.route("/api/tracking/summary")
+def api_tracking_summary():
+    """트래킹 등록된 댓글 목록과 상태 요약"""
+    try:
+        summary = comment_tracker.get_summary()
+        return jsonify({
+            "ok": True,
+            "comments": summary,
+            "total": len(summary),
+            "active": sum(1 for c in summary if c["status"] == "active"),
+            "hidden": sum(1 for c in summary if c["status"] == "hidden"),
+            "tracking_running": tracking_state["running"],
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/tracking/check-all", methods=["POST"])
+def api_tracking_check_all():
+    """모든 등록된 댓글의 생존 상태를 확인 (백그라운드)"""
+    with tracking_lock:
+        if tracking_state["running"]:
+            return jsonify({"ok": False, "error": "이미 트래킹 진행 중입니다."})
+        tracking_state["running"] = True
+        tracking_state["progress"] = 0
+
+    def run_tracking():
+        try:
+            result = comment_tracker.check_all()
+            tracking_state["last_result"] = result
+            add_log(
+                f"[트래킹] 완료: {result['active']}/{result['total']}개 생존, "
+                f"{result['hidden']}개 숨김",
+                "info"
+            )
+        except Exception as e:
+            add_log(f"[트래킹] 오류: {str(e)}", "error")
+        finally:
+            tracking_state["running"] = False
+
+    thread = threading.Thread(target=run_tracking, daemon=True)
+    thread.start()
+    return jsonify({"ok": True, "message": "트래킹 시작됨"})
+
+
+@app.route("/api/tracking/check/<comment_id>", methods=["POST"])
+def api_tracking_check_one(comment_id):
+    """개별 댓글 상태 확인"""
+    try:
+        result = comment_tracker.check_comment(comment_id)
+        return jsonify({"ok": True, "result": result})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/tracking/register", methods=["POST"])
+def api_tracking_register():
+    """댓글을 트래킹 대상으로 등록"""
+    data = request.json or {}
+    comment_url = data.get("comment_url", "")
+    video_url = data.get("video_url", "")
+    account_label = data.get("account_label", "")
+    comment_text = data.get("comment_text", "")
+
+    if not comment_url:
+        return jsonify({"ok": False, "error": "comment_url 필수"})
+
+    ok = comment_tracker.register_comment(
+        comment_url, video_url, account_label, comment_text
+    )
+    return jsonify({"ok": ok})
+
+
+@app.route("/api/tracking/remove/<comment_id>", methods=["POST"])
+def api_tracking_remove(comment_id):
+    """트래킹 대상에서 제거"""
+    ok = comment_tracker.remove_comment(comment_id)
+    return jsonify({"ok": ok})
+
+
+@app.route("/api/tracking/status")
+def api_tracking_status():
+    """트래킹 실행 상태"""
+    return jsonify({
+        "running": tracking_state["running"],
+        "last_result": tracking_state.get("last_result"),
+    })
 
 
 if __name__ == "__main__":

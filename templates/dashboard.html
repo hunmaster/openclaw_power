@@ -305,6 +305,7 @@
         <button class="tab active" onclick="switchTab('dashboard')">대시보드</button>
         <button class="tab" id="tabBtnTasks" onclick="switchTab('tasks')">작업 목록</button>
         <button class="tab" onclick="switchTab('accounts')">계정 관리</button>
+        <button class="tab" onclick="switchTab('tracking')">댓글 트래킹</button>
         <button class="tab" onclick="switchTab('smm')">SMM 좋아요</button>
         <button class="tab" onclick="switchTab('settings')">설정</button>
         <button class="tab" onclick="switchTab('logs')">실행 로그</button>
@@ -569,6 +570,56 @@
         </div>
     </div>
 
+    <!-- ━━━ 댓글 트래킹 탭 ━━━ -->
+    <div class="tab-content" id="tab-tracking">
+        <div class="cards" style="grid-template-columns:repeat(4,1fr)">
+            <div class="card">
+                <div class="card-label">총 등록</div>
+                <div class="card-value" id="trackTotal">0</div>
+            </div>
+            <div class="card">
+                <div class="card-label">생존 확인</div>
+                <div class="card-value" id="trackActive" style="color:var(--success)">0</div>
+            </div>
+            <div class="card">
+                <div class="card-label">숨김/삭제</div>
+                <div class="card-value" id="trackHidden" style="color:var(--error)">0</div>
+            </div>
+            <div class="card">
+                <div class="card-label">트래킹 상태</div>
+                <div class="card-value" id="trackStatus" style="font-size:14px">대기</div>
+            </div>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                <h3 style="margin:0;font-size:15px">등록된 댓글</h3>
+                <button class="btn btn-primary" id="btnCheckAll" onclick="runTrackingCheckAll()">
+                    전체 생존 확인
+                </button>
+            </div>
+            <table style="width:100%;border-collapse:collapse;font-size:13px">
+                <thead>
+                    <tr style="border-bottom:1px solid var(--border)">
+                        <th style="text-align:left;padding:8px;color:var(--text-dim)">계정</th>
+                        <th style="text-align:left;padding:8px;color:var(--text-dim)">댓글 내용</th>
+                        <th style="text-align:center;padding:8px;color:var(--text-dim)">상태</th>
+                        <th style="text-align:center;padding:8px;color:var(--text-dim)">위치</th>
+                        <th style="text-align:center;padding:8px;color:var(--text-dim)">최고위치</th>
+                        <th style="text-align:center;padding:8px;color:var(--text-dim)">좋아요</th>
+                        <th style="text-align:center;padding:8px;color:var(--text-dim)">마지막 확인</th>
+                        <th style="text-align:center;padding:8px;color:var(--text-dim)">작업</th>
+                    </tr>
+                </thead>
+                <tbody id="trackingTableBody">
+                    <tr><td colspan="8" style="text-align:center;padding:32px;color:var(--text-dim)">
+                        등록된 댓글이 없습니다. 댓글 작성 시 자동으로 등록됩니다.
+                    </td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
     <!-- ━━━ SMM 좋아요 탭 ━━━ -->
     <div class="tab-content" id="tab-smm">
         <div class="cards" style="grid-template-columns:repeat(3,1fr)">
@@ -719,11 +770,11 @@
                         <input type="number" id="setMaxComments" value="20">
                     </div>
                     <div class="form-group">
-                        <label>연속 댓글 간격 (초)</label>
+                        <label>연속 댓글 기본 간격 (초) <span style="color:var(--accent-light);font-size:11px">±40% 랜덤</span></label>
                         <input type="number" id="setCommentInterval" value="180">
                     </div>
                     <div class="form-group">
-                        <label>같은 영상 간격 (분)</label>
+                        <label>같은 영상 기본 간격 (분) <span style="color:var(--accent-light);font-size:11px">±30~50% 랜덤</span></label>
                         <input type="number" id="setSameVideoInterval" value="30">
                     </div>
                 </div>
@@ -936,6 +987,7 @@
         if (tabName === 'accounts') loadAccountList();
         if (tabName === 'settings') loadSettings();
         if (tabName === 'smm') loadSMMInfo();
+        if (tabName === 'tracking') loadTrackingSummary();
     }
 
     // ─── API 호출 ───
@@ -2332,6 +2384,106 @@
         setInterval(pollStatus, 1500);
     }
     initApp();
+
+    // ─── 댓글 트래킹 ───
+    async function loadTrackingSummary() {
+        const data = await api('/api/tracking/summary');
+        if (!data || !data.ok) return;
+
+        document.getElementById('trackTotal').textContent = data.total;
+        document.getElementById('trackActive').textContent = data.active;
+        document.getElementById('trackHidden').textContent = data.hidden;
+        document.getElementById('trackStatus').textContent =
+            data.tracking_running ? '확인 중...' : '대기';
+
+        const tbody = document.getElementById('trackingTableBody');
+        if (!data.comments || data.comments.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--text-dim)">
+                등록된 댓글이 없습니다. 댓글 작성 시 자동으로 등록됩니다.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = data.comments.map(c => {
+            const statusBadge = c.status === 'active'
+                ? '<span style="color:var(--success)">● 생존</span>'
+                : c.status === 'hidden'
+                ? '<span style="color:var(--error)">● 숨김</span>'
+                : '<span style="color:var(--text-dim)">● 미확인</span>';
+
+            const posText = c.position
+                ? (c.position <= 3
+                    ? `<span style="color:var(--warning);font-weight:bold">⭐ ${c.position}위</span>`
+                    : `${c.position}위`)
+                : '-';
+
+            const bestText = c.best_position
+                ? (c.best_position <= 3
+                    ? `<span style="color:var(--warning);font-weight:bold">⭐ ${c.best_position}위</span>`
+                    : `${c.best_position}위`)
+                : '-';
+
+            const lastChecked = c.last_checked
+                ? new Date(c.last_checked).toLocaleString('ko-KR', {month:'numeric',day:'numeric',hour:'numeric',minute:'numeric'})
+                : '미확인';
+
+            return `<tr style="border-bottom:1px solid var(--border)">
+                <td style="padding:8px">${c.account_label}</td>
+                <td style="padding:8px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                    title="${(c.comment_text||'').replace(/"/g,'&quot;')}">${c.comment_text}</td>
+                <td style="padding:8px;text-align:center">${statusBadge}</td>
+                <td style="padding:8px;text-align:center">${posText}</td>
+                <td style="padding:8px;text-align:center">${bestText}</td>
+                <td style="padding:8px;text-align:center">${c.likes || 0}</td>
+                <td style="padding:8px;text-align:center;font-size:11px;color:var(--text-dim)">${lastChecked}</td>
+                <td style="padding:8px;text-align:center">
+                    <button class="btn" style="font-size:11px;padding:2px 8px"
+                        onclick="checkOneComment('${c.comment_id}')">확인</button>
+                    <button class="btn" style="font-size:11px;padding:2px 8px;color:var(--error)"
+                        onclick="removeTracking('${c.comment_id}')">삭제</button>
+                </td>
+            </tr>`;
+        }).join('');
+    }
+
+    async function runTrackingCheckAll() {
+        const btn = document.getElementById('btnCheckAll');
+        btn.disabled = true;
+        btn.textContent = '확인 중...';
+        document.getElementById('trackStatus').textContent = '확인 중...';
+
+        const data = await api('/api/tracking/check-all', {method:'POST'});
+        if (data && data.ok) {
+            // 폴링으로 완료 대기
+            const pollTracking = setInterval(async () => {
+                const st = await api('/api/tracking/status');
+                if (st && !st.running) {
+                    clearInterval(pollTracking);
+                    btn.disabled = false;
+                    btn.textContent = '전체 생존 확인';
+                    loadTrackingSummary();
+                }
+            }, 3000);
+        } else {
+            btn.disabled = false;
+            btn.textContent = '전체 생존 확인';
+            alert(data?.error || '트래킹 시작 실패');
+        }
+    }
+
+    async function checkOneComment(commentId) {
+        const data = await api(`/api/tracking/check/${commentId}`, {method:'POST'});
+        if (data && data.ok) {
+            loadTrackingSummary();
+        } else {
+            alert(data?.error || '확인 실패');
+        }
+    }
+
+    async function removeTracking(commentId) {
+        if (!confirm('트래킹 대상에서 제거하시겠습니까?')) return;
+        await api(`/api/tracking/remove/${commentId}`, {method:'POST'});
+        loadTrackingSummary();
+    }
 </script>
 
 </body>
