@@ -203,7 +203,7 @@ def load_accounts():
 @app.route("/")
 def dashboard():
     """메인 대시보드."""
-    return render_template("dashboard.html")
+    return render_template("dashboard.html", is_owner=is_owner_mode())
 
 
 # ──────────────────────────── API 라우트 ────────────────────────────

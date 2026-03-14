@@ -309,7 +309,7 @@
         <button class="tab" id="tabBtnTasks" onclick="switchTab('tasks')">작업 목록</button>
         <button class="tab" onclick="switchTab('accounts')">계정 관리</button>
         <button class="tab" onclick="switchTab('tracking')">댓글 트래킹</button>
-        <button class="tab" onclick="switchTab('smm')">SMM 좋아요</button>
+        {% if is_owner %}<button class="tab" onclick="switchTab('smm')">SMM 좋아요</button>{% endif %}
         <button class="tab" onclick="switchTab('settings')">설정</button>
         <button class="tab" onclick="switchTab('logs')">실행 로그</button>
     </div>
@@ -337,10 +337,10 @@
                 <div class="card-label">활성 계정</div>
                 <div class="card-value" id="accountCount">-</div>
             </div>
-            <div class="card">
+            {% if is_owner %}<div class="card">
                 <div class="card-label">SMM 잔액</div>
                 <div class="card-value yellow" id="smmBalance">-</div>
-            </div>
+            </div>{% endif %}
         </div>
 
         <!-- 중복 스캔 확인 모달 -->
@@ -787,7 +787,8 @@
         </div>
     </div>
 
-    <!-- ━━━ SMM 좋아요 탭 ━━━ -->
+    {% if is_owner %}
+    <!-- ━━━ SMM 좋아요 탭 (Owner 전용) ━━━ -->
     <div class="tab-content" id="tab-smm">
         <div class="cards" style="grid-template-columns:repeat(3,1fr)">
             <div class="card">
@@ -888,6 +889,8 @@
         </div>
     </div>
 
+    {% endif %}
+
     <!-- ━━━ 설정 탭 ━━━ -->
     <div class="tab-content" id="tab-settings">
         <!-- API 연동 상태 -->
@@ -916,6 +919,7 @@
                         <input type="text" id="setNotionDbId" placeholder="30d35cfd83d3...">
                     </div>
                 </div>
+                {% if is_owner %}
                 <div>
                     <h4 style="margin-bottom:12px;font-size:13px;color:var(--accent-light)">SMM Kings API</h4>
                     <div class="form-group">
@@ -930,6 +934,7 @@
                         </select>
                     </div>
                 </div>
+                {% endif %}
             </div>
         </div>
 
@@ -1118,6 +1123,9 @@
 </style>
 
 <script>
+    // ─── Owner 모드 플래그 (서버에서 주입) ───
+    const IS_OWNER = {{ 'true' if is_owner else 'false' }};
+
     // ─── 초기 셋업 완료 플래그 ───
     let _initDone = false;
 
@@ -1166,7 +1174,7 @@
         // tasks 탭: 이미 초기화 시 로드됨, 탭 전환만으로 재조회 안 함
         if (tabName === 'accounts') loadAccountList();
         if (tabName === 'settings') loadSettings();
-        if (tabName === 'smm') loadSMMInfo();
+        if (tabName === 'smm' && IS_OWNER) loadSMMInfo();
         if (tabName === 'tracking') loadTrackingSummary();
         if (tabName === 'tracking') loadTrackingSummary();
     }
@@ -1232,8 +1240,10 @@
         if (!data) return;
 
         document.getElementById('accountCount').textContent = data.account_count;
-        document.getElementById('smmBalance').textContent =
-            data.smm_balance !== null ? '$' + parseFloat(data.smm_balance).toFixed(2) : 'N/A';
+        if (IS_OWNER && document.getElementById('smmBalance')) {
+            document.getElementById('smmBalance').textContent =
+                data.smm_balance !== null ? '$' + parseFloat(data.smm_balance).toFixed(2) : 'N/A';
+        }
 
         // 상태별 카운트 (서버에서 한 번에 반환)
         document.getElementById('pendingCount').textContent = data.pending_count || 0;
@@ -1869,9 +1879,11 @@
         document.getElementById('setNotionToken').value = data.NOTION_API_TOKEN || '';
         document.getElementById('setNotionToken').placeholder = data.NOTION_API_TOKEN ? '현재 값 유지 (변경 시 새로 입력)' : 'ntn_xxxx...';
         document.getElementById('setNotionDbId').value = data.NOTION_DATABASE_ID || '';
-        document.getElementById('setSmmApiKey').value = data.SMM_API_KEY || '';
-        document.getElementById('setSmmApiKey').placeholder = data.SMM_API_KEY ? '현재 값 유지 (변경 시 새로 입력)' : 'API 키 입력';
-        document.getElementById('setSmmEnabled').value = data.SMM_ENABLED || 'false';
+        if (IS_OWNER) {
+            document.getElementById('setSmmApiKey').value = data.SMM_API_KEY || '';
+            document.getElementById('setSmmApiKey').placeholder = data.SMM_API_KEY ? '현재 값 유지 (변경 시 새로 입력)' : 'API 키 입력';
+            document.getElementById('setSmmEnabled').value = data.SMM_ENABLED || 'false';
+        }
 
         // 운영 설정
         document.getElementById('setMaxComments').value = data.MAX_COMMENTS_PER_DAY;
@@ -1935,8 +1947,6 @@
         const payload = {
             NOTION_API_TOKEN: document.getElementById('setNotionToken').value,
             NOTION_DATABASE_ID: document.getElementById('setNotionDbId').value,
-            SMM_API_KEY: document.getElementById('setSmmApiKey').value,
-            SMM_ENABLED: document.getElementById('setSmmEnabled').value,
             MAX_COMMENTS_PER_DAY: document.getElementById('setMaxComments').value,
             COMMENT_INTERVAL_SEC: document.getElementById('setCommentInterval').value,
             SAME_VIDEO_INTERVAL_MIN: document.getElementById('setSameVideoInterval').value,
@@ -1947,6 +1957,12 @@
             ADB_AUTO_ETHERNET: document.getElementById('setAdbAutoEthernet').value,
             ADB_ETHERNET_NAME: document.getElementById('setAdbEthernetName').value,
         };
+
+        // SMM 설정은 Owner만
+        if (IS_OWNER) {
+            payload.SMM_API_KEY = document.getElementById('setSmmApiKey').value;
+            payload.SMM_ENABLED = document.getElementById('setSmmEnabled').value;
+        }
 
         const res = await api('/api/settings', {
             method: 'POST',
@@ -1976,7 +1992,6 @@
         const labels = {
             env_file: '.env 설정 파일',
             notion: 'Notion API',
-            smm: 'SMM Kings API',
             accounts: '계정 파일',
             adb: 'ADB IP 변경',
         };
@@ -1984,6 +1999,7 @@
         let html = '<div style="display:flex;flex-direction:column;gap:10px">';
         for (const [key, info] of Object.entries(data)) {
             if (key === 'proxy') continue;  // 프록시 항목 스킵
+            if (key === 'smm' && !IS_OWNER) continue;  // SMM은 Owner만
             const icon = info.ok === true ? '&#10004;' : info.ok === false ? '&#10008;' : '&#9644;';
             const color = info.ok === true ? 'var(--green)' : info.ok === false ? 'var(--red)' : 'var(--text-dim)';
             const bg = info.ok === true ? 'rgba(0,184,148,0.08)' : info.ok === false ? 'rgba(255,107,107,0.08)' : 'rgba(136,136,160,0.08)';
@@ -2350,8 +2366,13 @@
     // ── 좋아요 승인 대기 리스트 (인라인) ──
     function renderLikeApprovalItem(item) {
         const topStr = item.top_likes.map(n => n.toLocaleString()).join(', ');
-        const cost = (item.qty * 1.12 / 1000 * 1450).toFixed(0);
         const extraQty = item.qty - (item.default_qty || 0);
+        // 원가 정보는 Owner만 표시
+        let costHtml = '';
+        if (IS_OWNER) {
+            const cost = (item.qty * 1.12 / 1000 * 1450).toFixed(0);
+            costHtml = ` &middot; 원가 <span style="color:var(--yellow)">~${Number(cost).toLocaleString()}원</span>`;
+        }
         return `
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:8px">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
@@ -2365,7 +2386,7 @@
                             ${item.video_title || '제목 없음'}
                         </div>
                         <div style="font-size:11px;color:var(--text-dim)">
-                            ${item.account} &middot; ${item.created_at} &middot; 예상 <span style="color:var(--yellow)">~${Number(cost).toLocaleString()}원</span>
+                            ${item.account} &middot; ${item.created_at}${costHtml}
                         </div>
                     </div>
                 </div>
