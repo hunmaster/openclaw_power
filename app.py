@@ -13,6 +13,7 @@ import os
 import sys
 import json
 import time
+import uuid
 import threading
 from collections import defaultdict, deque
 from datetime import datetime
@@ -48,17 +49,9 @@ automation_state = {
 }
 automation_lock = threading.Lock()
 
-# 좋아요 관리자 컨펌 대기 상태
-like_approval_state = {
-    "pending": False,          # 컨펌 대기 중 여부
-    "approved": False,         # 승인됨
-    "denied": False,           # 거부됨
-    "comment_url": None,       # 대상 댓글 URL
-    "page_id": None,           # 노션 페이지 ID
-    "calculated_qty": 0,       # 계산된 좋아요 수
-    "top_likes": [],           # 상위 댓글 좋아요 수
-    "video_url": None,         # 영상 URL
-}
+# 좋아요 승인 대기 리스트 (MAX 초과 건)
+like_pending_list = []  # [{id, comment_url, page_id, qty, top_likes, video_url, video_title, account, created_at}]
+like_pending_lock = threading.Lock()
 
 # 대댓글 자동화 상태
 reply_state = {
@@ -721,67 +714,91 @@ def _mask_key(value, visible=4):
 
 # ──────────────────────────── 좋아요 관리자 컨펌 API ────────────────────────────
 
-@app.route("/api/likes/approval")
-def api_likes_approval_status():
-    """좋아요 관리자 컨펌 대기 상태를 조회합니다."""
-    return jsonify(like_approval_state)
+@app.route("/api/likes/pending")
+def api_likes_pending():
+    """좋아요 승인 대기 리스트를 조회합니다."""
+    with like_pending_lock:
+        return jsonify({"items": list(like_pending_list)})
 
 
 @app.route("/api/likes/approve", methods=["POST"])
 def api_likes_approve():
-    """관리자가 고수량 좋아요 주문을 승인합니다."""
-    like_approval_state["approved"] = True
-    like_approval_state["denied"] = False
-    add_log(f"[관리자 승인] 좋아요 {like_approval_state['calculated_qty']}개 주문 승인됨", "success")
-    return jsonify({"success": True, "message": "승인됨"})
+    """개별 또는 일괄 좋아요 주문을 승인합니다."""
+    data = request.get_json() or {}
+    item_id = data.get("id")         # 개별 승인
+    approve_all = data.get("all")    # 일괄 승인
+
+    smm = SMMClient()
+    if not smm.enabled:
+        return jsonify({"success": False, "error": "SMM 비활성화"}), 400
+
+    results = []
+    with like_pending_lock:
+        targets = list(like_pending_list) if approve_all else [
+            item for item in like_pending_list if item["id"] == item_id
+        ]
+
+        for item in targets:
+            order = smm.order_likes(item["comment_url"], quantity=item["qty"])
+            if order.get("success"):
+                add_log(
+                    f"[수동 승인] 좋아요 {item['qty']}개 주문 완료 | "
+                    f"주문ID: {order.get('order_id')} | {item['video_title'][:30]}",
+                    "success"
+                )
+                # 좋아요 체크박스 업데이트
+                try:
+                    notion = NotionManager()
+                    notion.update_like_checkbox(item["page_id"])
+                except Exception:
+                    pass
+                results.append({"id": item["id"], "success": True, "order_id": order.get("order_id")})
+            else:
+                add_log(f"[수동 승인 실패] {item['video_title'][:30]} | {order.get('error')}", "error")
+                results.append({"id": item["id"], "success": False, "error": order.get("error")})
+
+        # 성공한 항목 제거
+        success_ids = {r["id"] for r in results if r["success"]}
+        like_pending_list[:] = [item for item in like_pending_list if item["id"] not in success_ids]
+
+    return jsonify({"success": True, "results": results})
 
 
-@app.route("/api/likes/deny", methods=["POST"])
-def api_likes_deny():
-    """관리자가 고수량 좋아요 주문을 거부합니다 (기본 수량으로 진행)."""
-    like_approval_state["denied"] = True
-    like_approval_state["approved"] = False
-    add_log(f"[관리자 거부] 좋아요 기본 수량으로 진행", "info")
-    return jsonify({"success": True, "message": "거부됨 - 기본 수량으로 진행"})
+@app.route("/api/likes/dismiss", methods=["POST"])
+def api_likes_dismiss():
+    """대기 항목을 무시합니다 (기본 수량으로 이미 처리됨)."""
+    data = request.get_json() or {}
+    item_id = data.get("id")
+    dismiss_all = data.get("all")
+
+    with like_pending_lock:
+        if dismiss_all:
+            count = len(like_pending_list)
+            like_pending_list.clear()
+            add_log(f"[무시] 좋아요 대기 {count}건 모두 제거", "info")
+        elif item_id:
+            like_pending_list[:] = [item for item in like_pending_list if item["id"] != item_id]
+            add_log(f"[무시] 좋아요 대기 항목 제거", "info")
+
+    return jsonify({"success": True})
 
 
 def _calculate_dynamic_likes(top_likes, default_qty):
     """
     상위 댓글 좋아요 수를 기반으로 동적 좋아요 수량을 계산합니다.
-
-    전략:
-    - 상위 3~5개 댓글의 좋아요 중간값을 기준으로 설정
-    - 최소: 기본 수량 (SMM_LIKE_QUANTITY)
-    - 자동 상한: SMM_LIKE_AUTO_MAX (기본 500)
-    - 1000 초과 시: 관리자 컨펌 필요
-
-    Args:
-        top_likes: 상위 댓글 좋아요 수 리스트 (높은 순)
-        default_qty: 기본 좋아요 수량
-
-    Returns:
-        int: 주문할 좋아요 수량
+    중간값 x 1.1 기준, 최소 기본 수량 보장.
     """
     if not top_likes:
         return default_qty
 
-    # 0이 아닌 좋아요만 필터링
     nonzero = [n for n in top_likes if n > 0]
     if not nonzero:
         return default_qty
 
-    # 중간값 기준 (상위 댓글 좋아요의 중간값 + 약간의 버퍼)
     nonzero.sort()
-    median_idx = len(nonzero) // 2
-    median_likes = nonzero[median_idx]
-
-    # 중간값의 110%를 목표로 (상위 노출을 위해 살짝 높게)
+    median_likes = nonzero[len(nonzero) // 2]
     target = int(median_likes * 1.1)
-
-    # 최소값 보장
-    target = max(target, default_qty)
-
-    return target
+    return max(target, default_qty)
 
 
 @app.route("/api/settings", methods=["GET"])
@@ -1547,7 +1564,7 @@ def _run_automation(limit=0, selected_ids=None):
                     else:
                         add_log(f"[2/3 노션 반영 실패] {notion_err}", "warning")
 
-                    # ── 3단계: 동적 좋아요 주문 ──
+                    # ── 3단계: 동적 좋아요 주문 (논블로킹) ──
                     if smm_client.enabled:
                         automation_state["current_task"] = f"[3/3 좋아요 분석] {task_url_short}"
                         like_auto_max = int(os.getenv("SMM_LIKE_AUTO_MAX", "500"))
@@ -1557,87 +1574,74 @@ def _run_automation(limit=0, selected_ids=None):
                         top_likes = bot.get_top_comment_likes(count=5)
                         dynamic_qty = _calculate_dynamic_likes(top_likes, default_qty)
 
-                        # 로그: 분석 결과
                         if top_likes:
                             add_log(
                                 f"[3/3 좋아요 분석] 상위 댓글 좋아요: {top_likes} → "
-                                f"목표 수량: {dynamic_qty}개",
+                                f"목표: {dynamic_qty}개",
                                 "info"
                             )
                         else:
-                            add_log(f"[3/3 좋아요] 상위 댓글 분석 실패 → 기본 수량 {default_qty}개", "info")
+                            add_log(f"[3/3 좋아요] 상위 댓글 분석 실패 → 기본 {default_qty}개", "info")
 
-                        # 자동 상한 초과 시 관리자 컨펌 대기
-                        final_qty = dynamic_qty
                         if dynamic_qty > like_auto_max:
+                            # MAX 초과 → 기본 수량으로 즉시 주문 + 대기 리스트에 추가
                             add_log(
-                                f"[관리자 컨펌 필요] 좋아요 {dynamic_qty}개 > 자동 상한 {like_auto_max}개 | "
-                                f"대시보드에서 승인/거부 대기 중...",
+                                f"[3/3 좋아요] {dynamic_qty}개 > MAX {like_auto_max}개 → "
+                                f"기본 {default_qty}개 우선 주문, 추가분 승인 대기",
                                 "warning"
                             )
-                            # 컨펌 상태 설정
-                            like_approval_state.update({
-                                "pending": True,
-                                "approved": False,
-                                "denied": False,
+                            # 기본 수량 즉시 주문
+                            single = smm_client.order_likes(comment_url, quantity=default_qty)
+                            if single.get("success"):
+                                automation_state["results"]["likes"] += 1
+                                add_log(f"[3/3 좋아요 기본 주문] {default_qty}개 | 주문ID: {single.get('order_id')}", "success")
+                            else:
+                                add_log(f"[3/3 좋아요 주문 실패] {single.get('error', '?')}", "warning")
+
+                            # 추가분 대기 리스트에 추가 (사용자가 대시보드에서 수동 승인)
+                            pending_item = {
+                                "id": str(uuid.uuid4())[:8],
                                 "comment_url": comment_url,
                                 "page_id": task["page_id"],
-                                "calculated_qty": dynamic_qty,
+                                "qty": dynamic_qty,
+                                "default_qty": default_qty,
                                 "top_likes": top_likes,
                                 "video_url": task["youtube_url"],
-                            })
-                            automation_state["current_task"] = f"[컨펌 대기] 좋아요 {dynamic_qty}개"
-
-                            # 최대 5분 대기 (5초 간격 폴링)
-                            approval_timeout = 300
-                            waited = 0
-                            while waited < approval_timeout and automation_state["running"]:
-                                if like_approval_state["approved"]:
-                                    final_qty = dynamic_qty
-                                    add_log(f"[관리자 승인] 좋아요 {dynamic_qty}개 주문 진행", "success")
-                                    break
-                                elif like_approval_state["denied"]:
-                                    final_qty = default_qty
-                                    add_log(f"[관리자 거부] 기본 수량 {default_qty}개로 진행", "info")
-                                    break
-                                time.sleep(5)
-                                waited += 5
-
-                            # 타임아웃: 기본 수량으로 진행
-                            if waited >= approval_timeout and not like_approval_state["approved"]:
-                                final_qty = default_qty
-                                add_log(f"[컨펌 타임아웃] 5분 초과 → 기본 수량 {default_qty}개로 진행", "warning")
-
-                            # 상태 초기화
-                            like_approval_state.update({
-                                "pending": False, "approved": False, "denied": False,
-                                "comment_url": None, "page_id": None,
-                                "calculated_qty": 0, "top_likes": [], "video_url": None,
-                            })
-
-                        automation_state["current_task"] = f"[3/3 좋아요 {final_qty}개] {task_url_short}"
-                        add_log(f"[3/3 좋아요 주문 중] {final_qty}개 | {comment_url[:50]}...", "info")
-                        single = smm_client.order_likes(comment_url, quantity=final_qty)
-                        if single.get("success"):
-                            automation_state["results"]["likes"] += 1
+                                "video_title": task.get("video_title", "")[:60],
+                                "account": current_label,
+                                "created_at": datetime.now().strftime("%H:%M:%S"),
+                            }
+                            with like_pending_lock:
+                                like_pending_list.append(pending_item)
                             add_log(
-                                f"[3/3 좋아요 주문 성공] {final_qty}개 | 주문ID: {single.get('order_id')}",
-                                "success"
+                                f"[승인 대기 추가] {dynamic_qty}개 좋아요 | "
+                                f"대시보드에서 수동 승인 가능",
+                                "warning"
                             )
-                            # 좋아요 완료 체크박스 체크
-                            try:
-                                notion.update_like_checkbox(task["page_id"])
-                            except Exception:
-                                pass
                         else:
-                            err = single.get("error", "?")
-                            add_log(f"[3/3 좋아요 주문 실패] {err}", "warning")
-                            if "incorrect_service" in str(err).lower():
+                            # MAX 이하 → 자동 주문
+                            automation_state["current_task"] = f"[3/3 좋아요 {dynamic_qty}개] {task_url_short}"
+                            add_log(f"[3/3 좋아요 주문 중] {dynamic_qty}개 | {comment_url[:50]}...", "info")
+                            single = smm_client.order_likes(comment_url, quantity=dynamic_qty)
+                            if single.get("success"):
+                                automation_state["results"]["likes"] += 1
                                 add_log(
-                                    f"서비스 ID '{smm_client.service_id}' 유효하지 않음. "
-                                    "SMM 좋아요 탭 → 서비스 조회에서 올바른 ID 확인 필요",
-                                    "error",
+                                    f"[3/3 좋아요 주문 성공] {dynamic_qty}개 | 주문ID: {single.get('order_id')}",
+                                    "success"
                                 )
+                                try:
+                                    notion.update_like_checkbox(task["page_id"])
+                                except Exception:
+                                    pass
+                            else:
+                                err = single.get("error", "?")
+                                add_log(f"[3/3 좋아요 주문 실패] {err}", "warning")
+                                if "incorrect_service" in str(err).lower():
+                                    add_log(
+                                        f"서비스 ID '{smm_client.service_id}' 유효하지 않음. "
+                                        "SMM 좋아요 탭 → 서비스 조회에서 올바른 ID 확인 필요",
+                                        "error",
+                                    )
                     else:
                         add_log("[3/3 좋아요] SMM 비활성화 - 건너뜀", "info")
                     # 상태는 '댓글완료' 유지 (추후 대댓글 자동화에서 처리)
