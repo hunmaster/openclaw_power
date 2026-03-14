@@ -591,6 +591,28 @@
             </div>
         </div>
 
+        <!-- 수동 등록 -->
+        <div class="card" style="margin-top:16px">
+            <h3 style="margin:0 0 12px;font-size:15px">기존 댓글 등록</h3>
+            <p style="font-size:12px;color:var(--text-dim);margin:0 0 12px">
+                이미 작성된 댓글 URL을 붙여넣어 트래킹 대상에 추가합니다.
+                (예: https://www.youtube.com/watch?v=xxxxx&lc=댓글ID)
+            </p>
+            <div style="display:flex;gap:8px;align-items:flex-end">
+                <div class="form-group" style="flex:1;margin:0">
+                    <label>댓글 URL (lc= 포함)</label>
+                    <input type="text" id="manualCommentUrl" placeholder="https://www.youtube.com/watch?v=...&lc=...">
+                </div>
+                <div class="form-group" style="width:150px;margin:0">
+                    <label>계정 (선택)</label>
+                    <input type="text" id="manualAccountLabel" placeholder="계정명">
+                </div>
+                <button class="btn btn-primary" onclick="registerManualComment()" style="height:36px;white-space:nowrap">
+                    등록
+                </button>
+            </div>
+        </div>
+
         <div class="card" style="margin-top:16px">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
                 <h3 style="margin:0;font-size:15px">등록된 댓글</h3>
@@ -2481,6 +2503,34 @@
         if (!confirm('트래킹 대상에서 제거하시겠습니까?')) return;
         await api(`/api/tracking/remove/${commentId}`, {method:'POST'});
         loadTrackingSummary();
+    }
+
+    async function registerManualComment() {
+        const url = document.getElementById('manualCommentUrl').value.trim();
+        const account = document.getElementById('manualAccountLabel').value.trim();
+
+        if (!url) { alert('댓글 URL을 입력하세요.'); return; }
+        if (!url.includes('lc=')) { alert('lc= 파라미터가 포함된 댓글 URL을 입력하세요.'); return; }
+
+        const data = await api('/api/tracking/register', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                comment_url: url,
+                video_url: url.split('&lc=')[0],
+                account_label: account || '수동등록',
+                comment_text: '',
+            })
+        });
+
+        if (data && data.ok) {
+            document.getElementById('manualCommentUrl').value = '';
+            document.getElementById('manualAccountLabel').value = '';
+            loadTrackingSummary();
+            alert('트래킹 등록 완료! "전체 생존 확인"을 누르면 댓글 내용과 위치가 자동으로 채워집니다.');
+        } else {
+            alert(data?.error || '등록 실패');
+        }
     }
 </script>
 
