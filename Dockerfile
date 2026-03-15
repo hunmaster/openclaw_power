@@ -14,8 +14,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 소스 코드 복사
 COPY . .
 
-# config 디렉토리 생성
-RUN mkdir -p /app/config
+# config, data 디렉토리 생성
+RUN mkdir -p /app/config /app/data
 
 # 기본 환경변수 (고객 모드)
 ENV LICENSE_MODE=client

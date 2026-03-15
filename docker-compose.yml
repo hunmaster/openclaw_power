@@ -9,6 +9,7 @@ services:
     volumes:
       # 설정 파일 영속화 (컨테이너 삭제해도 유지)
       - ./config:/app/config
+      - ./data:/app/data
       - ./.env:/app/.env
     environment:
       - LICENSE_MODE=client
