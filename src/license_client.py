@@ -67,8 +67,9 @@ PLAN_FEATURES = {
         "auto_exposure_schedule": False,  # Agency부터
         "multi_account_parallel": False,  # Agency부터
         "task_scheduling": False,      # Agency부터
-        "like_boost": False,           # Business부터
-        "tracking_unlimited": False,   # Agency부터 (Starter/Business는 월 3회 무료)
+        "like_boost": True,            # Starter부터 (수익화 핵심)
+        "like_preview": False,         # Business부터 (좋아요 수량 미리보기)
+        "tracking_unlimited": False,   # 월 3회 무료
         "api_access": False,           # Enterprise만
     },
     "business": {
@@ -78,11 +79,12 @@ PLAN_FEATURES = {
         "auto_repost": True,
         "rank_check": True,
         "duplicate_scan": True,
-        "auto_exposure_schedule": False,
-        "multi_account_parallel": True,   # 2계정
-        "task_scheduling": False,
+        "auto_exposure_schedule": False,  # Agency부터 (Business는 수동만)
+        "multi_account_parallel": False,  # Agency부터 (대량 운영 = Agency)
+        "task_scheduling": False,      # Agency부터
         "like_boost": True,
-        "tracking_unlimited": False,   # Business도 월 3회 무료
+        "like_preview": True,          # Business부터 미리보기 가능
+        "tracking_unlimited": False,   # 월 10회 (Starter보다 넉넉하지만 제한)
         "api_access": False,
     },
     "agency": {
@@ -92,10 +94,11 @@ PLAN_FEATURES = {
         "auto_repost": True,
         "rank_check": True,
         "duplicate_scan": True,
-        "auto_exposure_schedule": True,
-        "multi_account_parallel": True,   # 5계정
-        "task_scheduling": True,
+        "auto_exposure_schedule": True,   # Agency 전용
+        "multi_account_parallel": True,   # Agency 전용 (5계정 동시)
+        "task_scheduling": True,          # Agency 전용
         "like_boost": True,
+        "like_preview": True,
         "tracking_unlimited": True,    # Agency부터 무제한
         "api_access": False,
     },
@@ -110,13 +113,15 @@ PLAN_FEATURES = {
         "multi_account_parallel": True,
         "task_scheduling": True,
         "like_boost": True,
+        "like_preview": True,
         "tracking_unlimited": True,    # 무제한
         "api_access": True,
     },
 }
 
 # 트래킹 무료 횟수 제한 (Starter/Business)
-TRACKING_FREE_LIMIT = 3
+TRACKING_FREE_LIMIT = 3       # Starter 월 트래킹 제한
+TRACKING_BUSINESS_LIMIT = 10  # Business 월 트래킹 제한
 
 LICENSE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config", ".license")
 

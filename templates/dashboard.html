@@ -1455,11 +1455,18 @@
     }
 
     // ─── 라이선스 상태 ───
+    let _likePreviewAllowed = IS_OWNER;  // 좋아요 미리보기 권한
+    let _currentTokenBalance = 0;        // 현재 토큰 잔액
+
     async function loadLicenseStatus(forceRefresh = false) {
         try {
             const url = forceRefresh ? '/api/license/status?refresh=1' : '/api/license/status';
             const data = await api(url);
             if (!data) return;
+
+            // 권한 상태 업데이트
+            _likePreviewAllowed = data.owner_mode || data.like_preview || false;
+            _currentTokenBalance = data.token_balance || 0;
 
             const badge = document.getElementById('licenseBadge');
             const planText = document.getElementById('licensePlanText');
@@ -2804,7 +2811,7 @@
                     <div style="color:var(--yellow);font-weight:700">${extraQty > 0 ? '+' + extraQty.toLocaleString() : '-'}개</div>
                 </div>
             </div>
-            ${(item.top_comments && item.top_comments.length > 0) ? `
+            ${(item.top_comments && item.top_comments.length > 0) ? (_likePreviewAllowed ? `
             <div style="margin-bottom:10px;background:var(--card);border-radius:6px;padding:8px 10px;font-size:11px">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
                     <span style="color:var(--text-dim);font-weight:600">상위 댓글 미리보기</span>
@@ -2821,16 +2828,44 @@
                         <span style="flex-shrink:0;color:var(--text-dim);font-size:10px;margin-left:auto;white-space:nowrap">♥ ${likeCnt}</span>
                     </div>`;
                 }).join('')}
-            </div>` : ''}
+            </div>` : `
+            <div style="margin-bottom:10px;background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.2);border-radius:6px;padding:12px 14px;font-size:12px;text-align:center;cursor:pointer" onclick="openSubscriptionPopup()">
+                <div style="color:#a78bfa;font-weight:600;margin-bottom:4px">상위 댓글 미리보기</div>
+                <div style="color:var(--text-dim);font-size:11px">Business 플랜 이상부터 미리보기가 가능합니다</div>
+                <div style="color:#a78bfa;font-size:11px;margin-top:6px;text-decoration:underline">플랜 업그레이드 →</div>
+            </div>`) : ''}
             <div style="display:flex;gap:8px">
+                ${(_currentTokenBalance >= (item.qty * 10) || IS_OWNER) ? `
                 <button onclick="approveSingleLike('${item.id}')" style="flex:1;padding:10px 0;background:var(--green);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;transition:opacity 0.2s" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
                     승인 (${item.qty.toLocaleString()}개 주문)
-                </button>
+                </button>` : `
+                <button onclick="showTokenShortagePopup(${item.qty})" style="flex:1;padding:10px 0;background:var(--border);color:var(--text-dim);border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;position:relative;overflow:hidden">
+                    <span style="color:#f87171">토큰 부족</span> · 승인 불가 (${item.qty.toLocaleString()}개)
+                </button>`}
                 <button onclick="dismissSingleLike('${item.id}')" style="padding:10px 20px;background:var(--border);color:var(--text-dim);border:none;border-radius:8px;font-size:13px;cursor:pointer;transition:opacity 0.2s" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
                     무시
                 </button>
             </div>
         </div>`;
+    }
+
+    function showTokenShortagePopup(qty) {
+        const needed = qty * 10;
+        const have = _currentTokenBalance;
+        const shortage = needed - have;
+        const msg = `토큰이 부족하여 좋아요 승인이 불가합니다.\n\n` +
+            `필요 토큰: ${needed.toLocaleString()}\n` +
+            `현재 잔액: ${have.toLocaleString()}\n` +
+            `부족분: ${shortage.toLocaleString()}\n\n` +
+            `토큰을 충전하시겠습니까?`;
+        if (confirm(msg)) {
+            // 토큰 충전 팝업 열기
+            if (typeof openChargePopup === 'function') {
+                openChargePopup();
+            } else if (typeof openSubscriptionPopup === 'function') {
+                openSubscriptionPopup();
+            }
+        }
     }
 
     function toggleCommentExpand(btn) {
@@ -4268,10 +4303,11 @@
                 <li>✅ 댓글 작성</li>
                 <li>✅ 노출 수동 확인</li>
                 <li>✅ 노션 연동</li>
+                <li>✅ 좋아요 부스트</li>
                 <li>✅ 월 3,000 토큰</li>
-                <li>✅ 최대 3계정</li>
+                <li>✅ 최대 3계정 (순차 작업)</li>
+                <li style="color:#555;">❌ 좋아요 미리보기</li>
                 <li style="color:#555;">❌ 자동 리포스팅</li>
-                <li style="color:#555;">❌ 좋아요 부스트</li>
             </ul>
             <button class="sub-plan-btn" onclick="openPaymentPopup('starter','Starter',79000)" style="width:100%;padding:10px;border:none;border-radius:8px;background:#3b82f6;color:#fff;font-weight:700;font-size:13px;cursor:pointer;transition:all .2s;">선택하기</button>
         </div>
@@ -4290,9 +4326,11 @@
                 <li>✅ Starter 전체 포함</li>
                 <li>✅ 자동 리포스팅</li>
                 <li>✅ 랭킹 체크 / 중복 스캔</li>
-                <li>✅ 좋아요 부스트</li>
+                <li>✅ 좋아요 미리보기</li>
                 <li>✅ 월 10,000 토큰</li>
-                <li>✅ 최대 10계정</li>
+                <li>✅ 최대 10계정 (순차 작업)</li>
+                <li style="color:#555;">❌ 다중 계정 동시작업</li>
+                <li style="color:#555;">❌ 스마트 계정 로테이션</li>
             </ul>
             <button class="sub-plan-btn" onclick="openPaymentPopup('business','Business',199000)" style="width:100%;padding:10px;border:none;border-radius:8px;background:linear-gradient(135deg,#8b5cf6,#6d28d9);color:#fff;font-weight:700;font-size:13px;cursor:pointer;transition:all .2s;">선택하기</button>
         </div>
@@ -4310,7 +4348,9 @@
                 <li>✅ Business 전체 포함</li>
                 <li>✅ 자동 노출 스케줄링</li>
                 <li>✅ 작업 예약 스케줄링</li>
-                <li>✅ 멀티 계정 동시작업</li>
+                <li>✅ 다중 계정 동시작업</li>
+                <li>✅ 스마트 계정 로테이션</li>
+                <li>✅ 무제한 트래킹</li>
                 <li>✅ 월 30,000 토큰</li>
                 <li>✅ 최대 30계정</li>
             </ul>
@@ -4334,7 +4374,7 @@
                 <li>✅ 무제한 토큰</li>
                 <li>✅ 무제한 계정</li>
             </ul>
-            <button class="sub-plan-btn" onclick="openPaymentPopup('enterprise','Enterprise',0)" style="width:100%;padding:10px;border:none;border-radius:8px;background:#22c55e;color:#000;font-weight:700;font-size:13px;cursor:pointer;transition:all .2s;">문의하기</button>
+            <button class="sub-plan-btn" onclick="window.open('https://open.kakao.com/o/sHqk1tli','_blank')" style="width:100%;padding:10px;border:none;border-radius:8px;background:#22c55e;color:#000;font-weight:700;font-size:13px;cursor:pointer;transition:all .2s;">문의하기</button>
         </div>
 
     </div>
@@ -4483,6 +4523,12 @@
     #subscriptionOverlay > div > div:nth-child(3) { grid-template-columns:1fr !important; }
 }
 </style>
+
+<!-- 우측 하단 문의하기 플로팅 버튼 -->
+<a href="https://open.kakao.com/o/sHqk1tli" target="_blank" id="floatingContactBtn" style="position:fixed;bottom:24px;right:24px;z-index:9998;display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#fee500,#f7d200);color:#3c1e1e;padding:12px 20px;border-radius:50px;font-size:13px;font-weight:700;text-decoration:none;box-shadow:0 4px 16px rgba(0,0,0,0.3);transition:all 0.3s ease;cursor:pointer;" onmouseover="this.style.transform='scale(1.05)';this.style.boxShadow='0 6px 24px rgba(0,0,0,0.4)'" onmouseout="this.style.transform='scale(1)';this.style.boxShadow='0 4px 16px rgba(0,0,0,0.3)'">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="#3c1e1e"><path d="M12 3C6.48 3 2 6.58 2 11c0 2.83 1.85 5.31 4.62 6.72-.15.56-.82 2.98-.86 3.19 0 0-.02.11.04.16.07.05.15.02.15.02.2-.03 2.37-1.56 3.36-2.2.87.13 1.77.2 2.69.2 5.52 0 10-3.58 10-8S17.52 3 12 3z"/></svg>
+    문의하기
+</a>
 
 </body>
 </html>

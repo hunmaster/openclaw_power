@@ -111,11 +111,16 @@ def _check_tracking_allowed():
         return None  # Owner는 무제한
     if license_client.can_use_feature("tracking_unlimited"):
         return None  # Agency 이상은 무제한
-    from src.license_client import TRACKING_FREE_LIMIT
+    from src.license_client import TRACKING_FREE_LIMIT, TRACKING_BUSINESS_LIMIT
+    plan_name = (license_client.get_plan_name() or "").lower()
+    limit = TRACKING_BUSINESS_LIMIT if plan_name == "business" else TRACKING_FREE_LIMIT
     used = _get_tracking_usage_count()
-    if used >= TRACKING_FREE_LIMIT:
+    if used >= limit:
+        if plan_name == "business":
+            return (f"이번 달 트래킹 {TRACKING_BUSINESS_LIMIT}회를 모두 사용했습니다. "
+                    f"Agency 플랜으로 업그레이드하면 무제한 이용 가능합니다.")
         return (f"이번 달 무료 트래킹 {TRACKING_FREE_LIMIT}회를 모두 사용했습니다. "
-                f"Agency 플랜으로 업그레이드하면 무제한 이용 가능합니다.")
+                f"Business 플랜은 월 {TRACKING_BUSINESS_LIMIT}회, Agency는 무제한입니다.")
     return None
 
 
@@ -2691,6 +2696,7 @@ def api_license_status():
         "max_accounts": license_client.get_max_accounts(),
         "token_balance": license_client.token_balance,
         "license_key": (license_client.license_key or "")[:8] + "..." if license_client.license_key else None,
+        "like_preview": license_client.can_use_feature("like_preview"),
     })
 
 
@@ -2743,7 +2749,8 @@ def api_license_features():
         "auto_repost": {"name": "자동 리포스팅", "available": license_client.can_use_feature("auto_repost"), "min_plan": "Business"},
         "rank_check": {"name": "순위 체크", "available": license_client.can_use_feature("rank_check"), "min_plan": "Business"},
         "duplicate_scan": {"name": "중복 스캔", "available": license_client.can_use_feature("duplicate_scan"), "min_plan": "Business"},
-        "like_boost": {"name": "좋아요 부스팅", "available": license_client.can_use_feature("like_boost"), "min_plan": "Business"},
+        "like_boost": {"name": "좋아요 부스팅", "available": license_client.can_use_feature("like_boost"), "min_plan": "Starter"},
+        "like_preview": {"name": "좋아요 수량 미리보기", "available": license_client.can_use_feature("like_preview"), "min_plan": "Business"},
         "auto_exposure_schedule": {"name": "자동 노출 체크 스케줄", "available": license_client.can_use_feature("auto_exposure_schedule"), "min_plan": "Agency"},
         "multi_account_parallel": {"name": "다중 계정 동시 작업", "available": license_client.can_use_feature("multi_account_parallel"), "min_plan": "Agency"},
         "task_scheduling": {"name": "작업 예약", "available": license_client.can_use_feature("task_scheduling"), "min_plan": "Agency"},
@@ -2850,7 +2857,7 @@ def api_like_boost_tiers():
 def api_like_boost_order():
     """좋아요 부스팅 주문."""
     if not license_client.can_use_feature("like_boost"):
-        return jsonify({"error": "좋아요 부스팅은 Business 플랜부터 사용 가능합니다."}), 403
+        return jsonify({"error": "좋아요 부스팅은 Starter 플랜부터 사용 가능합니다. 구독을 활성화해주세요."}), 403
 
     data = request.get_json() or {}
     comment_url = data.get("comment_url", "").strip()
