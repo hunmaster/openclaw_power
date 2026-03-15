@@ -329,6 +329,7 @@
         <button class="tab" onclick="switchTab('mypage')">마이페이지</button>
         <button class="tab" onclick="switchTab('settings')">설정</button>
         <button class="tab" onclick="switchTab('logs')">실행 로그</button>
+        {% if is_owner %}<button class="tab" onclick="switchTab('users')">유저 관리</button>{% endif %}
     </div>
 
     <!-- ━━━ 대시보드 탭 ━━━ -->
@@ -1008,6 +1009,35 @@
                     <tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text-dim);font-size:13px;">주문 내역이 없습니다</td></tr>
                 </tbody>
             </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- ━━━ 유저 관리 탭 (관리자 전용) ━━━ -->
+    {% if is_owner %}
+    <div class="tab-content" id="tab-users">
+        <div class="card" style="padding:20px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <h3 style="margin:0;font-size:16px;">가입 유저 목록</h3>
+                <button class="btn btn-secondary" onclick="loadUsers()" style="font-size:12px;">새로고침</button>
+            </div>
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                <thead>
+                    <tr style="border-bottom:1px solid var(--border);color:var(--text-dim);font-size:12px;">
+                        <th style="padding:8px;text-align:left;">ID</th>
+                        <th style="padding:8px;text-align:left;">이메일</th>
+                        <th style="padding:8px;text-align:left;">닉네임</th>
+                        <th style="padding:8px;text-align:left;">라이선스 키</th>
+                        <th style="padding:8px;text-align:left;">가입일</th>
+                        <th style="padding:8px;text-align:left;">최근 로그인</th>
+                        <th style="padding:8px;text-align:left;">상태</th>
+                    </tr>
+                </thead>
+                <tbody id="usersTableBody">
+                    <tr><td colspan="7" style="padding:20px;text-align:center;color:var(--text-dim);">로딩 중...</td></tr>
+                </tbody>
+            </table>
+            <div id="usersTotalCount" style="margin-top:12px;font-size:12px;color:var(--text-dim);"></div>
         </div>
     </div>
     {% endif %}
@@ -4226,6 +4256,41 @@
         }
     }
 
+    // ─── 유저 관리 (관리자) ───
+    async function loadUsers() {
+        const tbody = document.getElementById('usersTableBody');
+        const countEl = document.getElementById('usersTotalCount');
+        if (!tbody) return;
+
+        tbody.innerHTML = '<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--text-dim);">로딩 중...</td></tr>';
+        try {
+            const data = await api('/api/admin/users');
+            if (data.error) { tbody.innerHTML = `<tr><td colspan="7" style="padding:20px;text-align:center;color:#f87171">${data.error}</td></tr>`; return; }
+
+            const users = data.users || [];
+            if (!users.length) {
+                tbody.innerHTML = '<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--text-dim);">가입된 유저가 없습니다.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = users.map(u => `
+                <tr style="border-bottom:1px solid var(--border);">
+                    <td style="padding:8px;">${u.id}</td>
+                    <td style="padding:8px;">${u.email}</td>
+                    <td style="padding:8px;">${u.nickname || '-'}</td>
+                    <td style="padding:8px;font-family:monospace;font-size:11px;">${u.license_key || '<span style="color:#888">미등록</span>'}</td>
+                    <td style="padding:8px;font-size:11px;">${u.created_at ? new Date(u.created_at).toLocaleDateString('ko-KR') : '-'}</td>
+                    <td style="padding:8px;font-size:11px;">${u.last_login ? new Date(u.last_login).toLocaleDateString('ko-KR') : '-'}</td>
+                    <td style="padding:8px;"><span style="color:${u.is_active ? '#22c55e' : '#ef4444'};font-size:11px;font-weight:600;">${u.is_active ? '활성' : '비활성'}</span></td>
+                </tr>
+            `).join('');
+
+            if (countEl) countEl.textContent = `총 ${users.length}명`;
+        } catch (e) {
+            tbody.innerHTML = `<tr><td colspan="7" style="padding:20px;text-align:center;color:#f87171">로드 실패</td></tr>`;
+        }
+    }
+
     // ─── 마이페이지 ───
     const FEATURE_NAMES = {
         comment_post: '댓글 작성', auto_repost: '자동 리포스팅', rank_check: '랭킹 체크',
@@ -4319,6 +4384,7 @@
     switchTab = function(tab) {
         origSwitchTab(tab);
         if (tab === 'mypage') loadMypage();
+        if (tab === 'users') loadUsers();
     };
 </script>
 

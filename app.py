@@ -2881,6 +2881,27 @@ def api_admin_status():
     })
 
 
+@app.route("/api/admin/users")
+def api_admin_users():
+    """관리자용: 가입 유저 목록 조회."""
+    if not _admin_view_active:
+        return jsonify({"error": "관리자 권한이 필요합니다."}), 403
+
+    users = User.query.order_by(User.created_at.desc()).all()
+    return jsonify({
+        "users": [{
+            "id": u.id,
+            "email": u.email,
+            "nickname": u.nickname,
+            "license_key": (u.license_key or "")[:12] + "..." if u.license_key else None,
+            "created_at": u.created_at.isoformat() if u.created_at else None,
+            "last_login": u.last_login.isoformat() if u.last_login else None,
+            "is_active": u.is_active_user,
+        } for u in users],
+        "total": len(users),
+    })
+
+
 @app.route("/api/license/activate", methods=["POST"])
 def api_license_activate():
     """라이선스 키 활성화."""
