@@ -1250,7 +1250,7 @@
     <div class="tab-content" id="tab-mypage">
 
         <!-- 내 구독 정보 카드 -->
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px;">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px;">
             <div class="card" style="text-align:center;cursor:pointer;" onclick="openSubscriptionPopup()">
                 <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">현재 플랜</div>
                 <div id="myPlan" style="font-size:24px;font-weight:800;color:var(--accent-light);">-</div>
@@ -1260,6 +1260,14 @@
                 <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">잔여 토큰</div>
                 <div id="myTokens" style="font-size:24px;font-weight:800;color:#fbbf24;">-</div>
                 <button onclick="openChargePopup()" style="margin-top:8px;padding:6px 16px;background:linear-gradient(135deg,#f59e0b,#ef4444);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;transition:all .2s" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">토큰 충전</button>
+            </div>
+            <div class="card" style="text-align:center;background:linear-gradient(135deg,rgba(139,92,246,0.08),rgba(59,130,246,0.08));border:1px solid rgba(139,92,246,0.2);">
+                <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">좋아요 크레딧</div>
+                <div style="display:flex;align-items:baseline;justify-content:center;gap:2px;">
+                    <span id="myLikeCredits" style="font-size:24px;font-weight:800;color:var(--accent-light);">0</span>
+                    <span style="font-size:12px;color:var(--text-dim);">원</span>
+                </div>
+                <button onclick="openCreditChargeModal()" style="margin-top:8px;padding:6px 16px;background:linear-gradient(135deg,#8b5cf6,#3b82f6);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;transition:all .2s" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">크레딧 충전</button>
             </div>
             <div class="card" style="text-align:center;">
                 <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">최대 계정 수</div>
@@ -1295,11 +1303,61 @@
             </div>
         </div>
 
+        <!-- 좋아요 크레딧 충전 상품 -->
+        <div class="card" style="margin-bottom:20px;border:1px solid rgba(139,92,246,0.2);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <div>
+                    <h3 style="font-size:15px;margin:0;">좋아요 크레딧 충전</h3>
+                    <p style="font-size:11px;color:var(--text-dim);margin:4px 0 0;">충전한 크레딧으로 댓글 좋아요를 구매할 수 있습니다</p>
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-size:11px;color:var(--text-dim);">현재 잔액</div>
+                    <div style="font-size:18px;font-weight:700;color:var(--accent-light);"><span id="myLikeCreditsInline">0</span>원</div>
+                </div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px;">
+                <div onclick="purchaseLikeCredit('like_5000')" style="cursor:pointer;padding:16px 12px;background:var(--bg);border:2px solid var(--border);border-radius:12px;text-align:center;transition:all .2s;" onmouseover="this.style.borderColor='rgba(139,92,246,0.5)'" onmouseout="this.style.borderColor='var(--border)'">
+                    <div style="font-size:18px;font-weight:700;color:var(--accent-light);">5,000원</div>
+                    <div style="font-size:11px;color:var(--text-dim);margin-top:6px;">스탠다드 333개</div>
+                    <div style="font-size:10px;color:#888;margin-top:2px;">베이직 500개</div>
+                </div>
+                <div onclick="purchaseLikeCredit('like_10000')" style="cursor:pointer;padding:16px 12px;background:var(--bg);border:2px solid rgba(139,92,246,0.4);border-radius:12px;text-align:center;transition:all .2s;position:relative;" onmouseover="this.style.borderColor='rgba(139,92,246,0.7)'" onmouseout="this.style.borderColor='rgba(139,92,246,0.4)'">
+                    <div style="position:absolute;top:-8px;right:10px;background:var(--accent);color:#fff;font-size:9px;font-weight:700;padding:2px 8px;border-radius:8px;">인기</div>
+                    <div style="font-size:18px;font-weight:700;color:var(--accent-light);">10,000원</div>
+                    <div style="font-size:11px;color:var(--text-dim);margin-top:6px;">스탠다드 666개</div>
+                    <div style="font-size:10px;color:#888;margin-top:2px;">베이직 1,000개</div>
+                </div>
+                <div onclick="purchaseLikeCredit('like_30000')" style="cursor:pointer;padding:16px 12px;background:var(--bg);border:2px solid var(--border);border-radius:12px;text-align:center;transition:all .2s;" onmouseover="this.style.borderColor='rgba(139,92,246,0.5)'" onmouseout="this.style.borderColor='var(--border)'">
+                    <div style="font-size:18px;font-weight:700;color:var(--accent-light);">30,000원</div>
+                    <div style="font-size:11px;color:var(--text-dim);margin-top:6px;">스탠다드 2,000개</div>
+                    <div style="font-size:10px;color:#888;margin-top:2px;">베이직 3,000개</div>
+                </div>
+                <div onclick="purchaseLikeCredit('like_50000')" style="cursor:pointer;padding:16px 12px;background:var(--bg);border:2px solid var(--border);border-radius:12px;text-align:center;transition:all .2s;position:relative;" onmouseover="this.style.borderColor='rgba(139,92,246,0.5)'" onmouseout="this.style.borderColor='var(--border)'">
+                    <div style="position:absolute;top:-8px;right:10px;background:#f59e0b;color:#000;font-size:9px;font-weight:700;padding:2px 8px;border-radius:8px;">대량</div>
+                    <div style="font-size:18px;font-weight:700;color:var(--accent-light);">50,000원</div>
+                    <div style="font-size:11px;color:var(--text-dim);margin-top:6px;">스탠다드 3,333개</div>
+                    <div style="font-size:10px;color:#888;margin-top:2px;">베이직 5,000개</div>
+                </div>
+            </div>
+            <!-- 티어별 가격 안내 -->
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:12px;background:var(--bg);border-radius:8px;">
+                <div style="text-align:center;font-size:11px;">
+                    <span style="color:#888;">베이직</span> <span style="color:#ccc;font-weight:600;">10원/개</span>
+                </div>
+                <div style="text-align:center;font-size:11px;">
+                    <span style="color:var(--accent-light);">스탠다드</span> <span style="color:#ccc;font-weight:600;">15원/개</span>
+                </div>
+                <div style="text-align:center;font-size:11px;">
+                    <span style="color:var(--yellow);">프리미엄</span> <span style="color:#ccc;font-weight:600;">20원/개</span>
+                </div>
+            </div>
+        </div>
+
         <!-- 사용/충전 내역 -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
             <!-- 충전 내역 -->
             <div class="card">
-                <h3 style="font-size:15px;margin-bottom:16px;">충전 내역</h3>
+                <h3 style="font-size:15px;margin-bottom:16px;">토큰 충전 내역</h3>
                 <div id="myPurchaseHistory" style="max-height:300px;overflow-y:auto;">
                     <p style="color:var(--text-dim);font-size:13px;text-align:center;padding:20px;">내역이 없습니다</p>
                 </div>
@@ -1308,6 +1366,22 @@
             <div class="card">
                 <h3 style="font-size:15px;margin-bottom:16px;">토큰 사용 내역</h3>
                 <div id="myUsageHistory" style="max-height:300px;overflow-y:auto;">
+                    <p style="color:var(--text-dim);font-size:13px;text-align:center;padding:20px;">내역이 없습니다</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 좋아요 크레딧 내역 -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+            <div class="card">
+                <h3 style="font-size:15px;margin-bottom:16px;">크레딧 충전 내역</h3>
+                <div id="myCreditPurchaseHistory" style="max-height:300px;overflow-y:auto;">
+                    <p style="color:var(--text-dim);font-size:13px;text-align:center;padding:20px;">내역이 없습니다</p>
+                </div>
+            </div>
+            <div class="card">
+                <h3 style="font-size:15px;margin-bottom:16px;">좋아요 주문 내역</h3>
+                <div id="myCreditUsageHistory" style="max-height:300px;overflow-y:auto;">
                     <p style="color:var(--text-dim);font-size:13px;text-align:center;padding:20px;">내역이 없습니다</p>
                 </div>
             </div>
@@ -5172,6 +5246,52 @@
 
             // 사용/충전 내역 로드
             loadUsageHistory();
+
+            // 좋아요 크레딧 잔액 + 내역 로드
+            loadLikeCreditData();
+        } catch(e) {}
+    }
+
+    async function loadLikeCreditData() {
+        try {
+            const data = await api('/api/like-credits/history');
+            if (!data) return;
+
+            // 잔액 업데이트 (마이페이지 카드 + 인라인)
+            const balance = data.balance || 0;
+            const elCredits = document.getElementById('myLikeCredits');
+            const elCreditsInline = document.getElementById('myLikeCreditsInline');
+            if (elCredits) elCredits.textContent = balance.toLocaleString();
+            if (elCreditsInline) elCreditsInline.textContent = balance.toLocaleString();
+
+            // 크레딧 충전 내역
+            const purchaseEl = document.getElementById('myCreditPurchaseHistory');
+            if (purchaseEl && data.purchases && data.purchases.length > 0) {
+                purchaseEl.innerHTML = data.purchases.map(p =>
+                    `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:12px;">
+                        <span style="color:#4ade80;">+${(p.credits || 0).toLocaleString()}원</span>
+                        <span style="color:#888;">${p.purchased_at ? p.purchased_at.slice(0,10) : '-'}</span>
+                    </div>`
+                ).join('');
+            }
+
+            // 좋아요 주문 내역
+            const tierNames = {basic: '베이직', standard: '스탠다드', premium: '프리미엄'};
+            const statusColors = {'Pending': '#fbbf24', 'In progress': '#3b82f6', 'Completed': '#4ade80', 'Partial': '#fbbf24', 'Canceled': '#ef4444'};
+            const statusNames = {'Pending': '대기중', 'In progress': '진행중', 'Completed': '완료', 'Partial': '부분완료', 'Canceled': '취소'};
+            const usageEl = document.getElementById('myCreditUsageHistory');
+            if (usageEl && data.orders && data.orders.length > 0) {
+                usageEl.innerHTML = data.orders.map(o =>
+                    `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:12px;">
+                        <div>
+                            <span style="color:#aaa;">${tierNames[o.tier] || o.tier}</span>
+                            <span style="color:#ccc;font-weight:600;margin-left:4px;">${(o.quantity || 0).toLocaleString()}개</span>
+                            <span style="color:#ef4444;margin-left:6px;">-${(o.cost || 0).toLocaleString()}원</span>
+                        </div>
+                        <span style="color:${statusColors[o.status] || '#888'};font-size:11px;">${statusNames[o.status] || o.status}</span>
+                    </div>`
+                ).join('');
+            }
         } catch(e) {}
     }
 
