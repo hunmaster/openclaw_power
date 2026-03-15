@@ -3118,15 +3118,46 @@ def api_payment_success():
     order_id = request.args.get("orderId", "")
     amount = request.args.get("amount", "0")
     return f"""
-    <html><body><script>
-    window.opener && window.opener.postMessage({{
-        type: 'payment_success',
-        paymentKey: '{payment_key}',
-        orderId: '{order_id}',
-        amount: {amount}
-    }}, '*');
-    window.close();
-    </script><p>결제 완료! 이 창은 자동으로 닫힙니다.</p></body></html>
+    <html><body>
+    <p id="statusMsg" style="font-family:sans-serif;padding:20px;">결제 승인 처리 중...</p>
+    <script>
+    if (window.opener) {{
+        // 팝업 모드: 부모 창에 메시지 전달 후 닫기
+        window.opener.postMessage({{
+            type: 'payment_success',
+            paymentKey: '{payment_key}',
+            orderId: '{order_id}',
+            amount: {amount}
+        }}, '*');
+        window.close();
+    }} else {{
+        // 같은 창 리다이렉트 모드: 직접 결제 승인 처리 후 대시보드로 이동
+        fetch('/api/payment/confirm', {{
+            method: 'POST',
+            headers: {{'Content-Type': 'application/json'}},
+            body: JSON.stringify({{
+                paymentKey: '{payment_key}',
+                orderId: '{order_id}',
+                amount: {amount}
+            }})
+        }})
+        .then(r => r.json())
+        .then(data => {{
+            if (data.success) {{
+                document.getElementById('statusMsg').innerText = '결제가 완료되었습니다! 대시보드로 이동합니다...';
+                setTimeout(() => {{ window.location.href = '/'; }}, 1500);
+            }} else {{
+                document.getElementById('statusMsg').innerText = '결제 승인 실패: ' + (data.error || '알 수 없는 오류');
+                setTimeout(() => {{ window.location.href = '/'; }}, 3000);
+            }}
+        }})
+        .catch(err => {{
+            document.getElementById('statusMsg').innerText = '결제 처리 중 오류가 발생했습니다.';
+            setTimeout(() => {{ window.location.href = '/'; }}, 3000);
+        }});
+    }}
+    </script>
+    </body></html>
     """
 
 
@@ -3136,14 +3167,22 @@ def api_payment_fail():
     code = request.args.get("code", "")
     message = request.args.get("message", "결제가 취소되었습니다.")
     return f"""
-    <html><body><script>
-    window.opener && window.opener.postMessage({{
-        type: 'payment_fail',
-        code: '{code}',
-        message: '{message}'
-    }}, '*');
-    window.close();
-    </script><p>결제 실패: {message}</p></body></html>
+    <html><body>
+    <p id="statusMsg" style="font-family:sans-serif;padding:20px;">결제 실패: {message}</p>
+    <script>
+    if (window.opener) {{
+        window.opener.postMessage({{
+            type: 'payment_fail',
+            code: '{code}',
+            message: '{message}'
+        }}, '*');
+        window.close();
+    }} else {{
+        // 같은 창 리다이렉트 모드: 대시보드로 돌아가기
+        setTimeout(function() {{ window.location.href = '/'; }}, 2000);
+    }}
+    </script>
+    </body></html>
     """
 
 
