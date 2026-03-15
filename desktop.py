@@ -98,13 +98,12 @@ def main():
     )
 
     # 결제 시 외부 브라우저로 열기 위한 JS API
-    class DesktopAPI:
-        def open_external(self, url):
-            """외부 브라우저에서 URL 열기 (결제 페이지 등)"""
-            import webbrowser
-            webbrowser.open(url)
+    def open_external(url):
+        """외부 브라우저에서 URL 열기 (결제 페이지 등)"""
+        import webbrowser
+        webbrowser.open(url)
 
-    window.expose(DesktopAPI())
+    window.expose(open_external)
 
     print("[CommentBoost] 앱 창 열기...")
     webview.start(debug=False)
