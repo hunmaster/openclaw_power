@@ -1528,7 +1528,18 @@ def api_add_account():
         _sync_accounts_to_file(current_user.id)
 
         total = YouTubeAccount.query.filter_by(user_id=current_user.id).count()
-        print(f"[accounts] 계정 추가 완료: {email}, 총 {total}개 (user_id={current_user.id})")
+
+        # 활동 로그에 기록
+        log = UserActivityLog(
+            user_id=current_user.id,
+            email=current_user.email,
+            action="account_add",
+            detail=f"계정 추가: {email} (총 {total}개)",
+            ip_address=request.headers.get("X-Forwarded-For", request.remote_addr),
+        )
+        db.session.add(log)
+        db.session.commit()
+
         return jsonify({"message": "계정이 추가되었습니다.", "account": new_acc.to_dict(), "total": total})
     except Exception as e:
         db.session.rollback()
@@ -1552,7 +1563,20 @@ def api_delete_account(email):
         # 레거시 파일에도 동기화
         _sync_accounts_to_file(current_user.id)
 
-        return jsonify({"message": f"계정 {email}이 삭제되었습니다."})
+        remaining = YouTubeAccount.query.filter_by(user_id=current_user.id).count()
+
+        # 활동 로그에 기록
+        log = UserActivityLog(
+            user_id=current_user.id,
+            email=current_user.email,
+            action="account_delete",
+            detail=f"계정 삭제: {email} (남은 {remaining}개)",
+            ip_address=request.headers.get("X-Forwarded-For", request.remote_addr),
+        )
+        db.session.add(log)
+        db.session.commit()
+
+        return jsonify({"message": f"계정 {email}이 삭제되었습니다.", "remaining": remaining})
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": f"계정 삭제 중 오류: {str(e)}"}), 500
@@ -3203,6 +3227,23 @@ def api_admin_update_user():
         user.is_active_user = bool(data["is_active"])
 
     db.session.commit()
+
+    # 관리자 변경 활동 로그
+    changes = []
+    if new_plan:
+        changes.append(f"플랜→{new_plan}")
+    if "is_active" in data:
+        changes.append(f"상태→{'활성' if user.is_active_user else '비활성'}")
+    log = UserActivityLog(
+        user_id=user.id,
+        email=user.email,
+        action="admin_update",
+        detail=f"관리자 변경: {', '.join(changes)}",
+        ip_address=request.headers.get("X-Forwarded-For", request.remote_addr),
+    )
+    db.session.add(log)
+    db.session.commit()
+
     return jsonify({
         "success": True,
         "user": {

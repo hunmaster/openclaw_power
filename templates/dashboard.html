@@ -2425,21 +2425,26 @@
 
         msgEl.innerHTML = '<span style="color:var(--yellow)">계정 추가 중...</span>';
 
-        const res = await api('/api/accounts', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password, label: label || undefined, account_type: type }),
-        });
+        try {
+            const res = await api('/api/accounts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password, label: label || undefined, account_type: type }),
+            });
 
-        if (res && !res.error) {
-            msgEl.innerHTML = '<span style="color:var(--green)">계정이 추가되었습니다!</span>';
-            document.getElementById('newEmail').value = '';
-            document.getElementById('newPassword').value = '';
-            document.getElementById('newLabel').value = '';
-            await loadAccountList();
-            loadDashboard();
-        } else {
-            msgEl.innerHTML = `<span style="color:var(--red)">${res?.error || '추가 실패'}</span>`;
+            if (res && !res.error) {
+                const total = res.total || '';
+                msgEl.innerHTML = `<span style="color:var(--green)">계정이 추가되었습니다! ${total ? '(총 ' + total + '개)' : ''}</span>`;
+                document.getElementById('newEmail').value = '';
+                document.getElementById('newPassword').value = '';
+                document.getElementById('newLabel').value = '';
+                await loadAccountList();
+                loadDashboard();
+            } else {
+                msgEl.innerHTML = `<span style="color:var(--red)">${res?.error || '추가 실패'}</span>`;
+            }
+        } catch (e) {
+            msgEl.innerHTML = `<span style="color:var(--red)">네트워크 오류: ${e.message}</span>`;
         }
     }
 
