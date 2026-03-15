@@ -3841,7 +3841,9 @@
                 return;
             }
 
-            // PortOne V2 결제 요청 (IFRAME 모드로 대시보드 유지)
+            // PortOne V2 결제 요청
+            const successUrl = `${window.location.origin}/api/payment/success?paymentId=${orderData.paymentId}&orderId=${orderData.orderId}&amount=${orderData.amount}`;
+            const failUrl = `${window.location.origin}/api/payment/fail`;
             const response = await PortOne.requestPayment({
                 storeId: portoneStoreId,
                 channelKey: portoneChannelKey,
@@ -3850,7 +3852,7 @@
                 totalAmount: orderData.amount,
                 currency: 'CURRENCY_KRW',
                 payMethod: selectedPayMethod,
-                windowType: 'IFRAME',
+                redirectUrl: successUrl,
             });
 
             if (response.code) {
@@ -3953,7 +3955,8 @@
                 return;
             }
 
-            // PortOne V2 결제 요청 (IFRAME 모드로 대시보드 유지)
+            // PortOne V2 결제 요청
+            const chargeSuccessUrl = `${window.location.origin}/api/payment/success?paymentId=${orderData.paymentId}&orderId=${orderData.orderId}&amount=${orderData.amount}`;
             const response = await PortOne.requestPayment({
                 storeId: portoneStoreId,
                 channelKey: portoneChannelKey,
@@ -3962,7 +3965,7 @@
                 totalAmount: orderData.amount,
                 currency: 'CURRENCY_KRW',
                 payMethod: 'CARD',
-                windowType: 'IFRAME',
+                redirectUrl: chargeSuccessUrl,
             });
 
             if (response.code) {
