@@ -41,7 +41,7 @@ from src.lemonsqueezy_client import LemonSqueezyClient
 ls_client = LemonSqueezyClient()
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "commentboost-secret-" + str(uuid.uuid4())[:8])
+app.secret_key = os.environ.get("SECRET_KEY", "commentboost-secret-fixed-key-2024")
 
 # ─── 데이터베이스 & 로그인 매니저 ───
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(
