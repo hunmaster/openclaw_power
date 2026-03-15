@@ -1,54 +1,50 @@
-# 구조 전환 계획: 클라우드 SaaS → 로컬 앱 + 클라우드 서비스
+# 데스크탑 앱 전환 계획 (v2)
 
-## 현재 문제
-- 메인 앱(대시보드+자동화)이 Fly.io에 배포되어 있음
-- ADB/브라우저 GUI가 필수라 클라우드에서는 제대로 동작 불가
-- 모든 사용자가 하나의 서버를 공유하는 구조 → 데이터 초기화 문제 발생
+## 목표
+Flask 웹 대시보드 → PyWebView 기반 데스크탑 앱(.exe)으로 전환
+결제/구독 시스템을 웹훅 의존 → 클라이언트 폴링 방식으로 변경
 
-## 목표 구조
+## 아키텍처
 
 ```
 commentboost.cloud (Fly.io)
-├── 랜딩 페이지 (소개, 가격, 다운로드, 시작 가이드)
-└── 라이선스 서버 (api.commentboost.cloud - 이미 배포됨)
+├── 랜딩 페이지 (소개, 가격, .exe 다운로드)
+└── 라이선스 서버 (api.commentboost.cloud)
 
-고객 PC (각자 로컬)
-└── CommentBoost 앱 (설치형)
-    ├── 대시보드 (localhost:5000)
-    ├── 유튜브 자동화 (Playwright + ADB)
+고객 PC (Windows)
+└── CommentBoost.exe (PyWebView + Flask 내장)
+    ├── 네이티브 앱 창 (브라우저 URL바 없음)
+    ├── 대시보드 UI (Flask 내부 서버)
+    ├── 유튜브 자동화 (Playwright)
+    ├── 결제: 외부 브라우저 → Lemon Squeezy → 앱이 폴링으로 확인
     └── 라이선스 검증 → api.commentboost.cloud
 ```
 
-## 작업 목록
+## Phase 1: PyWebView 데스크탑 래퍼 (desktop.py)
+- Flask를 별도 스레드로 실행, PyWebView 네이티브 창에서 로드
+- HTTPS 불필요 (내부 통신이므로 http://127.0.0.1 사용)
+- 앱 종료 시 Flask 서버도 자동 종료
 
-### Phase 1: 랜딩 페이지 생성
-- `landing/` 디렉토리에 별도 Flask 앱 생성 (또는 정적 HTML)
-- 페이지 구성:
-  1. **히어로 섹션**: 서비스 소개, CTA (다운로드)
-  2. **기능 소개**: 핵심 기능 3~4개
-  3. **가격 플랜**: Free / Starter / Business / Agency / Enterprise
-  4. **다운로드 섹션**: Windows 설치 가이드 (ZIP 다운로드)
-  5. **시작 가이드**: 설치 → 라이선스 등록 → Notion 연결 → 계정 추가 → 실행
-  6. **FAQ**
-- `landing/Dockerfile` + `landing/fly.toml` (commentboost.cloud용)
+## Phase 2: 결제 폴링 시스템 (웹훅 대체)
+- 결제 버튼 클릭 → 외부 브라우저로 Lemon Squeezy 체크아웃 열기
+- 앱에서 주기적으로 Lemon Squeezy API 폴링 → 결제 완료 감지
+- 자동으로 구독 활성화 / 크레딧 충전 처리
+- 기존 웹훅 엔드포인트는 유지 (서버 배포 시 사용 가능)
 
-### Phase 2: 고객용 배포 패키지 구성
-- `install/` 디렉토리에 Windows 설치 스크립트 생성
-  - `install.bat`: Python 환경 설정 + 의존성 설치 + Playwright 설치
-  - `start.bat`: 앱 실행 (python app.py → localhost:5000 자동 열림)
-  - `update.bat`: 최신 버전 업데이트
-- `.env.example` 정리 (고객용 최소 설정)
-- 불필요한 클라우드 배포 파일 정리
+## Phase 3: PyInstaller .exe 빌드
+- build.py 스크립트로 .exe 패키징
+- Playwright Chromium 브라우저 번들링
+- 단일 폴더 zip 배포 (불사자 방식)
 
-### Phase 3: 메인 앱 fly.toml → 랜딩 페이지용으로 교체
-- 기존 `fly.toml`(메인 앱용) 제거 또는 랜딩 페이지용으로 교체
-- `Dockerfile`은 로컬 실행용으로 유지 (docker-compose로 로컬 사용 가능)
+## Phase 4: 랜딩페이지 + 배포
+- 다운로드 페이지에 .exe 링크 추가
+- GitHub Releases 또는 landing/releases/ 활용
+- 자동 업데이트 (기존 updater.py 활용)
 
-### Phase 4: 고객 여정 (User Journey) 문서화
-사용자가 보게 될 과정:
-1. commentboost.cloud 접속 → 서비스 소개 확인
-2. 다운로드 ZIP 받기 (GitHub Release 또는 직접 다운로드)
-3. 압축 해제 → `install.bat` 실행 (Python + 의존성 자동 설치)
-4. `start.bat` 실행 → 브라우저에서 localhost:5000 자동 열림
-5. 회원가입 → 라이선스 키 입력 → 셋업 위자드 진행
-6. Notion 연결 → 유튜브 계정 추가 → 자동화 시작
+## 이번 세션 작업
+1. desktop.py 생성 (PyWebView 래퍼)
+2. 결제 폴링 시스템 구현
+3. app.py 수정 (데스크탑 모드 지원, HTTPS 코드 정리)
+4. requirements.txt 업데이트
+5. build.py 생성 (PyInstaller 빌드)
+6. start.bat 업데이트

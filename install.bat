@@ -87,6 +87,6 @@ echo   설치 완료!
 echo ============================================
 echo.
 echo   실행 방법: start.bat 을 더블클릭하세요.
-echo   대시보드:  http://localhost:5000
+echo   (데스크탑 앱이 자동으로 열립니다)
 echo.
 pause

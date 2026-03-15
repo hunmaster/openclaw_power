@@ -376,3 +376,119 @@ class LemonSqueezyClient:
             "checkout_urls": self.checkout_urls,
             "has_urls": bool(self.checkout_urls),
         }
+
+    # ─── 결제 폴링 시스템 (데스크탑 앱용, 웹훅 대체) ───
+
+    def get_recent_orders(self, user_email=None, since_minutes=10):
+        """최근 주문 목록 조회 (폴링용)"""
+        if not self.api_key:
+            return []
+
+        try:
+            params = {}
+            if self.store_id:
+                params["filter[store_id]"] = self.store_id
+
+            resp = requests.get(
+                f"{LEMONSQUEEZY_API_BASE}/orders",
+                headers=self._headers(),
+                params=params,
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                return []
+
+            orders = resp.json().get("data", [])
+            recent = []
+            cutoff = time.time() - (since_minutes * 60)
+
+            for order in orders:
+                attrs = order.get("attributes", {})
+                created_at = attrs.get("created_at", "")
+
+                # ISO 8601 파싱
+                if created_at:
+                    try:
+                        from datetime import datetime, timezone
+                        dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                        if dt.timestamp() < cutoff:
+                            continue
+                    except (ValueError, TypeError):
+                        pass
+
+                if user_email and attrs.get("user_email", "").lower() != user_email.lower():
+                    continue
+
+                recent.append({
+                    "order_id": order.get("id"),
+                    "status": attrs.get("status"),
+                    "total": attrs.get("total"),
+                    "user_email": attrs.get("user_email"),
+                    "product_name": attrs.get("first_order_item", {}).get("product_name", ""),
+                    "variant_name": attrs.get("first_order_item", {}).get("variant_name", ""),
+                    "created_at": created_at,
+                })
+
+            return recent
+
+        except Exception as e:
+            print(f"[LemonSqueezy] 주문 조회 오류: {e}")
+            return []
+
+    def get_recent_subscriptions(self, user_email=None, since_minutes=10):
+        """최근 구독 목록 조회 (폴링용)"""
+        if not self.api_key:
+            return []
+
+        try:
+            params = {}
+            if self.store_id:
+                params["filter[store_id]"] = self.store_id
+
+            resp = requests.get(
+                f"{LEMONSQUEEZY_API_BASE}/subscriptions",
+                headers=self._headers(),
+                params=params,
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                return []
+
+            subs = resp.json().get("data", [])
+            recent = []
+            cutoff = time.time() - (since_minutes * 60)
+
+            for sub in subs:
+                attrs = sub.get("attributes", {})
+                created_at = attrs.get("created_at", "")
+
+                if created_at:
+                    try:
+                        from datetime import datetime, timezone
+                        dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                        if dt.timestamp() < cutoff:
+                            continue
+                    except (ValueError, TypeError):
+                        pass
+
+                if user_email and attrs.get("user_email", "").lower() != user_email.lower():
+                    continue
+
+                variant_id = str(attrs.get("variant_id", ""))
+                plan_id = self.get_plan_from_variant(variant_id)
+
+                recent.append({
+                    "subscription_id": sub.get("id"),
+                    "status": attrs.get("status"),
+                    "variant_id": variant_id,
+                    "plan_id": plan_id,
+                    "user_email": attrs.get("user_email"),
+                    "product_name": attrs.get("product_name", ""),
+                    "created_at": created_at,
+                })
+
+            return recent
+
+        except Exception as e:
+            print(f"[LemonSqueezy] 구독 조회 오류: {e}")
+            return []

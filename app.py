@@ -4249,6 +4249,155 @@ def api_payment_fail():
     return redirect("/?payment_result=fail")
 
 
+# ─── 결제 폴링 API (데스크탑 앱용 - 웹훅 대체) ───
+
+# 이미 처리된 주문/구독 ID 추적 (중복 충전 방지)
+_processed_payment_ids = set()
+
+
+@app.route("/api/payment/poll", methods=["POST"])
+@login_required
+def api_payment_poll():
+    """결제 완료 여부를 Lemon Squeezy API로 직접 확인 (폴링)
+
+    데스크탑 앱에서 결제 후 이 엔드포인트를 주기적으로 호출하여
+    웹훅 없이도 결제 완료를 감지하고 자동 충전합니다.
+    """
+    import requests as _requests
+
+    if not ls_client.api_key:
+        return jsonify({"error": "API 키 미설정"}), 503
+
+    data = request.get_json() or {}
+    payment_type = data.get("type", "")  # "subscription" 또는 "like_credit"
+    user_email = current_user.email if current_user.is_authenticated else None
+    lk = license_client.license_key
+
+    results = {"found": False, "processed": []}
+
+    # 구독 결제 확인
+    if payment_type in ("subscription", ""):
+        subs = ls_client.get_recent_subscriptions(user_email=user_email, since_minutes=10)
+        for sub in subs:
+            sub_id = sub["subscription_id"]
+            if sub_id in _processed_payment_ids:
+                continue
+            if sub["status"] != "active":
+                continue
+
+            plan_id = sub.get("plan_id")
+            if not plan_id:
+                continue
+
+            # 라이선스 서버에 플랜 업그레이드 요청
+            if lk:
+                try:
+                    plan_resp = _requests.post(
+                        f"{license_client.server_url}/api/license/plan/upgrade",
+                        json={
+                            "license_key": lk,
+                            "plan_id": plan_id,
+                            "payment_id": f"ls_poll_sub_{sub_id}",
+                        },
+                        timeout=10,
+                    )
+                    if plan_resp.status_code == 200 and plan_resp.json().get("success"):
+                        license_client.verify()
+                        add_log(f"[결제] 구독 활성화 완료: {plan_id}", "success")
+                        _processed_payment_ids.add(sub_id)
+                        results["found"] = True
+                        results["processed"].append({
+                            "type": "subscription",
+                            "plan": plan_id,
+                            "subscription_id": sub_id,
+                        })
+                except Exception as e:
+                    print(f"[폴링] 구독 처리 오류: {e}")
+
+    # 일회성 결제 (좋아요 크레딧) 확인
+    if payment_type in ("like_credit", ""):
+        orders = ls_client.get_recent_orders(user_email=user_email, since_minutes=10)
+        like_credit_map = {
+            "like_5000": 5000, "5000": 5000, "5,000": 5000,
+            "like_10000": 10000, "10000": 10000, "10,000": 10000,
+            "like_30000": 30000, "30000": 30000, "30,000": 30000,
+            "like_50000": 50000, "50000": 50000, "50,000": 50000,
+        }
+
+        for order in orders:
+            order_id = order["order_id"]
+            if order_id in _processed_payment_ids:
+                continue
+            if order["status"] != "paid":
+                continue
+
+            product_name = (order.get("product_name") or "").lower()
+            credits = 0
+            for key, amount in like_credit_map.items():
+                if key in product_name:
+                    credits = amount
+                    break
+
+            # 상품명 매칭 실패 시 금액 기준
+            if credits == 0 and order.get("total"):
+                total = order["total"]
+                total_krw = total // 100 if total > 100000 else total
+                if total_krw in (5000, 10000, 30000, 50000):
+                    credits = total_krw
+
+            if credits > 0 and lk:
+                try:
+                    _requests.post(
+                        f"{license_client.server_url}/api/license/likes/purchase",
+                        json={
+                            "license_key": lk,
+                            "credits": credits,
+                            "payment_id": f"ls_poll_order_{order_id}",
+                        },
+                        timeout=10,
+                    )
+                    license_client.like_credit_balance += credits
+                    add_log(f"[결제] 좋아요 크레딧 {credits:,}원 충전 완료", "success")
+                    _processed_payment_ids.add(order_id)
+                    results["found"] = True
+                    results["processed"].append({
+                        "type": "like_credit",
+                        "credits": credits,
+                        "order_id": order_id,
+                    })
+                except Exception as e:
+                    print(f"[폴링] 크레딧 충전 오류: {e}")
+
+    return jsonify(results)
+
+
+@app.route("/api/payment/open-checkout", methods=["POST"])
+@login_required
+def api_payment_open_checkout():
+    """결제 페이지를 외부 브라우저로 열기 (데스크탑 앱용)"""
+    data = request.get_json() or {}
+    product_id = data.get("product_id", "")
+
+    if not product_id:
+        return jsonify({"error": "상품 ID가 필요합니다."}), 400
+
+    user_email = current_user.email if current_user.is_authenticated else None
+    lk = license_client.license_key
+    checkout_url = ls_client.get_checkout_url(product_id, user_email=user_email, license_key=lk)
+
+    if not checkout_url:
+        return jsonify({"error": "결제 URL을 생성할 수 없습니다."}), 503
+
+    # 데스크탑 모드: 외부 브라우저로 열기
+    is_desktop = os.environ.get("DESKTOP_MODE") == "1"
+
+    return jsonify({
+        "checkout_url": checkout_url,
+        "desktop_mode": is_desktop,
+        "poll_endpoint": "/api/payment/poll",
+    })
+
+
 # 시작 시 라이선스 자동 검증
 if not is_owner_mode():
     _lic_result = license_client.auto_verify()

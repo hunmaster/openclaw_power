@@ -3187,7 +3187,7 @@
         // 4. 체크아웃 URL 열기
         if (checkoutUrl) {
             closeCreditChargeModal();
-            openCheckoutUrl(checkoutUrl);
+            openCheckoutUrl(checkoutUrl, 'like_credit');
         } else {
             msgEl.innerHTML = '<span style="color:var(--red)">결제 URL을 찾을 수 없습니다. 설정을 확인해주세요.</span>';
         }
@@ -4917,17 +4917,86 @@
     let selectedPayPlan = null;
     let selectedPayPrice = 0;
 
-    // 체크아웃 URL 열기 (오버레이 → 새 탭 fallback)
-    function openCheckoutUrl(url) {
+    // 체크아웃 URL 열기 (데스크탑: 외부 브라우저 + 폴링 / 웹: 오버레이 → 새 탭)
+    let _paymentPollTimer = null;
+
+    function openCheckoutUrl(url, paymentType) {
+        // 데스크탑 앱 모드: PyWebView의 API로 외부 브라우저 열기
+        if (window.pywebview && window.pywebview.api) {
+            try {
+                window.pywebview.api.open_external(url);
+                startPaymentPolling(paymentType || '');
+                return;
+            } catch(e) {
+                console.log('[Desktop] 외부 브라우저 열기 실패:', e);
+            }
+        }
+
+        // 웹 모드: Lemon Squeezy 오버레이 → 새 탭 fallback
         try {
             if (window.LemonSqueezy && window.LemonSqueezy.Url) {
                 window.LemonSqueezy.Url.Open(url);
+                startPaymentPolling(paymentType || '');
                 return;
             }
         } catch(e) {
             console.log('[LS] 오버레이 실패, 새 탭으로 전환:', e);
         }
         window.open(url, '_blank');
+        startPaymentPolling(paymentType || '');
+    }
+
+    function startPaymentPolling(paymentType) {
+        if (_paymentPollTimer) clearInterval(_paymentPollTimer);
+        let pollCount = 0;
+        const maxPolls = 60; // 최대 5분 (5초 간격)
+
+        console.log('[결제 폴링] 시작 - 타입:', paymentType || 'all');
+        showPaymentNotification('결제 진행 중... 완료 시 자동으로 반영됩니다.', 'warning');
+
+        _paymentPollTimer = setInterval(async () => {
+            pollCount++;
+            if (pollCount > maxPolls) {
+                clearInterval(_paymentPollTimer);
+                _paymentPollTimer = null;
+                console.log('[결제 폴링] 타임아웃');
+                return;
+            }
+
+            try {
+                const result = await api('/api/payment/poll', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ type: paymentType })
+                });
+
+                if (result && result.found) {
+                    clearInterval(_paymentPollTimer);
+                    _paymentPollTimer = null;
+                    console.log('[결제 폴링] 결제 감지:', result.processed);
+
+                    for (const item of (result.processed || [])) {
+                        if (item.type === 'subscription') {
+                            showPaymentNotification(`구독 활성화 완료: ${item.plan}`, 'success');
+                        } else if (item.type === 'like_credit') {
+                            showPaymentNotification(`좋아요 크레딧 ${item.credits.toLocaleString()}원 충전 완료!`, 'success');
+                        }
+                    }
+                    // 대시보드 새로고침
+                    if (typeof refreshDashboard === 'function') refreshDashboard();
+                    if (typeof loadLicenseInfo === 'function') loadLicenseInfo();
+                }
+            } catch(e) {
+                console.log('[결제 폴링] 오류:', e);
+            }
+        }, 5000); // 5초 간격
+    }
+
+    function stopPaymentPolling() {
+        if (_paymentPollTimer) {
+            clearInterval(_paymentPollTimer);
+            _paymentPollTimer = null;
+        }
     }
 
     // Lemon Squeezy 설정 초기화
@@ -5006,7 +5075,7 @@
 
         // 4. 체크아웃 URL 열기
         if (checkoutUrl) {
-            openCheckoutUrl(checkoutUrl);
+            openCheckoutUrl(checkoutUrl, 'subscription');
             msg.innerHTML = '<span style="color:#4ade80;">결제창이 열렸습니다. 결제를 완료해주세요.</span>';
             setTimeout(() => {
                 closePaymentPopup();

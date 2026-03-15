@@ -31,14 +31,18 @@ if not exist ".env" (
 if not exist "config" mkdir config
 if not exist "data" mkdir data
 
-echo 서버를 시작합니다...
-echo 대시보드: http://localhost:5000
+echo 데스크탑 앱을 시작합니다...
 echo.
-echo 종료하려면 이 창을 닫거나 Ctrl+C를 누르세요.
+echo 앱 창이 자동으로 열립니다.
+echo 종료하려면 앱 창을 닫거나 이 창에서 Ctrl+C를 누르세요.
 echo ────────────────────────────────────────────
 
-:: 2초 후 브라우저 자동 열기 (백그라운드)
-start /b cmd /c "timeout /t 2 /nobreak >nul && start http://localhost:5000"
-
-:: Flask 서버 실행
-python app.py
+:: 데스크탑 앱 실행 (PyWebView)
+python desktop.py
+if %errorlevel% neq 0 (
+    echo.
+    echo [대체] 데스크탑 모드 실행 실패. 브라우저 모드로 시작합니다...
+    echo 대시보드: https://localhost:5000
+    start /b cmd /c "timeout /t 2 /nobreak >nul && start https://localhost:5000"
+    python app.py
+)
