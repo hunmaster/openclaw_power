@@ -171,6 +171,51 @@ tracking_lock = threading.Lock()
 # 관리자 뷰 상태 (런타임 전역)
 _admin_view_active = is_owner_mode()
 
+# 플랜별 최대 계정 수 매핑
+PLAN_MAX_ACCOUNTS = {
+    "starter": 3, "business": 10, "agency": 30, "enterprise": 9999,
+}
+
+# 플랜별 월 토큰 수 매핑
+PLAN_TOKENS = {
+    "starter": 3000, "business": 10000, "agency": 30000, "enterprise": 999999999,
+}
+
+
+def _sync_plan_from_db():
+    """DB에 저장된 유저 플랜을 license_client에 동기화하고, 플랜 정보를 반환합니다."""
+    plan_name = license_client.get_plan_name()
+    token_balance = license_client.token_balance
+    max_accounts = license_client.get_max_accounts()
+    features = {}
+
+    try:
+        if current_user and current_user.is_authenticated:
+            db_plan = current_user.plan
+            if db_plan and db_plan != "Free":
+                plan_key = db_plan.lower()
+                if plan_key in PLAN_FEATURES:
+                    plan_name = db_plan
+                    max_accounts = PLAN_MAX_ACCOUNTS.get(plan_key, 3)
+                    # 토큰: license_client에 잔액이 없으면 플랜 기본값 사용
+                    if token_balance <= 0:
+                        token_balance = PLAN_TOKENS.get(plan_key, 0)
+                    # license_client 캐시 동기화
+                    if license_client.license_info is None:
+                        license_client.license_info = {}
+                    license_client.license_info["plan"] = db_plan
+                    license_client.license_info["plan_name"] = plan_key
+                    license_client.license_info["max_accounts"] = max_accounts
+                    license_client.license_info["is_permanent"] = (plan_key == "enterprise")
+                    license_client.token_balance = token_balance
+                    features = {feat: PLAN_FEATURES[plan_key].get(feat, False)
+                                for feat in PLAN_FEATURES[plan_key]}
+    except Exception:
+        pass
+
+    return plan_name, token_balance, max_accounts, features
+
+
 # 트래킹 월간 사용 횟수 (Starter/Business 제한용)
 tracking_usage = {"month": None, "count": 0}
 
@@ -1482,7 +1527,9 @@ def api_add_account():
         # 레거시 파일에도 동기화 (자동화 엔진 호환)
         _sync_accounts_to_file(current_user.id)
 
-        return jsonify({"message": "계정이 추가되었습니다.", "account": new_acc.to_dict()})
+        total = YouTubeAccount.query.filter_by(user_id=current_user.id).count()
+        print(f"[accounts] 계정 추가 완료: {email}, 총 {total}개 (user_id={current_user.id})")
+        return jsonify({"message": "계정이 추가되었습니다.", "account": new_acc.to_dict(), "total": total})
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": f"계정 추가 중 오류: {str(e)}"}), 500
@@ -1564,7 +1611,11 @@ def api_manual_login():
     """수동 로그인 - 브라우저를 열어 사용자가 직접 로그인합니다."""
     global manual_login_bot
 
-    from src.youtube_bot import YouTubeBot
+    # Playwright 사용 가능 여부 먼저 확인
+    try:
+        from src.youtube_bot import YouTubeBot
+    except ImportError as e:
+        return jsonify({"error": f"브라우저 모듈 로드 실패: {str(e)}. playwright install 실행 필요"}), 500
 
     data = request.get_json()
     if not data or not data.get("email"):
@@ -1591,7 +1642,7 @@ def api_manual_login():
     manual_login_state["active"] = True
     manual_login_state["email"] = email
     manual_login_state["status"] = "waiting"
-    manual_login_state["message"] = "브라우저에서 로그인을 완료해주세요..."
+    manual_login_state["message"] = "브라우저 시작 중..."
 
     def _do_manual_login():
         global manual_login_bot
@@ -1601,7 +1652,9 @@ def api_manual_login():
             bot.headless = False  # 화면 보이기 필수
             manual_login_bot = bot
 
+            manual_login_state["message"] = "브라우저를 여는 중..."
             bot.start_browser()
+            manual_login_state["message"] = "브라우저가 열렸습니다. 로그인을 완료해주세요."
             print(f"[manual_login] 브라우저 시작됨, email={email}")
             login_ok = bot.manual_login(email=email, timeout=300)
             print(f"[manual_login] 결과: {login_ok}")
@@ -3024,42 +3077,23 @@ def api_license_status():
         except Exception:
             pass
 
-    # DB에 저장된 유저 플랜을 우선 적용 (관리자가 변경한 경우 즉시 반영)
-    plan_name = license_client.get_plan_name()
-    features = {
-        "like_preview": license_client.can_use_feature("like_preview"),
-        "auto_repost": license_client.can_use_feature("auto_repost"),
-        "duplicate_scan": license_client.can_use_feature("duplicate_scan"),
-        "rank_check": license_client.can_use_feature("rank_check"),
-        "auto_exposure_schedule": license_client.can_use_feature("auto_exposure_schedule"),
-        "multi_account_parallel": license_client.can_use_feature("multi_account_parallel"),
-        "task_scheduling": license_client.can_use_feature("task_scheduling"),
-        "tracking_unlimited": license_client.can_use_feature("tracking_unlimited"),
-    }
+    # DB 플랜 우선 동기화 (관리자가 변경한 경우 즉시 반영)
+    plan_name, token_balance, max_accounts, synced_features = _sync_plan_from_db()
 
-    try:
-        if current_user and current_user.is_authenticated:
-            db_plan = current_user.plan
-            if db_plan and db_plan != "Free" and db_plan != plan_name:
-                # DB 플랜이 license_client와 다르면 DB 우선 (관리자 변경 반영)
-                plan_name = db_plan
-                # license_client 캐시도 동기화
-                plan_key = db_plan.lower()
-                if plan_key in PLAN_FEATURES:
-                    if license_client.license_info is None:
-                        license_client.license_info = {}
-                    license_client.license_info["plan"] = db_plan
-                    license_client.license_info["plan_name"] = plan_key
-                    features = {feat: PLAN_FEATURES[plan_key].get(feat, False) for feat in features}
-    except Exception:
-        pass
+    feature_keys = ["like_preview", "auto_repost", "duplicate_scan", "rank_check",
+                    "auto_exposure_schedule", "multi_account_parallel",
+                    "task_scheduling", "tracking_unlimited"]
+    if synced_features:
+        features = {feat: synced_features.get(feat, False) for feat in feature_keys}
+    else:
+        features = {feat: license_client.can_use_feature(feat) for feat in feature_keys}
 
     return jsonify({
         "active": license_client.is_active() or (plan_name and plan_name != "Free"),
         "owner_mode": license_client.owner_mode,
         "plan": plan_name,
-        "max_accounts": license_client.get_max_accounts(),
-        "token_balance": license_client.token_balance,
+        "max_accounts": max_accounts,
+        "token_balance": token_balance,
         "license_key": (license_client.license_key or "")[:8] + "..." if license_client.license_key else None,
         "features": features,
     })
@@ -3160,6 +3194,9 @@ def api_admin_update_user():
                 license_client.license_info = {}
             license_client.license_info["plan"] = new_plan
             license_client.license_info["plan_name"] = plan_key
+            license_client.license_info["max_accounts"] = PLAN_MAX_ACCOUNTS.get(plan_key, 3)
+            license_client.license_info["is_permanent"] = (plan_key == "enterprise")
+            license_client.token_balance = PLAN_TOKENS.get(plan_key, 0)
 
     # 활성/비활성 변경
     if "is_active" in data:
@@ -3218,13 +3255,17 @@ def api_license_features():
 @app.route("/api/mypage")
 def api_mypage():
     """마이페이지 정보 반환."""
-    plan = license_client.get_plan_name()
-    balance = license_client.get_balance()
-    features = {}
-    for feat in ["comment_post", "auto_repost", "rank_check", "duplicate_scan",
-                 "like_boost", "auto_exposure_schedule", "multi_account_parallel",
-                 "task_scheduling", "api_access"]:
-        features[feat] = license_client.can_use_feature(feat)
+    # DB 플랜 우선 동기화 (관리자가 변경한 경우 반영)
+    plan, balance, max_accounts, synced_features = _sync_plan_from_db()
+
+    # features 구성 (synced가 있으면 사용, 아니면 license_client에서 조회)
+    feature_keys = ["comment_post", "auto_repost", "rank_check", "duplicate_scan",
+                    "like_boost", "auto_exposure_schedule", "multi_account_parallel",
+                    "task_scheduling", "api_access"]
+    if synced_features:
+        features = {feat: synced_features.get(feat, False) for feat in feature_keys}
+    else:
+        features = {feat: license_client.can_use_feature(feat) for feat in feature_keys}
 
     # 토큰 비용 정보
     from src.license_client import TOKEN_COSTS
@@ -3239,7 +3280,7 @@ def api_mypage():
         "plan": plan or "미인증",
         "owner_mode": license_client.owner_mode,
         "token_balance": balance,
-        "max_accounts": license_client.get_max_accounts(),
+        "max_accounts": max_accounts,
         "license_key": (license_client.license_key or "")[:8] + "..." if license_client.license_key else None,
         "features": features,
         "token_costs": TOKEN_COSTS,

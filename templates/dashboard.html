@@ -1815,7 +1815,8 @@
     async function api(url, options = {}) {
         const maxRetries = 3;
         const isPolling = url === '/api/status' || url === '/api/likes/pending' || url === '/api/reply/status';
-        const timeout = isPolling ? 5000 : 15000;
+        const isFast = url === '/api/accounts' || url === '/api/admin/status' || url === '/api/admin/users';
+        const timeout = isPolling ? 5000 : (isFast ? 8000 : 12000);
 
         for (let attempt = 0; attempt < maxRetries; attempt++) {
             try {
@@ -1835,7 +1836,7 @@
                 if (isPolling) return null;
                 // 마지막 시도가 아니면 대기 후 재시도
                 if (attempt < maxRetries - 1) {
-                    await new Promise(r => setTimeout(r, (attempt + 1) * 1000));
+                    await new Promise(r => setTimeout(r, (attempt + 1) * 500));
                 }
             }
         }
@@ -2422,6 +2423,8 @@
             return;
         }
 
+        msgEl.innerHTML = '<span style="color:var(--yellow)">계정 추가 중...</span>';
+
         const res = await api('/api/accounts', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2433,7 +2436,7 @@
             document.getElementById('newEmail').value = '';
             document.getElementById('newPassword').value = '';
             document.getElementById('newLabel').value = '';
-            loadAccountList();
+            await loadAccountList();
             loadDashboard();
         } else {
             msgEl.innerHTML = `<span style="color:var(--red)">${res?.error || '추가 실패'}</span>`;
@@ -2471,6 +2474,10 @@
     async function manualLogin(email) {
         if (!confirm(`${email} 계정의 수동 로그인을 시작합니다.\n\n브라우저가 열리면 직접 Google 로그인을 완료해주세요.\n계속하시겠습니까?`)) return;
 
+        const safeId = email.replace(/[^a-zA-Z0-9]/g, '_');
+        const statusEl = document.getElementById('loginStatus-' + safeId);
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--yellow)">브라우저 시작 중...</span>';
+
         const data = await api('/api/accounts/manual-login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2478,13 +2485,12 @@
         });
 
         if (data && data.error) {
+            if (statusEl) statusEl.innerHTML = `<span class="badge badge-red">${data.error}</span>`;
             alert(data.error);
             return;
         }
 
         // 수동 로그인 상태 폴링
-        const safeId = email.replace(/[^a-zA-Z0-9]/g, '_');
-        const statusEl = document.getElementById('loginStatus-' + safeId);
         if (statusEl) statusEl.innerHTML = `
             <span style="color:var(--yellow)">브라우저에서 로그인 진행 중...</span>
             <button class="btn btn-sm btn-primary" onclick="confirmManualLogin('${safeId}', '${email}')" style="margin-left:8px;font-size:11px;">로그인 완료 확인</button>
@@ -2492,17 +2498,23 @@
 
         const pollInterval = setInterval(async () => {
             const status = await api('/api/accounts/manual-login/status');
-            if (!status || !status.active) {
+            if (!status) return;
+            // 진행중이면 메시지 업데이트
+            if (status.active && status.message && statusEl) {
+                const msgSpan = statusEl.querySelector('span');
+                if (msgSpan) msgSpan.textContent = status.message;
+            }
+            if (!status.active) {
                 clearInterval(pollInterval);
-                if (status && status.status === 'success') {
+                if (status.status === 'success') {
                     if (statusEl) statusEl.innerHTML = `<span class="badge badge-green">${status.message}</span>`;
-                } else if (status && status.status === 'failed') {
+                } else if (status.status === 'failed') {
                     if (statusEl) statusEl.innerHTML = `<span class="badge badge-red">${status.message}</span>`;
                 }
                 // 쿠키 상태 새로고침
                 setTimeout(() => loadLoginStatus(email), 1000);
             }
-        }, 3000);
+        }, 2000);
     }
 
     // ─── 수동 로그인 완료 확인 (사용자가 직접 클릭) ───
@@ -3918,18 +3930,20 @@
         document.getElementById('tabBtnTasks').classList.add('tab-loading');
 
         try {
-            // 1단계: 서버 연결 확인
+            // 1~2단계: 서버 연결 + 대시보드 병렬 로드
             updateInitStep('server', 'loading', '서버 연결 확인 중...');
-            const statusOk = await api('/api/status');
+            updateInitStep('dashboard', 'loading', '대시보드 데이터 불러오는 중...');
+
+            const [statusOk] = await Promise.all([
+                api('/api/status'),
+                loadDashboard(),
+            ]);
+
             if (statusOk) {
                 updateInitStep('server', 'done', '서버 연결 완료');
             } else {
                 updateInitStep('server', 'error', '서버 연결 실패');
             }
-
-            // 2단계: 대시보드 데이터
-            updateInitStep('dashboard', 'loading', '대시보드 데이터 불러오는 중...');
-            await loadDashboard();
             updateInitStep('dashboard', 'done', '대시보드 로드 완료');
 
             // 3단계: 작업 목록 (댓글작업전 우선 로드 → 나머지는 백그라운드)
@@ -3944,7 +3958,7 @@
 
             // 완료
             updateInitStep('done', 'done', '준비 완료!');
-            await new Promise(r => setTimeout(r, 400));
+            await new Promise(r => setTimeout(r, 200));
         } catch (e) {
             console.error('초기화 실패:', e);
         } finally {
