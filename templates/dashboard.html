@@ -3887,7 +3887,7 @@
                     totalAmount: orderData.amount,
                     currency: 'CURRENCY_KRW',
                     payMethod: selectedPayMethod,
-                    windowType: 'REDIRECTION',
+                    windowType: { pc: 'REDIRECTION', mobile: 'REDIRECTION' },
                     redirectUrl: successUrl,
                 });
 
@@ -4017,7 +4017,7 @@
                     totalAmount: orderData.amount,
                     currency: 'CURRENCY_KRW',
                     payMethod: 'CARD',
-                    windowType: 'REDIRECTION',
+                    windowType: { pc: 'REDIRECTION', mobile: 'REDIRECTION' },
                     redirectUrl: chargeSuccessUrl,
                 });
 
