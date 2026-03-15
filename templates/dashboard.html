@@ -311,7 +311,6 @@
             <option value="5">테스트 5건</option>
             <option value="-1">Full Auto (무한 반복)</option>
         </select>
-        <button class="btn btn-secondary" id="btnDupScan" onclick="showDupScanModal()" title="수동으로 중복 영상을 사전 스캔합니다.">중복 스캔</button>
         <button class="btn btn-primary" id="btnStart" onclick="startAutomation()">실행</button>
         <button class="btn btn-danger" id="btnStop" onclick="stopAutomation()" disabled>중지</button>
     </div>
@@ -520,7 +519,7 @@
     <!-- ━━━ 작업 목록 탭 ━━━ -->
     <div class="tab-content" id="tab-tasks">
         <!-- 상태 필터 탭 -->
-        <div style="display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:0;flex-wrap:wrap">
+        <div style="display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:0;flex-wrap:wrap;align-items:center;">
             <button class="tab task-filter" data-status="전체" onclick="switchTaskFilter('전체', this)" style="border-right:2px solid var(--border);margin-right:4px">전체 리스트 <span class="tab-count" id="tabCount-전체"></span></button>
             <button class="tab task-filter active" data-status="댓글작업전" onclick="switchTaskFilter('댓글작업전', this)">댓글작업전 <span class="tab-count" id="tabCount-댓글작업전"></span></button>
             <button class="tab task-filter" data-status="댓글완료" onclick="switchTaskFilter('댓글완료', this)">댓글완료 <span class="tab-count" id="tabCount-댓글완료"></span></button>
@@ -528,6 +527,8 @@
             <button class="tab task-filter" data-status="좋아요작업완료" onclick="switchTaskFilter('좋아요작업완료', this)">좋아요 완료 <span class="tab-count" id="tabCount-좋아요작업완료"></span></button>
             <button class="tab task-filter" data-status="중복" onclick="switchTaskFilter('중복', this)">중복 <span class="tab-count" id="tabCount-중복"></span></button>
             <button class="tab task-filter" data-status="에러" onclick="switchTaskFilter('에러', this)">에러 <span class="tab-count" id="tabCount-에러"></span></button>
+            <div style="flex:1;"></div>
+            <button class="btn btn-secondary" id="btnDupScan" onclick="showDupScanModal()" title="수동으로 중복 영상을 사전 스캔합니다." style="font-size:12px;padding:5px 12px;margin-bottom:4px;">중복 스캔</button>
         </div>
 
         <!-- ━━━ 좋아요 승인 대기 (작업목록) ━━━ -->
