@@ -539,6 +539,26 @@ def api_tasks():
                 else:
                     # 날짜 없이 전체 상태 로드 (캐시 후 날짜는 필터링)
                     tasks = notion.get_tasks_by_status(status_filter, date_filter=None, progress_callback=on_progress)
+
+                    # 상태 필터 결과가 0건이면 → 전체 로드 후 실제 상태값 감지
+                    if not tasks and status_filter == "댓글작업전":
+                        on_progress(0, "상태값 자동 감지 중...")
+                        all_tasks = notion.get_all_tasks(progress_callback=on_progress)
+                        if all_tasks:
+                            # 실제 상태값 수집
+                            found_statuses = {}
+                            for t in all_tasks:
+                                sv = t.get("status", "")
+                                if sv:
+                                    found_statuses[sv] = found_statuses.get(sv, 0) + 1
+                            # 전체 캐시에 저장
+                            now_t = time.time()
+                            with _task_cache_lock:
+                                _task_cache["전체"] = {"tasks": all_tasks, "fetched_at": now_t}
+                            # 댓글 완료 체크박스가 False인 작업 = 댓글 미작업
+                            tasks = [t for t in all_tasks if not t.get("comment_done", False)]
+                            add_log(f"[상태 자동감지] 실제 상태값: {found_statuses}")
+                            add_log(f"[상태 자동감지] 댓글 미완료 작업: {len(tasks)}건 (전체 {len(all_tasks)}건)")
             finally:
                 with _loading_lock:
                     _loading_state["active"] = False
@@ -3163,6 +3183,67 @@ def api_setup_notion_create_template():
 
     except Exception as e:
         return jsonify({"error": f"DB 생성 실패: {str(e)}"}), 500
+
+
+@app.route("/api/setup/notion/status-options")
+def api_notion_status_options():
+    """노션 DB의 실제 상태 옵션값을 조회합니다."""
+    load_dotenv(override=True)
+    token = os.getenv("NOTION_API_TOKEN", "")
+    db_id = os.getenv("NOTION_DATABASE_ID", "")
+    col_status = os.getenv("NOTION_COLUMN_STATUS", "상태")
+
+    if not token or not db_id:
+        return jsonify({"error": "노션 설정이 필요합니다."}), 400
+
+    try:
+        from notion_client import Client
+        client = Client(auth=token)
+        db_info = client.databases.retrieve(database_id=db_id)
+        props = db_info.get("properties", {})
+
+        # 상태 컬럼 찾기
+        status_prop = props.get(col_status)
+        if not status_prop:
+            for name, prop in props.items():
+                if "상태" in name or "status" in name.lower():
+                    status_prop = prop
+                    col_status = name
+                    break
+
+        if not status_prop:
+            return jsonify({"error": "상태 컬럼을 찾을 수 없습니다.", "columns": list(props.keys())}), 404
+
+        prop_type = status_prop.get("type", "select")
+        options = status_prop.get(prop_type, {}).get("options", [])
+        option_names = [o["name"] for o in options]
+
+        # 실제 데이터에서 상태값 샘플링 (옵션에 없는 값도 감지)
+        sample_statuses = {}
+        try:
+            response = client.databases.query(database_id=db_id, page_size=100)
+            for page in response.get("results", []):
+                sp = page.get("properties", {}).get(col_status, {})
+                st = sp.get("type", "select")
+                sv = (sp.get(st) or {}).get("name", "")
+                if sv:
+                    sample_statuses[sv] = sample_statuses.get(sv, 0) + 1
+        except Exception:
+            pass
+
+        return jsonify({
+            "column_name": col_status,
+            "column_type": prop_type,
+            "options": option_names,
+            "sample_counts": sample_statuses,
+            "expected_mapping": {
+                "댓글작업전": "댓글작업전" if "댓글작업전" in option_names else None,
+                "댓글완료": "댓글완료" if "댓글완료" in option_names else None,
+            }
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 def _update_env_var(env_path, key, value):
