@@ -2985,7 +2985,7 @@ def _update_env_var(env_path, key, value):
 
 # PortOne 키 (나중에 .env에서 실제 키로 교체)
 PORTONE_STORE_ID = os.getenv("PORTONE_STORE_ID", "store-ec07c075-083e-4ff1-b301-4ad699b059b5")
-PORTONE_API_SECRET = os.getenv("PORTONE_API_SECRET", "test_sk_d26DlbXAaV0xQbpa7y1VqY50Q9RB")
+PORTONE_API_SECRET = os.getenv("PORTONE_API_SECRET", "vF5MpTaWMw6k4Ee38pMphS7ufHvSM5JOfw97oKVEqnNy50KBdF2F4QKHPBAuPcbYHtUV5jm2ig4JVu5L")
 PORTONE_CHANNEL_KEY = os.getenv("PORTONE_CHANNEL_KEY", "channel-key-a2ac5369-7591-4055-8411-5970c59a7e66")
 
 # 결제 상품 정의
