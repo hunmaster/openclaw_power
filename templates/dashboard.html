@@ -293,7 +293,7 @@
 <div class="header">
     <h1><span>YT</span> 댓글 자동화</h1>
     <div class="header-actions">
-        <span id="licenseBadge" style="display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:12px;font-size:12px;font-weight:600;background:#3b82f620;color:#60a5fa;cursor:pointer;" onclick="location.href='/setup'" title="라이선스 정보">
+        <span id="licenseBadge" style="display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:12px;font-size:12px;font-weight:600;background:#3b82f620;color:#60a5fa;cursor:pointer;" onclick="openSubscriptionPopup()" title="구독 정보 및 업그레이드">
             <span id="licensePlanText">-</span>
             <span id="licenseTokenText" style="color:#888;font-weight:400;"></span>
         </span>
@@ -3612,7 +3612,198 @@
         if (!confirm('리포스팅을 중지하시겠습니까?')) return;
         await api('/api/repost/stop', { method: 'POST' });
     }
+
+    // ─── 구독 업그레이드 팝업 ───
+    let subCountdownInterval = null;
+
+    function openSubscriptionPopup() {
+        document.getElementById('subscriptionOverlay').style.display = 'flex';
+        startEarlyBirdCountdown();
+    }
+
+    function closeSubscriptionPopup() {
+        document.getElementById('subscriptionOverlay').style.display = 'none';
+        if (subCountdownInterval) { clearInterval(subCountdownInterval); subCountdownInterval = null; }
+    }
+
+    function startEarlyBirdCountdown() {
+        // 매일 자정 기준으로 남은 시간 계산 (항상 촉박하게 보이도록)
+        function update() {
+            const now = new Date();
+            const endOfDay = new Date(now);
+            endOfDay.setHours(23, 59, 59, 999);
+            const diff = endOfDay - now;
+
+            const h = String(Math.floor(diff / 3600000)).padStart(2, '0');
+            const m = String(Math.floor((diff % 3600000) / 60000)).padStart(2, '0');
+            const s = String(Math.floor((diff % 60000) / 1000)).padStart(2, '0');
+
+            const el = document.getElementById('earlyBirdTimer');
+            if (el) el.textContent = `${h}:${m}:${s}`;
+        }
+        update();
+        if (subCountdownInterval) clearInterval(subCountdownInterval);
+        subCountdownInterval = setInterval(update, 1000);
+    }
+
+    function highlightCurrentPlan(planName) {
+        const plans = ['Starter', 'Business', 'Agency', 'Enterprise'];
+        const currentIdx = plans.findIndex(p => p.toLowerCase() === (planName || '').toLowerCase());
+        document.querySelectorAll('.sub-plan-card').forEach((card, idx) => {
+            card.classList.remove('current-plan', 'upgrade-available');
+            if (idx === currentIdx) {
+                card.classList.add('current-plan');
+                card.querySelector('.sub-plan-btn').textContent = '현재 플랜';
+                card.querySelector('.sub-plan-btn').disabled = true;
+            } else if (idx > currentIdx) {
+                card.classList.add('upgrade-available');
+            }
+        });
+    }
+
+    // 팝업 열릴 때 현재 플랜 표시
+    const origOpen = openSubscriptionPopup;
+    openSubscriptionPopup = async function() {
+        origOpen();
+        try {
+            const data = await api('/api/license/status');
+            if (data && data.plan) highlightCurrentPlan(data.plan);
+            const tokenEl = document.getElementById('subCurrentTokens');
+            if (tokenEl && data) tokenEl.textContent = data.token_balance ? data.token_balance.toLocaleString() : '0';
+            const planEl = document.getElementById('subCurrentPlan');
+            if (planEl && data) planEl.textContent = data.plan || '미인증';
+        } catch(e) {}
+    };
 </script>
+
+<!-- 구독 업그레이드 팝업 모달 -->
+<div id="subscriptionOverlay" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);align-items:center;justify-content:center;" onclick="if(event.target===this)closeSubscriptionPopup()">
+<div style="background:var(--card,#1a1a2e);border-radius:16px;max-width:820px;width:95%;max-height:90vh;overflow-y:auto;padding:0;box-shadow:0 25px 60px rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.08);">
+
+    <!-- 헤더 -->
+    <div style="padding:24px 28px 0;display:flex;justify-content:space-between;align-items:center;">
+        <div>
+            <h2 style="margin:0;font-size:20px;color:#fff;">구독 플랜</h2>
+            <p style="margin:4px 0 0;font-size:13px;color:#888;">현재: <strong id="subCurrentPlan" style="color:#60a5fa;">-</strong> &nbsp;|&nbsp; 잔여 토큰: <strong id="subCurrentTokens" style="color:#fbbf24;">-</strong></p>
+        </div>
+        <button onclick="closeSubscriptionPopup()" style="background:none;border:none;color:#888;font-size:22px;cursor:pointer;padding:4px;">&times;</button>
+    </div>
+
+    <!-- 얼리버드 배너 -->
+    <div style="margin:16px 28px;padding:14px 20px;background:linear-gradient(135deg,#f59e0b20,#ef444420);border:1px solid #f59e0b40;border-radius:12px;display:flex;align-items:center;gap:14px;">
+        <div style="font-size:28px;">🔥</div>
+        <div style="flex:1;">
+            <div style="font-size:14px;font-weight:700;color:#fbbf24;">얼리버드 특별 할인 진행 중!</div>
+            <div style="font-size:12px;color:#f59e0b;margin-top:2px;">지금 업그레이드하면 <strong>최대 40% 할인</strong> 적용</div>
+        </div>
+        <div style="text-align:center;background:rgba(0,0,0,0.3);padding:8px 14px;border-radius:8px;min-width:90px;">
+            <div style="font-size:10px;color:#f87171;font-weight:600;letter-spacing:0.5px;">마감까지</div>
+            <div id="earlyBirdTimer" style="font-size:20px;font-weight:800;color:#fbbf24;font-family:monospace;letter-spacing:2px;">00:00:00</div>
+        </div>
+    </div>
+
+    <!-- 플랜 카드 그리드 -->
+    <div style="padding:8px 28px 28px;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
+
+        <!-- Starter -->
+        <div class="sub-plan-card" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2);border-radius:12px;padding:20px 16px;text-align:center;transition:all .2s;position:relative;">
+            <div style="font-size:12px;font-weight:700;color:#60a5fa;letter-spacing:1px;margin-bottom:8px;">STARTER</div>
+            <div style="margin:8px 0;">
+                <span style="font-size:13px;color:#666;text-decoration:line-through;">₩49,000</span>
+                <div style="font-size:26px;font-weight:800;color:#fff;margin-top:2px;">₩29,000</div>
+                <div style="font-size:11px;color:#888;">/월</div>
+            </div>
+            <div style="font-size:11px;color:#ef4444;font-weight:600;margin-bottom:12px;">40% OFF</div>
+            <ul style="list-style:none;padding:0;margin:0 0 16px;text-align:left;font-size:11px;color:#aaa;line-height:2;">
+                <li>✅ 댓글 작성</li>
+                <li>✅ 노출 수동 확인</li>
+                <li>✅ 노션 연동</li>
+                <li>❌ 자동 리포스팅</li>
+                <li>❌ 좋아요 부스트</li>
+            </ul>
+            <button class="sub-plan-btn" onclick="alert('업그레이드 문의: 관리자에게 연락해주세요.')" style="width:100%;padding:10px;border:none;border-radius:8px;background:#3b82f6;color:#fff;font-weight:700;font-size:13px;cursor:pointer;transition:all .2s;">선택하기</button>
+        </div>
+
+        <!-- Business -->
+        <div class="sub-plan-card" style="background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.3);border-radius:12px;padding:20px 16px;text-align:center;transition:all .2s;position:relative;transform:scale(1.03);">
+            <div style="position:absolute;top:-10px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#8b5cf6,#6d28d9);padding:3px 12px;border-radius:20px;font-size:10px;font-weight:700;color:#fff;">추천</div>
+            <div style="font-size:12px;font-weight:700;color:#a78bfa;letter-spacing:1px;margin-bottom:8px;">BUSINESS</div>
+            <div style="margin:8px 0;">
+                <span style="font-size:13px;color:#666;text-decoration:line-through;">₩99,000</span>
+                <div style="font-size:26px;font-weight:800;color:#fff;margin-top:2px;">₩69,000</div>
+                <div style="font-size:11px;color:#888;">/월</div>
+            </div>
+            <div style="font-size:11px;color:#ef4444;font-weight:600;margin-bottom:12px;">30% OFF</div>
+            <ul style="list-style:none;padding:0;margin:0 0 16px;text-align:left;font-size:11px;color:#aaa;line-height:2;">
+                <li>✅ Starter 전체 포함</li>
+                <li>✅ 자동 리포스팅</li>
+                <li>✅ 랭킹 체크</li>
+                <li>✅ 중복 스캔</li>
+                <li>✅ 좋아요 부스트</li>
+            </ul>
+            <button class="sub-plan-btn" onclick="alert('업그레이드 문의: 관리자에게 연락해주세요.')" style="width:100%;padding:10px;border:none;border-radius:8px;background:linear-gradient(135deg,#8b5cf6,#6d28d9);color:#fff;font-weight:700;font-size:13px;cursor:pointer;transition:all .2s;">선택하기</button>
+        </div>
+
+        <!-- Agency -->
+        <div class="sub-plan-card" style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.2);border-radius:12px;padding:20px 16px;text-align:center;transition:all .2s;position:relative;">
+            <div style="font-size:12px;font-weight:700;color:#fbbf24;letter-spacing:1px;margin-bottom:8px;">AGENCY</div>
+            <div style="margin:8px 0;">
+                <span style="font-size:13px;color:#666;text-decoration:line-through;">₩199,000</span>
+                <div style="font-size:26px;font-weight:800;color:#fff;margin-top:2px;">₩149,000</div>
+                <div style="font-size:11px;color:#888;">/월</div>
+            </div>
+            <div style="font-size:11px;color:#ef4444;font-weight:600;margin-bottom:12px;">25% OFF</div>
+            <ul style="list-style:none;padding:0;margin:0 0 16px;text-align:left;font-size:11px;color:#aaa;line-height:2;">
+                <li>✅ Business 전체 포함</li>
+                <li>✅ 자동 노출 스케줄링</li>
+                <li>✅ 작업 스케줄링</li>
+                <li>✅ 멀티 계정 (5개)</li>
+                <li>❌ API 접근</li>
+            </ul>
+            <button class="sub-plan-btn" onclick="alert('업그레이드 문의: 관리자에게 연락해주세요.')" style="width:100%;padding:10px;border:none;border-radius:8px;background:#f59e0b;color:#000;font-weight:700;font-size:13px;cursor:pointer;transition:all .2s;">선택하기</button>
+        </div>
+
+        <!-- Enterprise -->
+        <div class="sub-plan-card" style="background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.2);border-radius:12px;padding:20px 16px;text-align:center;transition:all .2s;position:relative;">
+            <div style="font-size:12px;font-weight:700;color:#4ade80;letter-spacing:1px;margin-bottom:8px;">ENTERPRISE</div>
+            <div style="margin:8px 0;">
+                <span style="font-size:13px;color:#666;text-decoration:line-through;">₩399,000</span>
+                <div style="font-size:26px;font-weight:800;color:#fff;margin-top:2px;">₩299,000</div>
+                <div style="font-size:11px;color:#888;">/월</div>
+            </div>
+            <div style="font-size:11px;color:#ef4444;font-weight:600;margin-bottom:12px;">25% OFF</div>
+            <ul style="list-style:none;padding:0;margin:0 0 16px;text-align:left;font-size:11px;color:#aaa;line-height:2;">
+                <li>✅ Agency 전체 포함</li>
+                <li>✅ API 접근</li>
+                <li>✅ 전체 기능 잠금해제</li>
+                <li>✅ 우선 기술 지원</li>
+                <li>✅ 무제한 계정</li>
+            </ul>
+            <button class="sub-plan-btn" onclick="alert('업그레이드 문의: 관리자에게 연락해주세요.')" style="width:100%;padding:10px;border:none;border-radius:8px;background:#22c55e;color:#000;font-weight:700;font-size:13px;cursor:pointer;transition:all .2s;">선택하기</button>
+        </div>
+
+    </div>
+
+    <!-- 하단 안내 -->
+    <div style="padding:0 28px 20px;text-align:center;font-size:11px;color:#666;">
+        플랜 변경 및 결제 문의는 관리자에게 연락해주세요 &nbsp;|&nbsp; 모든 플랜은 부가세 별도입니다
+    </div>
+
+</div>
+</div>
+
+<style>
+.sub-plan-card:hover { transform:translateY(-3px) scale(1.02); box-shadow:0 8px 30px rgba(0,0,0,0.3); }
+.sub-plan-card.current-plan { border-color:#22c55e !important; box-shadow:0 0 20px rgba(34,197,94,0.15); }
+.sub-plan-card.current-plan .sub-plan-btn { background:#333 !important; color:#888 !important; cursor:default; }
+.sub-plan-card .sub-plan-btn:hover { opacity:0.9; transform:scale(1.02); }
+@media (max-width:768px) {
+    #subscriptionOverlay > div > div:last-of-type { grid-template-columns:repeat(2,1fr) !important; }
+}
+@media (max-width:480px) {
+    #subscriptionOverlay > div > div:last-of-type { grid-template-columns:1fr !important; }
+}
+</style>
 
 </body>
 </html>
