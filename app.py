@@ -1,5 +1,5 @@
 """
-YouTube 댓글 자동화 - 웹 대시보드 (Flask)
+댓글 부스터 - 유튜브 댓글 자동화 웹 대시보드 (Flask)
 
 기능:
 - 대시보드: 작업 현황, 계정 상태, SMM 잔액
@@ -37,7 +37,7 @@ from src.comment_tracker import CommentTracker
 from src.license_client import license_client, is_owner_mode, LIKE_TIERS
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "openclaw-secret-" + str(uuid.uuid4())[:8])
+app.secret_key = os.environ.get("SECRET_KEY", "commentboost-secret-" + str(uuid.uuid4())[:8])
 
 # ─── 데이터베이스 & 로그인 매니저 ───
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(
@@ -3149,7 +3149,7 @@ def api_setup_notion_create_template():
         # 댓글 작업용 DB 생성
         new_db = client.databases.create(
             parent={"type": "page_id", "page_id": parent_page_id},
-            title=[{"type": "text", "text": {"content": "YouTube 댓글 자동화"}}],
+            title=[{"type": "text", "text": {"content": "댓글 부스터"}}],
             properties={
                 "작업명": {"title": {}},
                 "영상 링크": {"url": {}},

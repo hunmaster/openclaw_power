@@ -1,5 +1,5 @@
 """
-YouTube 댓글 자동화 - 메인 오케스트레이터
+댓글 부스터 - 메인 오케스트레이터
 
 프로세스:
 1. 노션 DB에서 대기 중인 작업 목록 가져오기
@@ -81,7 +81,7 @@ def find_account(accounts, account_label):
 
 def display_status(tasks, proxy_manager, safety_rules, accounts, smm_client):
     """작업 현황을 표시합니다."""
-    console.print(Panel("[bold]YouTube 댓글 자동화 프로그램[/bold]", style="blue"))
+    console.print(Panel("[bold]댓글 부스터[/bold]", style="blue"))
 
     # 작업 목록 테이블
     table = Table(title="작업 목록")
@@ -206,7 +206,7 @@ def run():
     load_dotenv()
 
     console.print(Panel(
-        "[bold green]YouTube 댓글 자동화 프로그램 시작[/bold green]\n"
+        "[bold green]댓글 부스터 시작[/bold green]\n"
         "IP 가이드라인 + 유튜브 바이럴 가이드라인 적용\n"
         "안티디텍트 지문 | 프록시 로테이션 | 댓글 안전 규칙 | 좋아요 자동 구매",
         style="green",
