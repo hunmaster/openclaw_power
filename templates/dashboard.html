@@ -1315,9 +1315,9 @@
     // ─── Owner 모드 플래그 (서버에서 주입) ───
     let IS_OWNER = {{ 'true' if is_owner else 'false' }};
 
-    // ─── 관리자 모드 비밀 토글 (Ctrl+Shift+A) ───
+    // ─── 관리자 모드 비밀 토글 (Ctrl+F9) ───
     document.addEventListener('keydown', async function(e) {
-        if (e.ctrlKey && e.shiftKey && e.key.toUpperCase() === 'A') {
+        if (e.ctrlKey && e.key === 'F9') {
             e.preventDefault();
             const adminKey = prompt('관리자 키를 입력하세요:');
             if (!adminKey) return;
@@ -1337,7 +1337,7 @@
                             badge.id = 'adminModeBadge';
                             badge.style.cssText = 'position:fixed;top:8px;right:8px;background:#22c55e30;color:#4ade80;padding:4px 10px;border-radius:6px;font-size:11px;z-index:9999;border:1px solid #22c55e40;cursor:pointer;';
                             badge.textContent = 'ADMIN';
-                            badge.title = 'Ctrl+Shift+A로 해제';
+                            badge.title = 'Ctrl+F9로 해제';
                             document.body.appendChild(badge);
                         }
                     } else {
@@ -1552,7 +1552,7 @@
         badge.id = 'adminModeBadge';
         badge.style.cssText = 'position:fixed;top:8px;right:8px;background:#22c55e30;color:#4ade80;padding:4px 10px;border-radius:6px;font-size:11px;z-index:9999;border:1px solid #22c55e40;cursor:pointer;';
         badge.textContent = 'ADMIN';
-        badge.title = 'Ctrl+Shift+A로 해제';
+        badge.title = 'Ctrl+F9로 해제';
         document.body.appendChild(badge);
     }
 
