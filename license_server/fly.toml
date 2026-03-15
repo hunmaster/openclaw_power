@@ -2,6 +2,7 @@ app = "openclaw-license"
 primary_region = "nrt"
 
 [build]
+  dockerfile = "Dockerfile"
 
 [env]
   LICENSE_DB_PATH = "/data/license.db"
