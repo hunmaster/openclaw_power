@@ -3057,8 +3057,12 @@ def api_payment_confirm():
             timeout=15,
         )
         result = resp.json()
+        add_log(f"[결제] PortOne API 응답 (HTTP {resp.status_code}): {result}", "info")
 
-        if resp.status_code == 200 and result.get("status") == "PAID":
+        payment_status = result.get("status")
+        # PAID: 즉시 결제 완료, VIRTUAL_ACCOUNT_ISSUED: 가상계좌 발급됨
+        # 테스트 모드에서 카드결제는 보통 PAID로 돌아옴
+        if resp.status_code == 200 and payment_status == "PAID":
             # 결제 금액 검증
             paid_amount = result.get("amount", {}).get("total", 0)
             if paid_amount != amount:
@@ -3104,10 +3108,11 @@ def api_payment_confirm():
         else:
             status = result.get("status", "UNKNOWN")
             msg = result.get("message", f"결제 상태: {status}")
-            add_log(f"[결제] 결제 실패: {msg}", "error")
+            add_log(f"[결제] 결제 미완료: status={status}, HTTP={resp.status_code}, response={result}", "error")
             return jsonify({
-                "error": msg,
+                "error": f"결제 상태: {status}" if status != "UNKNOWN" else msg,
                 "status": status,
+                "detail": result.get("message", ""),
             }), 400
 
     except Exception as e:
