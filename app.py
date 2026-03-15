@@ -19,7 +19,7 @@ import threading
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
 
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, redirect
 from dotenv import load_dotenv
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -3117,18 +3117,31 @@ def api_payment_confirm():
 
 @app.route("/api/payment/success")
 def api_payment_success():
-    """결제 성공 리다이렉트 - PG 리다이렉트 방식 결제 완료 처리"""
+    """결제 성공 리다이렉트 - PortOne REDIRECTION 모드 결제 완료 처리
+
+    PortOne V2 REDIRECTION 모드: redirectUrl?paymentId=xxx 형태로 리다이렉트
+    Toss PG 직접: orderId, paymentKey, amount 형태로 리다이렉트
+    """
+    # PortOne V2가 추가하는 파라미터
     payment_id = request.args.get("paymentId", "")
+    # Toss PG가 직접 추가하는 파라미터 (fallback)
+    if not payment_id:
+        payment_id = request.args.get("paymentKey", "")
     order_id = request.args.get("orderId", "")
     amount_str = request.args.get("amount", "0")
+    # PortOne V2 에러 파라미터
+    error_code = request.args.get("code", "")
+    error_message = request.args.get("message", "")
+
+    # 에러 코드가 있으면 실패 처리
+    if error_code:
+        add_log(f"[결제] 결제 실패(리다이렉트): {error_code} - {error_message}", "error")
+        return redirect("/?payment_result=fail")
 
     try:
         amount = int(amount_str)
     except (ValueError, TypeError):
         amount = 0
-
-    error_msg = None
-    success = False
 
     if payment_id and order_id and amount:
         import requests as _requests
@@ -3146,10 +3159,7 @@ def api_payment_success():
 
             if resp.status_code == 200 and result.get("status") == "PAID":
                 paid_amount = result.get("amount", {}).get("total", 0)
-                if paid_amount != amount:
-                    error_msg = f"결제 금액 불일치: 요청 ₩{amount:,} vs 실제 ₩{paid_amount:,}"
-                    add_log(f"[결제] {error_msg}", "error")
-                else:
+                if paid_amount == amount:
                     # 결제 성공 → 상품 지급
                     product_id = None
                     for pid, prod in PAYMENT_PRODUCTS.items():
@@ -3178,82 +3188,27 @@ def api_payment_success():
                                 pass
 
                         add_log(f"[결제] 결제 완료(리다이렉트): {product['name']} (₩{amount:,})", "success")
-                    success = True
+
+                    return redirect("/?payment_result=success")
+                else:
+                    add_log(f"[결제] 금액 불일치: 요청 ₩{amount:,} vs 실제 ₩{paid_amount:,}", "error")
             else:
                 status = result.get("status", "UNKNOWN")
-                error_msg = result.get("message", f"결제 상태: {status}")
-                add_log(f"[결제] 결제 실패(리다이렉트): {error_msg}", "error")
+                add_log(f"[결제] 결제 상태 이상: {status}", "error")
 
         except Exception as e:
-            error_msg = str(e)
-            add_log(f"[결제] 결제 검증 오류: {error_msg}", "error")
-    else:
-        error_msg = "결제 정보가 부족합니다."
+            add_log(f"[결제] 결제 검증 오류: {str(e)}", "error")
 
-    if success:
-        return """<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>결제 완료</title>
-<style>
-body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0a0a1a;font-family:'Segoe UI',sans-serif;}
-.box{text-align:center;padding:60px 40px;background:#1a1a2e;border-radius:20px;border:1px solid rgba(74,222,128,0.2);box-shadow:0 20px 60px rgba(0,0,0,0.5);}
-.icon{font-size:64px;margin-bottom:16px;}
-h2{color:#4ade80;margin:0 0 8px;font-size:24px;}
-p{color:#888;font-size:14px;margin:0;}
-.spinner{margin-top:20px;width:24px;height:24px;border:3px solid rgba(74,222,128,0.2);border-top-color:#4ade80;border-radius:50%;animation:spin 0.8s linear infinite;display:inline-block;}
-@keyframes spin{to{transform:rotate(360deg)}}
-</style></head><body>
-<div class="box">
-<div class="icon">&#10003;</div>
-<h2>결제가 완료되었습니다!</h2>
-<p>잠시 후 대시보드로 이동합니다...</p>
-<div class="spinner"></div>
-</div>
-<script>setTimeout(function(){ window.location.href = '/'; }, 2000);</script>
-</body></html>"""
-    else:
-        safe_msg = (error_msg or "알 수 없는 오류").replace('"', '&quot;').replace('<', '&lt;')
-        return f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>결제 오류</title>
-<style>
-body{{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0a0a1a;font-family:'Segoe UI',sans-serif;}}
-.box{{text-align:center;padding:60px 40px;background:#1a1a2e;border-radius:20px;border:1px solid rgba(239,68,68,0.2);box-shadow:0 20px 60px rgba(0,0,0,0.5);}}
-.icon{{font-size:64px;margin-bottom:16px;}}
-h2{{color:#ef4444;margin:0 0 8px;font-size:24px;}}
-p{{color:#888;font-size:14px;margin:0;}}
-.spinner{{margin-top:20px;width:24px;height:24px;border:3px solid rgba(239,68,68,0.2);border-top-color:#ef4444;border-radius:50%;animation:spin 0.8s linear infinite;display:inline-block;}}
-@keyframes spin{{to{{transform:rotate(360deg)}}}}
-</style></head><body>
-<div class="box">
-<div class="icon">&#10007;</div>
-<h2>결제 처리 중 오류</h2>
-<p>{safe_msg}</p>
-<div class="spinner"></div>
-<p style="margin-top:12px;color:#666;">대시보드로 이동합니다...</p>
-</div>
-<script>setTimeout(function(){{ window.location.href = '/'; }}, 3000);</script>
-</body></html>"""
+    # 검증 실패해도 대시보드로 리다이렉트 (사용자가 막히지 않도록)
+    return redirect("/?payment_result=pending")
 
 
 @app.route("/api/payment/fail")
 def api_payment_fail():
     """결제 실패 리다이렉트"""
     message = request.args.get("message", "결제가 취소되었습니다.")
-    safe_msg = message.replace('"', '&quot;').replace('<', '&lt;')
-    return f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>결제 실패</title>
-<style>
-body{{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0a0a1a;font-family:'Segoe UI',sans-serif;}}
-.box{{text-align:center;padding:60px 40px;background:#1a1a2e;border-radius:20px;border:1px solid rgba(239,68,68,0.2);box-shadow:0 20px 60px rgba(0,0,0,0.5);}}
-h2{{color:#ef4444;margin:0 0 8px;font-size:22px;}}
-p{{color:#888;font-size:14px;margin:0;}}
-</style></head><body>
-<div class="box">
-<h2>결제 실패</h2>
-<p>{safe_msg}</p>
-<p style="margin-top:16px;color:#666;">잠시 후 대시보드로 이동합니다...</p>
-</div>
-<script>setTimeout(function(){{ window.location.href = '/'; }}, 2500);</script>
-</body></html>"""
+    add_log(f"[결제] 결제 실패: {message}", "error")
+    return redirect("/?payment_result=fail")
 
 
 # 시작 시 라이선스 자동 검증
