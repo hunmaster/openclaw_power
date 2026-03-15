@@ -10,8 +10,8 @@ COPY . .
 RUN mkdir -p /data
 ENV LICENSE_DB_PATH=/data/license.db
 ENV LICENSE_ADMIN_KEY=change-me-in-production
-ENV LICENSE_PORT=5100
+ENV LICENSE_PORT=8080
 
-EXPOSE 5100
+EXPOSE 8080
 
 CMD ["python", "server.py"]

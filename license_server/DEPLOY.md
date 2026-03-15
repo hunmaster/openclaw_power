@@ -1,6 +1,93 @@
 # 라이선스 서버 배포 가이드
 
-## 추천: Oracle Cloud Free Tier (무료)
+## 추천: Fly.io (간편 Docker 배포)
+
+### 1. Fly CLI 설치 & 로그인
+```bash
+# macOS
+brew install flyctl
+
+# Linux
+curl -L https://fly.io/install.sh | sh
+
+# 가입 & 로그인
+fly auth signup
+fly auth login
+```
+
+### 2. 배포
+```bash
+cd license_server
+
+# 앱 생성 (이미 fly.toml이 있으므로)
+fly launch --copy-config --yes
+
+# 영구 볼륨 생성 (DB 데이터 보존용, 1GB)
+fly volumes create license_data --size 1 --region nrt
+
+# 관리자 키 설정 (반드시 강력한 키로!)
+fly secrets set ADMIN_API_KEY="여기에-강력한-관리자키-입력"
+
+# 배포
+fly deploy
+
+# 상태 확인
+fly status
+```
+
+### 3. 확인
+```bash
+# 헬스체크
+curl https://openclaw-license.fly.dev/api/health
+
+# 관리자 대시보드
+# 브라우저에서: https://openclaw-license.fly.dev/admin
+```
+
+### 4. 커스텀 도메인 (선택)
+```bash
+# 도메인 연결
+fly certs add license.yourdomain.com
+
+# DNS 설정: CNAME → openclaw-license.fly.dev
+# SSL 자동 발급됨
+```
+
+### 5. 유용한 명령어
+```bash
+# 로그 확인
+fly logs
+
+# 앱 재시작
+fly apps restart
+
+# DB 백업 (SSH 접속)
+fly ssh console
+cp /data/license.db /tmp/backup.db
+exit
+fly sftp get /tmp/backup.db ./backup_$(date +%Y%m%d).db
+```
+
+## 고객 프로그램에 서버 URL 반영
+
+고객 `.env` 또는 `docker-compose.yml`의 `LICENSE_SERVER_URL`을 실제 URL로 변경:
+```yaml
+environment:
+  - LICENSE_SERVER_URL=https://openclaw-license.fly.dev
+  # 또는 커스텀 도메인 사용 시:
+  # - LICENSE_SERVER_URL=https://license.yourdomain.com
+```
+
+## 비용
+- **무료 티어**: 공유 CPU 1x, 256MB RAM (라이선스 서버에 충분)
+- **볼륨**: 1GB → 약 $0.15/월
+- **총 예상 비용**: 거의 무료 ~ $1/월 이하
+
+---
+
+## 대안: Oracle Cloud Free Tier
+
+Oracle Cloud 가입이 가능한 경우:
 
 ### 1. 서버 생성
 1. [Oracle Cloud](https://cloud.oracle.com) 가입 (신용카드 필요, 과금 없음)
@@ -69,23 +156,3 @@ sudo certbot --nginx -d license.yourdomain.com
 Oracle Cloud 콘솔에서:
 - Networking > Virtual Cloud Networks > Security Lists
 - Ingress Rule 추가: TCP 80, 443 허용
-
-### 6. 관리자 대시보드 접속
-```
-https://license.yourdomain.com/admin
-```
-접속 시 관리자 API 키 입력 요구됨.
-
-## 고객 프로그램에 서버 URL 반영
-
-고객 docker-compose.yml의 LICENSE_SERVER_URL을 실제 도메인으로 변경:
-```yaml
-environment:
-  - LICENSE_SERVER_URL=https://license.yourdomain.com
-```
-
-## 백업
-```bash
-# DB 백업 (주기적)
-docker cp license-server:/data/license.db ./backup_$(date +%Y%m%d).db
-```
