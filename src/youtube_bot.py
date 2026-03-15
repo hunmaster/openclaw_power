@@ -121,7 +121,9 @@ class YouTubeBot:
         label = account_label or self.account_label or "default"
         # 파일명에 사용할 수 없는 문자 제거
         safe_label = re.sub(r'[^\w\-]', '_', label)
-        cookie_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "sessions")
+        # Fly.io 볼륨 마운트(/data) 우선, 없으면 로컬 config 폴더
+        _base = "/data/config" if os.path.isdir("/data") else os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config")
+        cookie_dir = os.path.join(_base, "sessions")
         os.makedirs(cookie_dir, exist_ok=True)
         return os.path.join(cookie_dir, f"{safe_label}.json")
 

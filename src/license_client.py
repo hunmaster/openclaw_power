@@ -123,7 +123,10 @@ PLAN_FEATURES = {
 TRACKING_FREE_LIMIT = 3       # Starter 월 트래킹 제한
 TRACKING_BUSINESS_LIMIT = 10  # Business 월 트래킹 제한
 
-LICENSE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config", ".license")
+# Fly.io 볼륨 마운트(/data) 우선, 없으면 로컬 config 폴더
+_config_dir = "/data/config" if os.path.isdir("/data") else os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
+os.makedirs(_config_dir, exist_ok=True)
+LICENSE_FILE = os.path.join(_config_dir, ".license")
 
 
 def is_owner_mode():

@@ -44,13 +44,13 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "commentboost-secret-fixed-key-2024")
 
 # ─── 데이터베이스 & 로그인 매니저 ───
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "data", "users.db"
-)
+# Fly.io 볼륨 마운트(/data) 우선, 없으면 로컬 data 폴더 사용
+_data_dir = "/data" if os.path.isdir("/data") else os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+os.makedirs(_data_dir, exist_ok=True)
+
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(_data_dir, "users.db")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["REMEMBER_COOKIE_DURATION"] = timedelta(days=30)
-
-os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"), exist_ok=True)
 
 from src.models import db, User, UserSettings, YouTubeAccount, UserActivityLog, LikeOrder
 db.init_app(app)
@@ -76,7 +76,7 @@ with app.app_context():
     db.create_all()
     # 기존 DB에 새 컬럼/테이블 자동 추가 (마이그레이션)
     import sqlite3 as _sqlite3
-    _db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "users.db")
+    _db_path = os.path.join(_data_dir, "users.db")
     if os.path.exists(_db_path):
         _conn = _sqlite3.connect(_db_path)
         _cursor = _conn.cursor()

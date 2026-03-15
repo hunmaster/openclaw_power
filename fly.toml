@@ -9,6 +9,7 @@ primary_region = "nrt"
   LICENSE_SERVER_URL = "https://api.commentboost.cloud"
   FLASK_ENV = "production"
   PYTHONUNBUFFERED = "1"
+  ACCOUNTS_FILE = "/data/config/accounts.json"
 
 [http_service]
   internal_port = 5000
@@ -16,6 +17,10 @@ primary_region = "nrt"
   auto_stop_machines = "stop"
   auto_start_machines = true
   min_machines_running = 1
+
+[mounts]
+  source = "app_data"
+  destination = "/data"
 
 [[vm]]
   memory = "1gb"
