@@ -7,6 +7,7 @@ import os
 import functools
 from datetime import datetime
 from flask import Flask, request, jsonify, render_template
+import requests as http_requests
 
 from models import (
     init_db,
@@ -30,6 +31,10 @@ app = Flask(__name__, template_folder="templates")
 
 # 관리자 API 키 (환경변수로 설정)
 ADMIN_API_KEY = os.environ.get("LICENSE_ADMIN_KEY", "change-me-in-production")
+
+# PortOne 결제 설정
+PORTONE_STORE_ID = os.environ.get("PORTONE_STORE_ID", "")
+PORTONE_API_SECRET = os.environ.get("PORTONE_API_SECRET", "")
 
 
 # ─── 미들웨어 ───
@@ -165,32 +170,66 @@ def api_token_balance():
     })
 
 
+def verify_portone_payment(payment_id):
+    """PortOne V2 API로 결제 검증"""
+    if not PORTONE_API_SECRET:
+        return None, "PortOne API 시크릿이 설정되지 않았습니다."
+
+    resp = http_requests.get(
+        f"https://api.portone.io/payments/{payment_id}",
+        headers={
+            "Authorization": f"PortOne {PORTONE_API_SECRET}",
+            "Content-Type": "application/json",
+        },
+        timeout=10,
+    )
+
+    if resp.status_code != 200:
+        return None, f"결제 조회 실패 (HTTP {resp.status_code})"
+
+    payment = resp.json()
+
+    if payment.get("status") != "PAID":
+        return None, f"결제 미완료 상태: {payment.get('status')}"
+
+    return payment, None
+
+
 @app.route("/api/license/tokens/purchase", methods=["POST"])
 def api_purchase_tokens():
     """고객 토큰 충전 요청 (결제 완료 후 호출)"""
     data = request.get_json() or {}
     license_key = data.get("license_key", "").strip()
     tokens = int(data.get("tokens", 0))
-    payment_key = data.get("payment_key", "")  # 결제 검증 키
-    amount = int(data.get("amount", 0))  # 결제 금액
+    payment_id = data.get("payment_id", "")  # PortOne 결제 ID
     ip = get_client_ip()
 
-    if not license_key or tokens <= 0:
-        return jsonify({"error": "필수 파라미터 누락"}), 400
+    if not license_key or tokens <= 0 or not payment_id:
+        return jsonify({"error": "필수 파라미터 누락 (license_key, tokens, payment_id)"}), 400
 
     lic = get_license_by_key(license_key)
     if not lic or lic["status"] != "active":
         log_api_call(license_key, "/tokens/purchase", ip, False, "유효하지 않은 라이선스")
         return jsonify({"error": "유효하지 않은 라이선스"}), 403
 
+    # PortOne 결제 검증
+    payment, error = verify_portone_payment(payment_id)
+    if error:
+        log_api_call(license_key, "/tokens/purchase", ip, False, f"결제 검증 실패: {error}")
+        return jsonify({"error": f"결제 검증 실패: {error}"}), 400
+
+    amount = payment.get("amount", {}).get("total", 0)
+
     new_balance = add_tokens(lic["id"], tokens, amount)
-    log_api_call(license_key, "/tokens/purchase", ip, True, f"+{tokens} tokens, ₩{amount}")
+    log_api_call(license_key, "/tokens/purchase", ip, True,
+                 f"+{tokens} tokens, ₩{amount}, payment_id={payment_id}")
 
     return jsonify({
         "success": True,
         "balance": new_balance,
         "purchased": tokens,
         "amount": amount,
+        "payment_id": payment_id,
     })
 
 
