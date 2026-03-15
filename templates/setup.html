@@ -554,6 +554,16 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({notion_token: token, database_id: dbId}),
                 });
+                if (!resp.ok) {
+                    const text = await resp.text();
+                    try {
+                        const errData = JSON.parse(text);
+                        showMsg('notionMsg', 'error', errData.error || `서버 오류 (${resp.status})`);
+                    } catch (_) {
+                        showMsg('notionMsg', 'error', `서버 오류 (${resp.status}): ${text.slice(0, 200)}`);
+                    }
+                    return;
+                }
                 const data = await resp.json();
 
                 if (data.success || data.user) {
@@ -564,7 +574,7 @@
                     showMsg('notionMsg', 'error', data.error || '저장 실패');
                 }
             } catch (e) {
-                showMsg('notionMsg', 'error', '서버 연결 실패');
+                showMsg('notionMsg', 'error', '서버 연결 실패: ' + e.message);
             }
         }
 
