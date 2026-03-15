@@ -4268,4 +4268,18 @@ check_updates_async()
 
 if __name__ == "__main__":
     _start_scheduler()
-    app.run(host="0.0.0.0", port=5000, debug=True)
+
+    # HTTPS 지원 (Lemon Squeezy 결제 콜백이 https:// 강제)
+    import ssl
+    cert_file = os.path.join(os.path.dirname(__file__), "cert.pem")
+    key_file = os.path.join(os.path.dirname(__file__), "key.pem")
+
+    if os.path.exists(cert_file) and os.path.exists(key_file):
+        ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ssl_ctx.load_cert_chain(cert_file, key_file)
+        print("[서버] HTTPS 모드로 시작: https://localhost:5000")
+        app.run(host="0.0.0.0", port=5000, debug=True, ssl_context=ssl_ctx)
+    else:
+        print("[서버] 인증서 없음 - HTTP 모드로 시작: http://localhost:5000")
+        print("[서버] HTTPS 활성화: python -c \"from OpenSSL import crypto; k=crypto.PKey(); k.generate_key(crypto.TYPE_RSA,2048); c=crypto.X509(); c.get_subject().CN='localhost'; c.set_serial_number(1000); c.gmtime_adj_notBefore(0); c.gmtime_adj_notAfter(365*24*60*60); c.set_issuer(c.get_subject()); c.set_pubkey(k); c.sign(k,'sha256'); open('cert.pem','wb').write(crypto.dump_certificate(crypto.FILETYPE_PEM,c)); open('key.pem','wb').write(crypto.dump_privatekey(crypto.FILETYPE_PEM,k))\"")
+        app.run(host="0.0.0.0", port=5000, debug=True)

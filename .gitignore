@@ -15,6 +15,9 @@ config/.license
 *.db-journal
 *.db-wal
 
+# SSL 인증서
+*.pem
+
 # Python
 __pycache__/
 *.py[cod]
