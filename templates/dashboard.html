@@ -299,7 +299,7 @@
             <span id="licensePlanText">-</span>
             <span id="licenseTokenText" style="color:#888;font-weight:400;"></span>
         </span>
-        <button onclick="handleLogout()" style="background:transparent;border:1px solid #333;color:#888;padding:4px 10px;border-radius:8px;font-size:11px;cursor:pointer;" title="로그아웃">로그아웃</button>
+        <button onclick="handleLogout()" style="background:#1e1e1e;border:1px solid #444;color:#ccc;padding:5px 12px;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;" title="로그아웃">로그아웃</button>
         <span id="statusIndicator">
             <span class="status-dot stopped"></span>
             <span style="font-size:13px;color:var(--text-dim)">대기 중</span>
@@ -361,8 +361,8 @@
         </div>
 
         <!-- 중복 스캔 확인 모달 -->
-        <div id="dupScanModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:1000;display:none;align-items:center;justify-content:center">
-            <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:12px;padding:24px;max-width:460px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.4)">
+        <div id="dupScanModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1000;display:none;align-items:center;justify-content:center">
+            <div style="background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:24px;max-width:460px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.6)">
                 <h3 style="margin:0 0 16px;font-size:16px">중복 스캔</h3>
                 <div style="font-size:13px;color:var(--text-dim);line-height:1.7;margin-bottom:20px">
                     <p style="margin:0 0 10px">노션 대기 작업의 영상 URL을 전체 완료 목록과 비교하여<br><strong style="color:var(--text)">이미 댓글을 단 영상</strong>을 찾아냅니다.</p>
