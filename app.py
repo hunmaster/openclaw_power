@@ -656,6 +656,7 @@ def api_dashboard():
         "status_counts": status_counts,
         "smm_enabled": smm.enabled,
         "smm_balance": smm_balance,
+        "like_credit_balance": license_client.get_like_credit_balance(),
         "settings": {
             "max_comments_per_day": int(os.getenv("MAX_COMMENTS_PER_DAY", "20")),
             "comment_interval_sec": int(os.getenv("COMMENT_INTERVAL_SEC", "180")),
@@ -1227,10 +1228,6 @@ def api_likes_approve():
     approve_all = data.get("all")    # 일괄 승인
     custom_qty = data.get("custom_qty")  # 사용자 지정 수량
 
-    smm = SMMClient()
-    if not smm.enabled:
-        return jsonify({"success": False, "error": "SMM 비활성화"}), 400
-
     results = []
     with like_pending_lock:
         targets = list(like_pending_list) if approve_all else [
@@ -1239,7 +1236,7 @@ def api_likes_approve():
 
         for item in targets:
             qty = custom_qty if (custom_qty and not approve_all) else item["qty"]
-            order = smm.order_likes(item["comment_url"], quantity=qty)
+            order = license_client.order_likes_via_server(item["comment_url"], quantity=qty, source="approval")
             if order.get("success"):
                 add_log(
                     f"[수동 승인] 좋아요 {item['qty']}개 주문 완료 | "
@@ -2138,8 +2135,8 @@ def _run_automation(limit=0, selected_ids=None):
                     else:
                         add_log(f"[2/3 노션 반영 실패] {notion_err}", "warning")
 
-                    # ── 3단계: 동적 좋아요 주문 (논블로킹) ──
-                    if smm_client.enabled:
+                    # ── 3단계: 동적 좋아요 주문 (라이선스 서버 경유) ──
+                    if license_client.is_active():
                         automation_state["current_task"] = f"[3/3 좋아요 분석] {task_url_short}"
                         like_auto_max = int(os.getenv("SMM_LIKE_AUTO_MAX", "500"))
                         default_qty = int(os.getenv("SMM_LIKE_QUANTITY", "20"))
@@ -2167,8 +2164,8 @@ def _run_automation(limit=0, selected_ids=None):
                                 f"기본 {default_qty}개 우선 주문, 추가분 승인 대기",
                                 "warning"
                             )
-                            # 기본 수량 즉시 주문
-                            single = smm_client.order_likes(comment_url, quantity=default_qty)
+                            # 기본 수량 즉시 주문 (라이선스 서버 경유)
+                            single = license_client.order_likes_via_server(comment_url, quantity=default_qty, source="auto")
                             if single.get("success"):
                                 automation_state["results"]["likes"] += 1
                                 add_log(f"[3/3 좋아요 기본 주문] {default_qty}개 | 주문ID: {single.get('order_id')}", "success")
@@ -2199,10 +2196,10 @@ def _run_automation(limit=0, selected_ids=None):
                                 "warning"
                             )
                         else:
-                            # MAX 이하 → 자동 주문
+                            # MAX 이하 → 자동 주문 (라이선스 서버 경유)
                             automation_state["current_task"] = f"[3/3 좋아요 {dynamic_qty}개] {task_url_short}"
                             add_log(f"[3/3 좋아요 주문 중] {dynamic_qty}개 | {comment_url[:50]}...", "info")
-                            single = smm_client.order_likes(comment_url, quantity=dynamic_qty)
+                            single = license_client.order_likes_via_server(comment_url, quantity=dynamic_qty, source="auto")
                             if single.get("success"):
                                 automation_state["results"]["likes"] += 1
                                 add_log(
@@ -2217,14 +2214,8 @@ def _run_automation(limit=0, selected_ids=None):
                             else:
                                 err = single.get("error", "?")
                                 add_log(f"[3/3 좋아요 주문 실패] {err}", "warning")
-                                if "incorrect_service" in str(err).lower():
-                                    add_log(
-                                        f"서비스 ID '{smm_client.service_id}' 유효하지 않음. "
-                                        "SMM 좋아요 탭 → 서비스 조회에서 올바른 ID 확인 필요",
-                                        "error",
-                                    )
                     else:
-                        add_log("[3/3 좋아요] SMM 비활성화 - 건너뜀", "info")
+                        add_log("[3/3 좋아요] 라이선스 미인증 - 건너뜀", "info")
                     # 상태는 '댓글완료' 유지 (추후 대댓글 자동화에서 처리)
 
                     safety_rules.record_comment(current_label, task["youtube_url"], task["comment_text"])
@@ -2945,12 +2936,13 @@ def api_repost():
                         )
                         comment_tracker._save_history()
 
-                        # SMM 좋아요 주문
-                        if smm_client.enabled:
-                            single = smm_client.order_likes(new_comment_url)
+                        # 좋아요 주문 (라이선스 서버 경유)
+                        if license_client.is_active():
+                            repost_qty = int(os.getenv("SMM_LIKE_QUANTITY", "20"))
+                            single = license_client.order_likes_via_server(new_comment_url, quantity=repost_qty, source="repost")
                             if single.get("success"):
                                 add_log(f"[리포스팅] 좋아요 주문 완료: {single.get('order_id')}", "success")
-                                _save_like_order(single.get("order_id"), new_comment_url, int(os.getenv("SMM_LIKE_QUANTITY", "20")), source="repost")
+                                _save_like_order(single.get("order_id"), new_comment_url, repost_qty, source="repost")
 
                         repost_state["results"]["success"] += 1
                         add_log(
@@ -3606,9 +3598,23 @@ def api_like_boost_tiers():
     return jsonify(LIKE_TIERS)
 
 
+@app.route("/api/like-credits/balance")
+def api_like_credit_balance():
+    """좋아요 크레딧 잔액 조회."""
+    balance = license_client.get_like_credit_balance()
+    return jsonify({"balance": balance})
+
+
+@app.route("/api/like-credits/history")
+def api_like_credit_history():
+    """좋아요 크레딧 충전/주문 이력 조회."""
+    data = license_client.get_like_orders()
+    return jsonify(data)
+
+
 @app.route("/api/like-boost/order", methods=["POST"])
 def api_like_boost_order():
-    """좋아요 부스팅 주문."""
+    """좋아요 부스팅 주문 (라이선스 서버를 통해 크레딧 차감 + SMM 대행)."""
     if not license_client.can_use_feature("like_boost"):
         return jsonify({"error": "좋아요 부스팅은 Starter 플랜부터 사용 가능합니다. 구독을 활성화해주세요."}), 403
 
@@ -3626,12 +3632,11 @@ def api_like_boost_order():
     cost = license_client.get_like_cost(quantity, tier)
     tier_info = LIKE_TIERS.get(tier, {})
 
-    # SMM 주문 실행
-    smm = SMMClient()
-    result = smm.order_likes(comment_url, quantity, tier=tier)
+    # 라이선스 서버를 통해 주문 (크레딧 차감 + SMM 대행)
+    result = license_client.order_likes_via_server(comment_url, quantity, tier=tier, source="boost")
 
     if result.get("success"):
-        # DB에 주문 이력 저장
+        # 로컬 DB에도 주문 이력 저장 (대시보드 표시용)
         try:
             order = LikeOrder(
                 user_id=current_user.id,
@@ -3652,11 +3657,14 @@ def api_like_boost_order():
             "success": True,
             "order_id": result.get("order_id"),
             "cost": cost,
+            "remaining_credits": result.get("remaining_credits", 0),
             "tier": tier_info.get("name", tier),
             "quantity": quantity,
         })
     else:
-        return jsonify({"error": result.get("error", "주문 실패")}), 500
+        error_msg = result.get("error", "주문 실패")
+        status_code = 402 if "크레딧 부족" in error_msg else 500
+        return jsonify({"error": error_msg, "balance_required": result.get("balance_required")}), status_code
 
 
 @app.route("/api/like-orders")
@@ -3670,7 +3678,7 @@ def api_like_orders():
 @app.route("/api/like-orders/refresh-status", methods=["POST"])
 @login_required
 def api_like_orders_refresh_status():
-    """SMM에서 주문 상태를 최신으로 업데이트합니다."""
+    """라이선스 서버를 통해 SMM 주문 상태를 업데이트합니다."""
     orders = LikeOrder.query.filter_by(user_id=current_user.id).filter(
         LikeOrder.status.in_(["Pending", "In progress", "Processing"])
     ).all()
@@ -3678,23 +3686,26 @@ def api_like_orders_refresh_status():
     if not orders:
         return jsonify({"updated": 0, "message": "업데이트할 진행중 주문이 없습니다."})
 
-    smm = SMMClient()
     order_ids = [o.order_id for o in orders]
-    statuses = smm.check_multiple_orders(order_ids)
+    result = license_client.refresh_like_order_status(order_ids)
 
-    updated = 0
-    for order in orders:
-        status_data = statuses.get(str(order.order_id))
-        if status_data and isinstance(status_data, dict):
-            new_status = status_data.get("status", order.status)
-            order.status = new_status
-            order.remains = status_data.get("remains")
-            updated += 1
+    # 서버에서 업데이트된 결과를 로컬 DB에도 반영
+    if result.get("updated", 0) > 0:
+        # 서버에서 최신 주문 이력 조회하여 로컬 동기화
+        server_orders = license_client.get_like_orders()
+        server_order_map = {o.get("smm_order_id"): o for o in server_orders.get("orders", [])}
+        updated = 0
+        for order in orders:
+            server_data = server_order_map.get(order.order_id)
+            if server_data:
+                order.status = server_data.get("status", order.status)
+                order.remains = server_data.get("remains")
+                updated += 1
+        if updated:
+            db.session.commit()
+        return jsonify({"updated": updated, "message": f"{updated}건 상태 업데이트 완료"})
 
-    if updated:
-        db.session.commit()
-
-    return jsonify({"updated": updated, "message": f"{updated}건 상태 업데이트 완료"})
+    return jsonify({"updated": 0, "message": "업데이트할 항목이 없습니다."})
 
 
 @app.route("/api/setup/check")
@@ -3974,6 +3985,11 @@ PAYMENT_PRODUCTS = {
     "token_1200": {"name": "토큰 1,200개", "amount": 30000, "tokens": 1200, "type": "token"},
     "token_3000": {"name": "토큰 3,000개", "amount": 60000, "tokens": 3000, "type": "token"},
     "token_7000": {"name": "토큰 7,000개", "amount": 105000, "tokens": 7000, "type": "token"},
+    # 좋아요 크레딧 충전 (원 단위)
+    "like_5000": {"name": "좋아요 크레딧 5,000원", "amount": 5000, "credits": 5000, "type": "like_credit"},
+    "like_10000": {"name": "좋아요 크레딧 10,000원", "amount": 10000, "credits": 10000, "type": "like_credit"},
+    "like_30000": {"name": "좋아요 크레딧 30,000원", "amount": 30000, "credits": 30000, "type": "like_credit"},
+    "like_50000": {"name": "좋아요 크레딧 50,000원", "amount": 50000, "credits": 50000, "type": "like_credit"},
 }
 
 
@@ -3990,12 +4006,13 @@ def api_payment_config():
 
 @app.route("/api/payment/checkout", methods=["POST"])
 def api_payment_checkout():
-    """Lemon Squeezy 체크아웃 URL 생성 (커스텀 데이터 포함)"""
+    """Lemon Squeezy 체크아웃 URL 생성 (구독 플랜 + 좋아요 크레딧 지원)"""
     data = request.get_json() or {}
     plan_id = data.get("plan_id", "")
 
-    if plan_id not in ("starter", "business", "agency"):
-        return jsonify({"error": "잘못된 플랜입니다."}), 400
+    valid_ids = ("starter", "business", "agency", "like_5000", "like_10000", "like_30000", "like_50000")
+    if plan_id not in valid_ids:
+        return jsonify({"error": "잘못된 상품입니다."}), 400
 
     if not ls_client.is_available():
         return jsonify({"error": "결제 서비스가 준비되지 않았습니다. 잠시 후 다시 시도해주세요."}), 503
@@ -4124,6 +4141,53 @@ def api_payment_webhook():
         print(f"[웹훅] 결제 실패: email={user_email}")
         add_log("[결제] 구독 결제 실패 - 확인 필요", "error")
 
+    elif event_name == "order_created":
+        # 일회성 상품 결제 (좋아요 크레딧 등)
+        order_id = payload.get("data", {}).get("id", "")
+        status = attrs.get("status", "")
+        total = attrs.get("total", 0)
+        product_name = attrs.get("first_order_item", {}).get("product_name", "").lower()
+
+        print(f"[웹훅] 주문 생성: order_id={order_id}, status={status}, total={total}, product={product_name}")
+
+        if status == "paid" and lk:
+            # 좋아요 크레딧 상품인지 확인
+            like_credit_map = {
+                "like_5000": 5000, "5000": 5000, "5,000": 5000,
+                "like_10000": 10000, "10000": 10000, "10,000": 10000,
+                "like_30000": 30000, "30000": 30000, "30,000": 30000,
+                "like_50000": 50000, "50000": 50000, "50,000": 50000,
+            }
+
+            credits = 0
+            for key, amount in like_credit_map.items():
+                if key in product_name:
+                    credits = amount
+                    break
+
+            # 상품명으로 매칭 안되면 결제 금액 기준으로 매칭
+            if credits == 0 and total > 0:
+                total_krw = total // 100 if total > 100000 else total  # cents 변환 고려
+                if total_krw in (5000, 10000, 30000, 50000):
+                    credits = total_krw
+
+            if credits > 0:
+                try:
+                    _requests.post(
+                        f"{license_client.server_url}/api/license/likes/purchase",
+                        json={
+                            "license_key": lk,
+                            "credits": credits,
+                            "payment_id": f"ls_order_{order_id}",
+                        },
+                        timeout=10,
+                    )
+                    license_client.like_credit_balance += credits
+                    add_log(f"[결제] 좋아요 크레딧 {credits:,}원 충전 완료", "success")
+                    print(f"[웹훅] 좋아요 크레딧 충전: +{credits}원")
+                except Exception as e:
+                    print(f"[웹훅] 좋아요 크레딧 충전 오류: {e}")
+
     return jsonify({"success": True}), 200
 
 
@@ -4144,6 +4208,16 @@ def api_payment_request():
             user_email = current_user.email if current_user.is_authenticated else None
             lk = license_client.license_key
             checkout_url = ls_client.get_checkout_url(plan_id, user_email=user_email, license_key=lk)
+            if checkout_url:
+                return jsonify({"redirect": checkout_url, "provider": "lemonsqueezy"})
+        return jsonify({"error": "결제 서비스 준비 중입니다."}), 503
+
+    # 좋아요 크레딧은 Lemon Squeezy로 리다이렉트
+    if product["type"] == "like_credit":
+        if ls_client.is_available():
+            user_email = current_user.email if current_user.is_authenticated else None
+            lk = license_client.license_key
+            checkout_url = ls_client.get_checkout_url(product_id, user_email=user_email, license_key=lk)
             if checkout_url:
                 return jsonify({"redirect": checkout_url, "provider": "lemonsqueezy"})
         return jsonify({"error": "결제 서비스 준비 중입니다."}), 503

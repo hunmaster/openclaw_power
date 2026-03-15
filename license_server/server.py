@@ -26,6 +26,13 @@ from models import (
     add_tokens,
     refill_monthly_tokens,
     log_api_call,
+    get_like_credit_balance,
+    add_like_credits,
+    consume_like_credits,
+    create_like_order,
+    get_like_orders,
+    get_like_credit_purchases,
+    update_like_order_status,
 )
 
 app = Flask(__name__, template_folder="templates")
@@ -36,6 +43,22 @@ ADMIN_API_KEY = os.environ.get("LICENSE_ADMIN_KEY", "change-me-in-production")
 # PortOne 결제 설정
 PORTONE_STORE_ID = os.environ.get("PORTONE_STORE_ID", "")
 PORTONE_API_SECRET = os.environ.get("PORTONE_API_SECRET", "")
+
+# SMM Kings API 설정 (서버에서만 관리 - 고객에게 노출하지 않음)
+SMM_API_KEY = os.environ.get("SMM_API_KEY", "")
+SMM_API_URL = "https://smmkings.com/api/v2"
+SMM_SERVICE_IDS = {
+    "basic": os.environ.get("SMM_LIKE_SERVICE_ID_BASIC", ""),
+    "standard": os.environ.get("SMM_LIKE_SERVICE_ID_STANDARD", ""),
+    "premium": os.environ.get("SMM_LIKE_SERVICE_ID_PREMIUM", ""),
+}
+
+# 좋아요 티어별 가격 (원/개)
+LIKE_TIER_PRICES = {
+    "basic": 10,
+    "standard": 15,
+    "premium": 20,
+}
 
 
 # ─── 미들웨어 ───
@@ -103,6 +126,9 @@ def api_verify_license():
     # 토큰 잔액
     balance = get_token_balance(lic["id"])
 
+    # 좋아요 크레딧 잔액
+    like_balance = get_like_credit_balance(lic["id"])
+
     log_api_call(license_key, "/verify", ip, True, "검증 성공")
 
     return jsonify({
@@ -119,6 +145,9 @@ def api_verify_license():
         "tokens": {
             "balance": balance["balance"] if balance else 0,
             "extra_token_price": lic["extra_token_price"],
+        },
+        "like_credits": {
+            "balance": like_balance["balance"] if like_balance else 0,
         },
         "device": {
             "is_new": is_new,
@@ -230,6 +259,202 @@ def api_purchase_tokens():
         "balance": new_balance,
         "purchased": tokens,
         "amount": amount,
+        "payment_id": payment_id,
+    })
+
+
+# ═══════════════════════════════════════════
+#  좋아요 크레딧 API (고객 로컬앱에서 호출)
+# ═══════════════════════════════════════════
+
+@app.route("/api/license/likes/balance", methods=["POST"])
+def api_like_credit_balance():
+    """좋아요 크레딧 잔액 조회."""
+    data = request.get_json() or {}
+    license_key = data.get("license_key", "").strip()
+
+    lic = get_license_by_key(license_key)
+    if not lic:
+        return jsonify({"error": "유효하지 않은 라이선스"}), 404
+
+    balance = get_like_credit_balance(lic["id"])
+    return jsonify({
+        "balance": balance["balance"],
+        "plan": lic["plan_display"],
+    })
+
+
+@app.route("/api/license/likes/order", methods=["POST"])
+def api_like_order():
+    """
+    좋아요 주문 대행.
+    1. 크레딧 잔액 확인 및 차감
+    2. SMM Kings에 주문
+    3. 주문 기록 저장
+    """
+    data = request.get_json() or {}
+    license_key = data.get("license_key", "").strip()
+    comment_url = data.get("comment_url", "").strip()
+    quantity = int(data.get("quantity", 10))
+    tier = data.get("tier", "standard")
+    source = data.get("source", "boost")
+    ip = get_client_ip()
+
+    if not license_key or not comment_url:
+        return jsonify({"error": "필수 파라미터 누락"}), 400
+
+    if quantity < 10:
+        return jsonify({"error": "최소 10개부터 주문 가능합니다."}), 400
+
+    if tier not in LIKE_TIER_PRICES:
+        return jsonify({"error": f"잘못된 티어: {tier}"}), 400
+
+    lic = get_license_by_key(license_key)
+    if not lic or lic["status"] != "active":
+        log_api_call(license_key, "/likes/order", ip, False, "유효하지 않은 라이선스")
+        return jsonify({"error": "유효하지 않은 라이선스"}), 403
+
+    # 비용 계산
+    price_per_unit = LIKE_TIER_PRICES[tier]
+    cost = quantity * price_per_unit
+
+    # 크레딧 잔액 확인 및 차감
+    try:
+        remaining = consume_like_credits(lic["id"], cost)
+    except ValueError as e:
+        log_api_call(license_key, "/likes/order", ip, False, str(e))
+        return jsonify({"error": str(e), "balance_required": cost}), 402
+
+    # SMM Kings 주문 실행
+    service_id = SMM_SERVICE_IDS.get(tier, "")
+    if not service_id or not SMM_API_KEY:
+        # SMM 미설정 시 크레딧 환불
+        add_like_credits(lic["id"], cost)
+        log_api_call(license_key, "/likes/order", ip, False, "SMM 서비스 미설정")
+        return jsonify({"error": "좋아요 서비스가 일시적으로 이용 불가합니다."}), 503
+
+    try:
+        smm_resp = http_requests.post(SMM_API_URL, data={
+            "key": SMM_API_KEY,
+            "action": "add",
+            "service": service_id,
+            "link": comment_url,
+            "quantity": quantity,
+        }, timeout=30)
+        smm_result = smm_resp.json()
+    except Exception as e:
+        # SMM 요청 실패 시 크레딧 환불
+        add_like_credits(lic["id"], cost)
+        log_api_call(license_key, "/likes/order", ip, False, f"SMM 요청 실패: {e}")
+        return jsonify({"error": "좋아요 주문 처리 중 오류가 발생했습니다."}), 500
+
+    if "order" in smm_result:
+        smm_order_id = str(smm_result["order"])
+        order = create_like_order(lic["id"], smm_order_id, comment_url, quantity, tier, cost, source)
+        log_api_call(license_key, "/likes/order", ip, True,
+                     f"주문 성공: {quantity}개 {tier} (₩{cost}), SMM#{smm_order_id}")
+        return jsonify({
+            "success": True,
+            "order_id": smm_order_id,
+            "cost": cost,
+            "remaining_credits": remaining,
+            "tier": tier,
+            "quantity": quantity,
+        })
+    else:
+        # SMM 주문 실패 시 크레딧 환불
+        add_like_credits(lic["id"], cost)
+        error_msg = smm_result.get("error", "알 수 없는 오류")
+        log_api_call(license_key, "/likes/order", ip, False, f"SMM 주문 실패: {error_msg}")
+        return jsonify({"error": f"좋아요 주문 실패: {error_msg}"}), 500
+
+
+@app.route("/api/license/likes/orders", methods=["POST"])
+def api_like_order_history():
+    """좋아요 주문 이력 조회."""
+    data = request.get_json() or {}
+    license_key = data.get("license_key", "").strip()
+
+    lic = get_license_by_key(license_key)
+    if not lic:
+        return jsonify({"error": "유효하지 않은 라이선스"}), 404
+
+    orders = get_like_orders(lic["id"])
+    purchases = get_like_credit_purchases(lic["id"])
+    balance = get_like_credit_balance(lic["id"])
+
+    return jsonify({
+        "orders": orders,
+        "purchases": purchases,
+        "balance": balance["balance"],
+    })
+
+
+@app.route("/api/license/likes/order-status", methods=["POST"])
+def api_like_order_status():
+    """좋아요 주문 상태 업데이트 (SMM Kings에서 확인)."""
+    data = request.get_json() or {}
+    license_key = data.get("license_key", "").strip()
+    order_ids = data.get("order_ids", [])
+
+    lic = get_license_by_key(license_key)
+    if not lic:
+        return jsonify({"error": "유효하지 않은 라이선스"}), 404
+
+    if not order_ids or not SMM_API_KEY:
+        return jsonify({"updated": 0})
+
+    # SMM Kings에 상태 조회
+    try:
+        orders_str = ",".join(str(oid) for oid in order_ids)
+        smm_resp = http_requests.post(SMM_API_URL, data={
+            "key": SMM_API_KEY,
+            "action": "status",
+            "orders": orders_str,
+        }, timeout=30)
+        statuses = smm_resp.json()
+    except Exception:
+        return jsonify({"updated": 0, "error": "SMM 상태 조회 실패"})
+
+    updated = 0
+    if isinstance(statuses, dict):
+        for oid, status_data in statuses.items():
+            if isinstance(status_data, dict) and "status" in status_data:
+                update_like_order_status(
+                    str(oid),
+                    status_data["status"],
+                    status_data.get("remains"),
+                )
+                updated += 1
+
+    return jsonify({"updated": updated})
+
+
+@app.route("/api/license/likes/purchase", methods=["POST"])
+def api_like_credit_purchase():
+    """좋아요 크레딧 충전 (결제 완료 후 호출)."""
+    data = request.get_json() or {}
+    license_key = data.get("license_key", "").strip()
+    credits = int(data.get("credits", 0))
+    payment_id = data.get("payment_id", "")
+    ip = get_client_ip()
+
+    if not license_key or credits <= 0 or not payment_id:
+        return jsonify({"error": "필수 파라미터 누락"}), 400
+
+    lic = get_license_by_key(license_key)
+    if not lic or lic["status"] != "active":
+        log_api_call(license_key, "/likes/purchase", ip, False, "유효하지 않은 라이선스")
+        return jsonify({"error": "유효하지 않은 라이선스"}), 403
+
+    new_balance = add_like_credits(lic["id"], credits, credits, payment_id)
+    log_api_call(license_key, "/likes/purchase", ip, True,
+                 f"+{credits}원 크레딧, payment_id={payment_id}")
+
+    return jsonify({
+        "success": True,
+        "balance": new_balance,
+        "purchased": credits,
         "payment_id": payment_id,
     })
 

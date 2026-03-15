@@ -200,6 +200,7 @@ class LicenseClient:
         self.hardware_id = self._generate_hardware_id()
         self.license_info = None
         self.token_balance = 0
+        self.like_credit_balance = 0
         self._heartbeat_thread = None
         self._running = False
         self.owner_mode = is_owner_mode()
@@ -288,6 +289,7 @@ class LicenseClient:
             if data.get("valid"):
                 self.license_info = data.get("license", {})
                 self.token_balance = data.get("tokens", {}).get("balance", 0)
+                self.like_credit_balance = data.get("like_credits", {}).get("balance", 0)
 
             return data
         except requests.exceptions.ConnectionError:
@@ -393,6 +395,82 @@ class LicenseClient:
             return self.token_balance
         except Exception:
             return self.token_balance
+
+    # ─── 좋아요 크레딧 ───
+
+    def get_like_credit_balance(self):
+        """좋아요 크레딧 잔액 조회 (원 단위)."""
+        if self.owner_mode:
+            return 999999999
+        if not self.license_key:
+            return 0
+        try:
+            resp = requests.post(
+                f"{self.server_url}/api/license/likes/balance",
+                json={"license_key": self.license_key},
+                timeout=10,
+            )
+            data = resp.json()
+            return data.get("balance", 0)
+        except Exception:
+            return 0
+
+    def order_likes_via_server(self, comment_url, quantity=10, tier="standard", source="boost"):
+        """라이선스 서버를 통해 좋아요 주문 (크레딧 차감 + SMM 대행)."""
+        if self.owner_mode:
+            return {"success": True, "order_id": "owner_mode", "cost": 0, "remaining_credits": 999999999}
+        if not self.license_key:
+            return {"success": False, "error": "라이선스 미인증"}
+        try:
+            resp = requests.post(
+                f"{self.server_url}/api/license/likes/order",
+                json={
+                    "license_key": self.license_key,
+                    "comment_url": comment_url,
+                    "quantity": quantity,
+                    "tier": tier,
+                    "source": source,
+                },
+                timeout=30,
+            )
+            data = resp.json()
+            if resp.status_code == 200:
+                return data
+            else:
+                return {"success": False, "error": data.get("error", "주문 실패"), "balance_required": data.get("balance_required")}
+        except Exception as e:
+            return {"success": False, "error": f"서버 연결 실패: {str(e)}"}
+
+    def get_like_orders(self):
+        """좋아요 주문 이력 + 충전 이력 + 잔액 조회."""
+        if not self.license_key:
+            return {"orders": [], "purchases": [], "balance": 0}
+        try:
+            resp = requests.post(
+                f"{self.server_url}/api/license/likes/orders",
+                json={"license_key": self.license_key},
+                timeout=10,
+            )
+            return resp.json()
+        except Exception:
+            return {"orders": [], "purchases": [], "balance": 0}
+
+    def refresh_like_order_status(self, order_ids):
+        """좋아요 주문 상태 업데이트 요청."""
+        if not self.license_key or not order_ids:
+            return {"updated": 0}
+        try:
+            resp = requests.post(
+                f"{self.server_url}/api/license/likes/order-status",
+                json={
+                    "license_key": self.license_key,
+                    "order_ids": order_ids,
+                },
+                timeout=30,
+            )
+            return resp.json()
+        except Exception:
+            return {"updated": 0}
 
     def is_active(self):
         """라이선스가 활성 상태인지"""

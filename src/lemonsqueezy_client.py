@@ -65,6 +65,19 @@ class LemonSqueezyClient:
                 loaded += 1
                 print(f"[LemonSqueezy] 토큰 충전 URL 로드: {token_id}")
 
+        # 좋아요 크레딧 충전 상품 URL 로드
+        like_credit_urls = {
+            "like_5000": os.getenv("LEMONSQUEEZY_CHECKOUT_LIKE_5000", ""),
+            "like_10000": os.getenv("LEMONSQUEEZY_CHECKOUT_LIKE_10000", ""),
+            "like_30000": os.getenv("LEMONSQUEEZY_CHECKOUT_LIKE_30000", ""),
+            "like_50000": os.getenv("LEMONSQUEEZY_CHECKOUT_LIKE_50000", ""),
+        }
+        for like_id, url in like_credit_urls.items():
+            if url:
+                self.checkout_urls[like_id] = url
+                loaded += 1
+                print(f"[LemonSqueezy] 좋아요 크레딧 URL 로드: {like_id}")
+
         return loaded
 
     def initialize(self):

@@ -110,6 +110,41 @@ def init_db():
             message TEXT,
             logged_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
+
+        -- 좋아요 크레딧 잔액 (원 단위, 토큰과 별도)
+        CREATE TABLE IF NOT EXISTS like_credit_balance (
+            license_id TEXT PRIMARY KEY,
+            balance INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (license_id) REFERENCES licenses(id)
+        );
+
+        -- 좋아요 크레딧 충전 이력
+        CREATE TABLE IF NOT EXISTS like_credit_purchases (
+            id TEXT PRIMARY KEY,
+            license_id TEXT NOT NULL,
+            credits INTEGER NOT NULL,
+            price INTEGER NOT NULL,
+            payment_id TEXT,
+            purchased_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (license_id) REFERENCES licenses(id)
+        );
+
+        -- 좋아요 주문 이력 (서버에서 SMM 주문 대행)
+        CREATE TABLE IF NOT EXISTS like_orders (
+            id TEXT PRIMARY KEY,
+            license_id TEXT NOT NULL,
+            smm_order_id TEXT,
+            comment_url TEXT NOT NULL,
+            quantity INTEGER NOT NULL,
+            tier TEXT NOT NULL DEFAULT 'standard',
+            cost INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'Pending',
+            remains INTEGER,
+            source TEXT DEFAULT 'boost',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (license_id) REFERENCES licenses(id)
+        );
     """)
     conn.commit()
 
@@ -441,6 +476,121 @@ def refill_monthly_tokens(license_id):
         "UPDATE token_balance SET balance = balance + ?, last_refill = datetime('now') WHERE license_id = ?",
         (lic["tokens_per_month"], license_id),
     )
+    conn.commit()
+    conn.close()
+
+
+# ─── API 로그 ───
+
+# ─── 좋아요 크레딧 관리 ───
+
+def get_like_credit_balance(license_id):
+    """좋아요 크레딧 잔액 조회 (원 단위)."""
+    conn = get_db()
+    row = conn.execute("SELECT * FROM like_credit_balance WHERE license_id = ?", (license_id,)).fetchone()
+    if not row:
+        # 잔액 레코드가 없으면 생성
+        conn.execute("INSERT INTO like_credit_balance (license_id, balance) VALUES (?, 0)", (license_id,))
+        conn.commit()
+        row = conn.execute("SELECT * FROM like_credit_balance WHERE license_id = ?", (license_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else {"license_id": license_id, "balance": 0}
+
+
+def add_like_credits(license_id, credits, price=0, payment_id=None):
+    """좋아요 크레딧 충전."""
+    conn = get_db()
+    existing = conn.execute("SELECT * FROM like_credit_balance WHERE license_id = ?", (license_id,)).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE like_credit_balance SET balance = balance + ? WHERE license_id = ?",
+            (credits, license_id),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO like_credit_balance (license_id, balance) VALUES (?, ?)",
+            (license_id, credits),
+        )
+    conn.execute(
+        "INSERT INTO like_credit_purchases (id, license_id, credits, price, payment_id) VALUES (?, ?, ?, ?, ?)",
+        (str(uuid.uuid4()), license_id, credits, price, payment_id),
+    )
+    conn.commit()
+    new_bal = conn.execute("SELECT balance FROM like_credit_balance WHERE license_id = ?", (license_id,)).fetchone()
+    conn.close()
+    return new_bal["balance"]
+
+
+def consume_like_credits(license_id, amount, description=None):
+    """좋아요 크레딧 차감. 잔액 부족 시 ValueError."""
+    conn = get_db()
+    bal = conn.execute("SELECT balance FROM like_credit_balance WHERE license_id = ?", (license_id,)).fetchone()
+    if not bal:
+        conn.close()
+        raise ValueError("좋아요 크레딧 잔액 정보 없음")
+    if bal["balance"] < amount:
+        conn.close()
+        raise ValueError(f"좋아요 크레딧 부족 (잔액: {bal['balance']}원, 필요: {amount}원)")
+    conn.execute(
+        "UPDATE like_credit_balance SET balance = balance - ? WHERE license_id = ?",
+        (amount, license_id),
+    )
+    conn.commit()
+    new_bal = conn.execute("SELECT balance FROM like_credit_balance WHERE license_id = ?", (license_id,)).fetchone()
+    conn.close()
+    return new_bal["balance"]
+
+
+def create_like_order(license_id, smm_order_id, comment_url, quantity, tier, cost, source="boost"):
+    """좋아요 주문 기록 생성."""
+    conn = get_db()
+    order_id = str(uuid.uuid4())
+    conn.execute(
+        "INSERT INTO like_orders (id, license_id, smm_order_id, comment_url, quantity, tier, cost, source) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (order_id, license_id, smm_order_id, comment_url, quantity, tier, cost, source),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM like_orders WHERE id = ?", (order_id,)).fetchone()
+    conn.close()
+    return dict(row)
+
+
+def get_like_orders(license_id, limit=50):
+    """좋아요 주문 이력 조회."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM like_orders WHERE license_id = ? ORDER BY created_at DESC LIMIT ?",
+        (license_id, limit),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_like_credit_purchases(license_id, limit=20):
+    """좋아요 크레딧 충전 이력 조회."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM like_credit_purchases WHERE license_id = ? ORDER BY purchased_at DESC LIMIT ?",
+        (license_id, limit),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def update_like_order_status(order_id, status, remains=None):
+    """좋아요 주문 상태 업데이트."""
+    conn = get_db()
+    if remains is not None:
+        conn.execute(
+            "UPDATE like_orders SET status = ?, remains = ?, updated_at = datetime('now') WHERE id = ? OR smm_order_id = ?",
+            (status, remains, order_id, order_id),
+        )
+    else:
+        conn.execute(
+            "UPDATE like_orders SET status = ?, updated_at = datetime('now') WHERE id = ? OR smm_order_id = ?",
+            (status, order_id, order_id),
+        )
     conn.commit()
     conn.close()
 

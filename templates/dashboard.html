@@ -1034,6 +1034,55 @@
             <p style="font-size:13px;color:var(--text-dim);">댓글에 좋아요를 추가하여 상위 노출을 유도합니다.</p>
         </div>
 
+        <!-- 크레딧 잔액 + 충전 -->
+        <div class="card" style="margin-bottom:24px;background:linear-gradient(135deg, rgba(139,92,246,0.1), rgba(59,130,246,0.1));border:1px solid rgba(139,92,246,0.3);">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                    <div style="font-size:12px;color:var(--text-dim);margin-bottom:4px;">내 좋아요 크레딧</div>
+                    <div style="display:flex;align-items:baseline;gap:4px;">
+                        <span id="likeCreditBalance" style="font-size:32px;font-weight:800;color:var(--accent-light);">0</span>
+                        <span style="font-size:14px;color:var(--text-dim);">원</span>
+                    </div>
+                    <div style="font-size:11px;color:var(--text-dim);margin-top:4px;">
+                        베이직 <span id="creditCanBuyBasic">0</span>개 / 스탠다드 <span id="creditCanBuyStandard">0</span>개 / 프리미엄 <span id="creditCanBuyPremium">0</span>개 구매 가능
+                    </div>
+                </div>
+                <button class="btn btn-primary" onclick="openCreditChargeModal()" style="padding:10px 20px;font-size:13px;font-weight:600;">
+                    크레딧 충전
+                </button>
+            </div>
+        </div>
+
+        <!-- 크레딧 충전 모달 -->
+        <div id="creditChargeModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:9999;justify-content:center;align-items:center;">
+            <div style="background:var(--card);border-radius:16px;padding:28px;max-width:480px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.4);">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+                    <h3 style="margin:0;font-size:16px;font-weight:600;">좋아요 크레딧 충전</h3>
+                    <button onclick="closeCreditChargeModal()" style="background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer;">&times;</button>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <div class="credit-pkg" onclick="purchaseLikeCredit('like_5000')" style="cursor:pointer;padding:16px;background:var(--bg);border:2px solid var(--border);border-radius:12px;text-align:center;transition:all 0.2s;">
+                        <div style="font-size:20px;font-weight:700;color:var(--accent-light);">5,000원</div>
+                        <div style="font-size:11px;color:var(--text-dim);margin-top:4px;">스탠다드 333개</div>
+                    </div>
+                    <div class="credit-pkg" onclick="purchaseLikeCredit('like_10000')" style="cursor:pointer;padding:16px;background:var(--bg);border:2px solid var(--accent);border-radius:12px;text-align:center;transition:all 0.2s;">
+                        <div style="font-size:20px;font-weight:700;color:var(--accent-light);">10,000원</div>
+                        <div style="font-size:11px;color:var(--text-dim);margin-top:4px;">스탠다드 666개</div>
+                        <div style="font-size:10px;color:var(--accent);font-weight:600;margin-top:2px;">인기</div>
+                    </div>
+                    <div class="credit-pkg" onclick="purchaseLikeCredit('like_30000')" style="cursor:pointer;padding:16px;background:var(--bg);border:2px solid var(--border);border-radius:12px;text-align:center;transition:all 0.2s;">
+                        <div style="font-size:20px;font-weight:700;color:var(--accent-light);">30,000원</div>
+                        <div style="font-size:11px;color:var(--text-dim);margin-top:4px;">스탠다드 2,000개</div>
+                    </div>
+                    <div class="credit-pkg" onclick="purchaseLikeCredit('like_50000')" style="cursor:pointer;padding:16px;background:var(--bg);border:2px solid var(--border);border-radius:12px;text-align:center;transition:all 0.2s;">
+                        <div style="font-size:20px;font-weight:700;color:var(--accent-light);">50,000원</div>
+                        <div style="font-size:11px;color:var(--text-dim);margin-top:4px;">스탠다드 3,333개</div>
+                    </div>
+                </div>
+                <div id="creditChargeMsg" style="margin-top:12px;font-size:12px;text-align:center;"></div>
+            </div>
+        </div>
+
         <!-- 티어 선택 카드 -->
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px;">
             <!-- 베이직 -->
@@ -1799,7 +1848,7 @@
         if (tabName === 'settings') loadSettings();
         if (tabName === 'smm' && IS_OWNER) loadSMMInfo();
         if (tabName === 'tracking') loadTrackingSummary();
-        if (tabName === 'boost') loadLikeOrders();
+        if (tabName === 'boost') { loadLikeOrders(); loadLikeCreditBalance(); }
     }
 
     // ─── API 호출 (타임아웃 + 재시도 + 네트워크 인식) ───
@@ -2917,7 +2966,8 @@
         }
 
         const price = qty * tierPrices[selectedTier];
-        if (!confirm(`${selectedTier.toUpperCase()} 티어로 ${qty}개 좋아요를 주문합니다.\n예상 금액: ${price.toLocaleString()}원\n\n진행하시겠습니까?`)) return;
+        const currentBalance = parseInt(document.getElementById('likeCreditBalance')?.textContent?.replace(/,/g, '') || '0');
+        if (!confirm(`${selectedTier.toUpperCase()} 티어로 ${qty}개 좋아요를 주문합니다.\n예상 금액: ${price.toLocaleString()}원\n현재 잔액: ${currentBalance.toLocaleString()}원\n\n진행하시겠습니까?`)) return;
 
         btn.disabled = true;
         btn.textContent = '주문 중...';
@@ -2932,9 +2982,12 @@
             const data = await resp.json();
 
             if (data.success) {
-                msgEl.innerHTML = `<span style="color:var(--green)">주문 완료! 주문 ID: ${data.order_id} | ${data.tier} ${data.quantity}개 | ${data.cost.toLocaleString()}원</span>`;
+                msgEl.innerHTML = `<span style="color:var(--green)">주문 완료! 주문 ID: ${data.order_id} | ${data.tier} ${data.quantity}개 | ${data.cost.toLocaleString()}원 | 잔액: ${(data.remaining_credits || 0).toLocaleString()}원</span>`;
                 document.getElementById('boostCommentUrl').value = '';
                 addBoostHistory(data);
+            } else if (resp.status === 402) {
+                // 크레딧 부족
+                msgEl.innerHTML = `<span style="color:var(--red)">${data.error}</span> <button class="btn btn-sm btn-primary" onclick="openCreditChargeModal()" style="margin-left:8px;font-size:11px;">크레딧 충전하기</button>`;
             } else {
                 msgEl.innerHTML = `<span style="color:var(--red)">${data.error || '주문 실패'}</span>`;
             }
@@ -3015,9 +3068,68 @@
     }
 
     function addBoostHistory(data) {
-        // 주문 후 즉시 목록 새로고침
+        // 주문 후 즉시 목록 새로고침 + 잔액 갱신
         loadLikeOrders();
+        loadLikeCreditBalance();
     }
+
+    // ─── 좋아요 크레딧 관리 ───
+    async function loadLikeCreditBalance() {
+        try {
+            const data = await api('/api/like-credits/balance');
+            if (!data) return;
+            const balance = data.balance || 0;
+            const el = document.getElementById('likeCreditBalance');
+            if (el) el.textContent = balance.toLocaleString();
+            // 구매 가능 수량 표시
+            const elBasic = document.getElementById('creditCanBuyBasic');
+            const elStandard = document.getElementById('creditCanBuyStandard');
+            const elPremium = document.getElementById('creditCanBuyPremium');
+            if (elBasic) elBasic.textContent = Math.floor(balance / 10).toLocaleString();
+            if (elStandard) elStandard.textContent = Math.floor(balance / 15).toLocaleString();
+            if (elPremium) elPremium.textContent = Math.floor(balance / 20).toLocaleString();
+        } catch(e) {}
+    }
+
+    function openCreditChargeModal() {
+        document.getElementById('creditChargeModal').style.display = 'flex';
+    }
+    function closeCreditChargeModal() {
+        document.getElementById('creditChargeModal').style.display = 'none';
+        document.getElementById('creditChargeMsg').innerHTML = '';
+    }
+
+    async function purchaseLikeCredit(productId) {
+        const msgEl = document.getElementById('creditChargeMsg');
+        msgEl.innerHTML = '<span style="color:var(--accent-light)">결제 준비 중...</span>';
+
+        try {
+            const resp = await fetch('/api/payment/request', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ product_id: productId }),
+            });
+            const data = await resp.json();
+
+            if (data.redirect) {
+                // Lemon Squeezy 체크아웃으로 이동
+                if (window.LemonSqueezy) {
+                    closeCreditChargeModal();
+                    window.LemonSqueezy.Url.Open(data.redirect);
+                } else {
+                    window.open(data.redirect, '_blank');
+                    closeCreditChargeModal();
+                }
+            } else if (data.error) {
+                msgEl.innerHTML = `<span style="color:var(--red)">${data.error}</span>`;
+            }
+        } catch(e) {
+            msgEl.innerHTML = '<span style="color:var(--red)">서버 연결 실패</span>';
+        }
+    }
+
+    // 주문 시 크레딧 부족 에러 처리 개선
+    const _originalOrderBoost = orderBoost;
 
     // ─── 중복 스캔 모달 ───
     function showDupScanModal() {
