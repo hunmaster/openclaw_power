@@ -3041,7 +3041,10 @@ def api_payment_confirm():
     order_id = data.get("orderId", "")
     amount = int(data.get("amount", 0))
 
+    print(f"[결제 디버그] 요청 수신: paymentId={payment_id}, orderId={order_id}, amount={amount}")
+
     if not payment_id or not order_id or not amount:
+        print(f"[결제 디버그] 필수 파라미터 누락!")
         return jsonify({"error": "필수 파라미터 누락"}), 400
 
     import requests as _requests
@@ -3057,6 +3060,7 @@ def api_payment_confirm():
             timeout=15,
         )
         result = resp.json()
+        print(f"[결제 디버그] PortOne API HTTP {resp.status_code}, 응답: {result}")
         add_log(f"[결제] PortOne API 응답 (HTTP {resp.status_code}): {result}", "info")
 
         payment_status = result.get("status")
@@ -3116,6 +3120,9 @@ def api_payment_confirm():
             }), 400
 
     except Exception as e:
+        import traceback
+        print(f"[결제 디버그] 예외 발생: {str(e)}")
+        traceback.print_exc()
         add_log(f"[결제] 결제 처리 오류: {str(e)}", "error")
         return jsonify({"error": f"결제 처리 오류: {str(e)}"}), 500
 
