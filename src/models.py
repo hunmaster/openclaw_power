@@ -199,6 +199,61 @@ class LikeOrder(db.Model):
         }
 
 
+class AutomationLog(db.Model):
+    """자동화 실행 로그 (댓글 작성 성공/실패 기록 - 영속 저장)."""
+    __tablename__ = "automation_logs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    action = db.Column(db.String(50), nullable=False)  # comment_post, comment_fail, like_order, automation_start, automation_end
+    account_label = db.Column(db.String(100), nullable=True)
+    video_url = db.Column(db.String(500), nullable=True)
+    video_title = db.Column(db.String(500), nullable=True)
+    comment_text = db.Column(db.Text, nullable=True)
+    comment_url = db.Column(db.String(500), nullable=True)
+    detail = db.Column(db.String(500), nullable=True)
+    level = db.Column(db.String(20), default="info")  # info, success, warning, error
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "action": self.action,
+            "account_label": self.account_label,
+            "video_url": self.video_url,
+            "video_title": self.video_title,
+            "comment_text": (self.comment_text or "")[:100],
+            "comment_url": self.comment_url,
+            "detail": self.detail,
+            "level": self.level,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class CommentHistory(db.Model):
+    """댓글 히스토리 (안전 규칙용 - 파일 대신 DB에 저장)."""
+    __tablename__ = "comment_history"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    account_label = db.Column(db.String(100), nullable=False, index=True)
+    video_id = db.Column(db.String(20), nullable=True, index=True)
+    video_url = db.Column(db.String(500), nullable=True)
+    comment_text = db.Column(db.String(200), nullable=True)  # 처음 100자
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "account_label": self.account_label,
+            "video_id": self.video_id,
+            "comment_text": self.comment_text,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class UserActivityLog(db.Model):
     """유저 활동 로그 (가입, 로그인, 탈퇴 등)."""
     __tablename__ = "user_activity_log"

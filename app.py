@@ -56,7 +56,7 @@ app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(_data_dir, "
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["REMEMBER_COOKIE_DURATION"] = timedelta(days=30)
 
-from src.models import db, User, UserSettings, YouTubeAccount, UserActivityLog, LikeOrder
+from src.models import db, User, UserSettings, YouTubeAccount, UserActivityLog, LikeOrder, AutomationLog, CommentHistory
 db.init_app(app)
 
 login_manager = LoginManager()
@@ -368,6 +368,48 @@ def add_log(message, level="info"):
         automation_state["logs"] = automation_state["logs"][-200:]
 
 
+def save_automation_log(action, user_id=None, account_label=None, video_url=None,
+                        video_title=None, comment_text=None, comment_url=None,
+                        detail=None, level="info"):
+    """자동화 실행 로그를 DB에 영속 저장합니다."""
+    try:
+        with app.app_context():
+            if user_id is None:
+                user_id = current_user.id if (current_user and current_user.is_authenticated) else 1
+            log = AutomationLog(
+                user_id=user_id,
+                action=action,
+                account_label=account_label,
+                video_url=video_url,
+                video_title=video_title,
+                comment_text=(comment_text or "")[:200] if comment_text else None,
+                comment_url=comment_url,
+                detail=(detail or "")[:500] if detail else None,
+                level=level,
+            )
+            db.session.add(log)
+            db.session.commit()
+    except Exception:
+        pass
+
+
+def save_comment_history_db(user_id, account_label, video_url, video_id, comment_text):
+    """댓글 히스토리를 DB에 저장합니다 (안전 규칙 + 관리자 통계용)."""
+    try:
+        with app.app_context():
+            record = CommentHistory(
+                user_id=user_id,
+                account_label=account_label,
+                video_id=video_id,
+                video_url=video_url,
+                comment_text=(comment_text or "")[:100],
+            )
+            db.session.add(record)
+            db.session.commit()
+    except Exception:
+        pass
+
+
 # 트래커에 대시보드 로그 콜백 연결
 comment_tracker.set_log_callback(add_log)
 
@@ -592,8 +634,17 @@ def api_dashboard():
     except Exception:
         pass
 
-    # 오늘 총 성공 댓글 수 (comment_history.json 기반, 새로고침해도 유지됨)
-    today_success = safety_rules.get_today_total_success()
+    # 오늘 총 성공 댓글 수 (DB 우선, 파일 폴백)
+    try:
+        from sqlalchemy import func as sa_func
+        today_start = datetime.strptime(datetime.now().strftime("%Y-%m-%d"), "%Y-%m-%d")
+        today_success = db.session.query(sa_func.count(CommentHistory.id)).filter(
+            CommentHistory.created_at >= today_start
+        ).scalar() or 0
+        if today_success == 0:
+            today_success = safety_rules.get_today_total_success()
+    except Exception:
+        today_success = safety_rules.get_today_total_success()
 
     return jsonify({
         "accounts": account_stats,
@@ -1142,11 +1193,21 @@ def _get_user_setting(user_id, key, default=None):
     return os.getenv(key, default or UserSettings.DEFAULTS.get(key, ""))
 
 
+MASKED_PLACEHOLDER = "__MASKED__"
+
+
 def _mask_key(value, visible=4):
-    """API 키를 마스킹합니다. 앞 4자만 보여줌."""
+    """API 키를 마스킹합니다. 앞 4자만 보여줌. 마스킹 접두사 추가."""
     if not value or len(value) <= visible:
         return value
-    return value[:visible] + "*" * (len(value) - visible)
+    return MASKED_PLACEHOLDER + value[:visible] + "*" * min(len(value) - visible, 20)
+
+
+def _is_masked_value(value):
+    """마스킹된 값인지 정확하게 판별합니다 (단순 * 포함 여부 대신 접두사 체크)."""
+    if not value or not isinstance(value, str):
+        return False
+    return value.startswith(MASKED_PLACEHOLDER)
 
 
 # ──────────────────────────── 좋아요 관리자 컨펌 API ────────────────────────────
@@ -1298,8 +1359,8 @@ def api_save_settings():
         for key, value in data.items():
             if key not in user_keys:
                 continue
-            if "*" in str(value):
-                continue
+            if _is_masked_value(str(value)):
+                continue  # 마스킹된 값은 저장하지 않음 (기존 값 유지)
             user_updates[key] = str(value)
 
         if user_updates:
@@ -1315,8 +1376,8 @@ def api_save_settings():
             for key, value in data.items():
                 if key not in owner_keys:
                     continue
-                if "*" in str(value):
-                    continue
+                if _is_masked_value(str(value)):
+                    continue  # 마스킹된 값은 저장하지 않음 (기존 값 유지)
                 _update_env_var(env_path, key, str(value))
 
         # Notion 관련 설정이 바뀌었으면 setup_completed 체크
@@ -1886,6 +1947,7 @@ def _run_automation(limit=0, selected_ids=None):
         else:
             mode_label = "[전체 실행]"
         add_log(f"자동화 시작 {mode_label}", "info")
+        save_automation_log("automation_start", detail=mode_label, level="info")
 
         notion = NotionManager()
         proxy_manager = ProxyManager()
@@ -2167,6 +2229,24 @@ def _run_automation(limit=0, selected_ids=None):
 
                     safety_rules.record_comment(current_label, task["youtube_url"], task["comment_text"])
 
+                    # DB에 댓글 히스토리 저장 (안전 규칙 + 관리자 통계)
+                    _auto_user_id = current_user.id if (current_user and current_user.is_authenticated) else 1
+                    save_comment_history_db(
+                        _auto_user_id, current_label,
+                        task["youtube_url"], safety_rules._extract_video_id(task["youtube_url"]),
+                        task["comment_text"]
+                    )
+                    # DB에 자동화 로그 저장
+                    save_automation_log(
+                        "comment_post", user_id=_auto_user_id,
+                        account_label=current_label,
+                        video_url=task["youtube_url"],
+                        video_title=task.get("video_title"),
+                        comment_text=task["comment_text"],
+                        comment_url=comment_url,
+                        level="success"
+                    )
+
                     # 트래킹 자동 등록 (상태: 트래킹 예정 - 4시간 후 자동 확인)
                     if comment_url:
                         comment_tracker.register_comment(
@@ -2183,6 +2263,15 @@ def _run_automation(limit=0, selected_ids=None):
                     automation_state["results"]["fail"] += 1
                     notion.update_task_error(task["page_id"], "댓글 작성 실패")
                     add_log("댓글 작성 실패", "error")
+                    # DB에 실패 로그 저장
+                    save_automation_log(
+                        "comment_fail",
+                        account_label=current_label,
+                        video_url=task["youtube_url"],
+                        video_title=task.get("video_title"),
+                        detail="댓글 작성 실패",
+                        level="error"
+                    )
                     prev_task_success = False
 
             except Exception as e:
@@ -2203,13 +2292,14 @@ def _run_automation(limit=0, selected_ids=None):
         summary_prefix = "[테스트 완료]" if test_mode else "[전체 완료]"
         dup = automation_state['results'].get('duplicate', 0)
         dup_text = f", 중복: {dup}" if dup > 0 else ""
-        add_log(
+        summary_msg = (
             f"{summary_prefix} 성공: {automation_state['results']['success']}, "
             f"실패: {automation_state['results']['fail']}, "
             f"건너뜀: {automation_state['results']['skip']}, "
-            f"좋아요: {automation_state['results']['likes']}{dup_text}",
-            "success" if automation_state['results']['success'] > 0 else "warning",
+            f"좋아요: {automation_state['results']['likes']}{dup_text}"
         )
+        add_log(summary_msg, "success" if automation_state['results']['success'] > 0 else "warning")
+        save_automation_log("automation_end", detail=summary_msg, level="success")
 
     except Exception as e:
         add_log(f"치명적 오류: {str(e)}", "error")
@@ -3134,8 +3224,10 @@ def api_admin_toggle():
     data = request.get_json() or {}
     admin_key = data.get("admin_key", "").strip()
 
-    # 관리자 비밀 키 검증 (환경변수 또는 기본값)
-    expected_key = os.environ.get("ADMIN_SECRET_KEY", "wkd930330@@")
+    # 관리자 비밀 키 검증 (환경변수 필수 - 미설정 시 관리자 접근 차단)
+    expected_key = os.environ.get("ADMIN_SECRET_KEY")
+    if not expected_key:
+        return jsonify({"error": "ADMIN_SECRET_KEY 환경변수가 설정되지 않았습니다. .env에 설정해주세요."}), 500
     if admin_key != expected_key:
         return jsonify({"error": "관리자 인증 실패"}), 403
 
@@ -3190,6 +3282,125 @@ def api_admin_activity_log():
     return jsonify({
         "logs": [log.to_dict() for log in logs],
         "total": len(logs),
+    })
+
+
+@app.route("/api/admin/stats")
+def api_admin_stats():
+    """관리자용: 사용자별 댓글 통계 (오늘/전체 댓글 수, 성공률, 마지막 실행)."""
+    if not _admin_view_active:
+        return jsonify({"error": "관리자 권한이 필요합니다."}), 403
+
+    from sqlalchemy import func
+
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    today_start = datetime.strptime(today, "%Y-%m-%d")
+
+    # 사용자별 전체 댓글 수
+    total_by_user = db.session.query(
+        CommentHistory.user_id,
+        func.count(CommentHistory.id).label("total_comments")
+    ).group_by(CommentHistory.user_id).all()
+
+    # 사용자별 오늘 댓글 수
+    today_by_user = db.session.query(
+        CommentHistory.user_id,
+        func.count(CommentHistory.id).label("today_comments")
+    ).filter(CommentHistory.created_at >= today_start).group_by(CommentHistory.user_id).all()
+
+    # 사용자별 자동화 성공/실패 수
+    success_by_user = db.session.query(
+        AutomationLog.user_id,
+        func.count(AutomationLog.id).label("count")
+    ).filter(AutomationLog.action == "comment_post").group_by(AutomationLog.user_id).all()
+
+    fail_by_user = db.session.query(
+        AutomationLog.user_id,
+        func.count(AutomationLog.id).label("count")
+    ).filter(AutomationLog.action == "comment_fail").group_by(AutomationLog.user_id).all()
+
+    # 사용자별 마지막 자동화 실행 시간
+    last_run_by_user = db.session.query(
+        AutomationLog.user_id,
+        func.max(AutomationLog.created_at).label("last_run")
+    ).filter(AutomationLog.action.in_(["automation_start", "comment_post"])).group_by(AutomationLog.user_id).all()
+
+    # 조합
+    total_map = {r.user_id: r.total_comments for r in total_by_user}
+    today_map = {r.user_id: r.today_comments for r in today_by_user}
+    success_map = {r.user_id: r.count for r in success_by_user}
+    fail_map = {r.user_id: r.count for r in fail_by_user}
+    last_run_map = {r.user_id: r.last_run.isoformat() if r.last_run else None for r in last_run_by_user}
+
+    users = User.query.all()
+    stats = []
+    for u in users:
+        s = success_map.get(u.id, 0)
+        f = fail_map.get(u.id, 0)
+        rate = round(s / (s + f) * 100, 1) if (s + f) > 0 else 0
+        stats.append({
+            "user_id": u.id,
+            "email": u.email,
+            "plan": u.plan or "Free",
+            "total_comments": total_map.get(u.id, 0),
+            "today_comments": today_map.get(u.id, 0),
+            "success_count": s,
+            "fail_count": f,
+            "success_rate": rate,
+            "last_run": last_run_map.get(u.id),
+        })
+
+    return jsonify({"stats": stats, "total_users": len(stats)})
+
+
+@app.route("/api/admin/automation-logs")
+def api_admin_automation_logs():
+    """관리자용: 자동화 실행 로그 조회 (영속 저장된 로그)."""
+    if not _admin_view_active:
+        return jsonify({"error": "관리자 권한이 필요합니다."}), 403
+
+    limit = request.args.get("limit", 200, type=int)
+    user_id = request.args.get("user_id", type=int)
+    action = request.args.get("action")  # comment_post, comment_fail, automation_start, etc.
+
+    query = AutomationLog.query
+    if user_id:
+        query = query.filter(AutomationLog.user_id == user_id)
+    if action:
+        query = query.filter(AutomationLog.action == action)
+
+    logs = query.order_by(AutomationLog.created_at.desc()).limit(limit).all()
+    return jsonify({
+        "logs": [log.to_dict() for log in logs],
+        "total": len(logs),
+    })
+
+
+@app.route("/api/admin/comment-history")
+def api_admin_comment_history():
+    """관리자용: 사용자별 댓글 히스토리 조회."""
+    if not _admin_view_active:
+        return jsonify({"error": "관리자 권한이 필요합니다."}), 403
+
+    limit = request.args.get("limit", 100, type=int)
+    user_id = request.args.get("user_id", type=int)
+    date = request.args.get("date")  # YYYY-MM-DD
+
+    query = CommentHistory.query
+    if user_id:
+        query = query.filter(CommentHistory.user_id == user_id)
+    if date:
+        try:
+            date_start = datetime.strptime(date, "%Y-%m-%d")
+            date_end = date_start + timedelta(days=1)
+            query = query.filter(CommentHistory.created_at >= date_start, CommentHistory.created_at < date_end)
+        except ValueError:
+            pass
+
+    records = query.order_by(CommentHistory.created_at.desc()).limit(limit).all()
+    return jsonify({
+        "records": [r.to_dict() for r in records],
+        "total": len(records),
     })
 
 
