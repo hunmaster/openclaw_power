@@ -2761,7 +2761,7 @@ def _update_env_var(env_path, key, value):
     lines = []
     found = False
     if os.path.exists(env_path):
-        with open(env_path, "r") as f:
+        with open(env_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
 
     new_lines = []
@@ -2775,7 +2775,7 @@ def _update_env_var(env_path, key, value):
     if not found:
         new_lines.append(f"{key}={value}\n")
 
-    with open(env_path, "w") as f:
+    with open(env_path, "w", encoding="utf-8") as f:
         f.writelines(new_lines)
 
     # 환경변수도 즉시 반영
