@@ -1,4 +1,4 @@
-app = "commentboost"
+app = "commentboost-app"
 primary_region = "nrt"
 
 [build]
