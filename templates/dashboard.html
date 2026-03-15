@@ -3186,13 +3186,8 @@
 
         // 4. 체크아웃 URL 열기
         if (checkoutUrl) {
-            if (window.LemonSqueezy) {
-                closeCreditChargeModal();
-                window.LemonSqueezy.Url.Open(checkoutUrl);
-            } else {
-                window.open(checkoutUrl, '_blank');
-                closeCreditChargeModal();
-            }
+            closeCreditChargeModal();
+            openCheckoutUrl(checkoutUrl);
         } else {
             msgEl.innerHTML = '<span style="color:var(--red)">결제 URL을 찾을 수 없습니다. 설정을 확인해주세요.</span>';
         }
@@ -4922,6 +4917,19 @@
     let selectedPayPlan = null;
     let selectedPayPrice = 0;
 
+    // 체크아웃 URL 열기 (오버레이 → 새 탭 fallback)
+    function openCheckoutUrl(url) {
+        try {
+            if (window.LemonSqueezy && window.LemonSqueezy.Url) {
+                window.LemonSqueezy.Url.Open(url);
+                return;
+            }
+        } catch(e) {
+            console.log('[LS] 오버레이 실패, 새 탭으로 전환:', e);
+        }
+        window.open(url, '_blank');
+    }
+
     // Lemon Squeezy 설정 초기화
     (async function initLemonSqueezy() {
         try {
@@ -4998,11 +5006,7 @@
 
         // 4. 체크아웃 URL 열기
         if (checkoutUrl) {
-            if (window.LemonSqueezy) {
-                window.LemonSqueezy.Url.Open(checkoutUrl);
-            } else {
-                window.open(checkoutUrl, '_blank');
-            }
+            openCheckoutUrl(checkoutUrl);
             msg.innerHTML = '<span style="color:#4ade80;">결제창이 열렸습니다. 결제를 완료해주세요.</span>';
             setTimeout(() => {
                 closePaymentPopup();
@@ -5076,12 +5080,7 @@
             }
 
             if (checkoutUrl) {
-                // LemonSqueezy 체크아웃으로 이동
-                if (window.LemonSqueezy) {
-                    window.LemonSqueezy.Url.Open(checkoutUrl);
-                } else {
-                    window.open(checkoutUrl, '_blank');
-                }
+                openCheckoutUrl(checkoutUrl);
                 msg.innerHTML = '<span style="color:#22c55e;">결제 페이지가 열렸습니다. 결제 완료 후 토큰이 자동 충전됩니다.</span>';
             } else {
                 // 토큰 상품 미등록 시 카카오 문의 안내

@@ -19,6 +19,19 @@ PRODUCT_NAME_TO_PLAN = {
     "agency": "agency",
 }
 
+# ─── 기본 체크아웃 URL (공개 URL - .env 없이도 결제 가능) ───
+DEFAULT_CHECKOUT_URLS = {
+    # 구독 플랜
+    "starter": "https://commentboost-ai.lemonsqueezy.com/checkout/buy/30b27fd0-7037-4a07-b57e-ef6f9de7c227",
+    "business": "https://commentboost-ai.lemonsqueezy.com/checkout/buy/c8fb4c61-2fc5-4eae-8a97-5585e8c37c4e",
+    "agency": "https://commentboost-ai.lemonsqueezy.com/checkout/buy/39eee6ef-dc49-4184-ac23-38af4150e573",
+    # 좋아요 크레딧
+    "like_5000": "https://commentboost-ai.lemonsqueezy.com/checkout/buy/3c0f7ce6-3a69-44bd-8696-8779f1e81839",
+    "like_10000": "https://commentboost-ai.lemonsqueezy.com/checkout/buy/5821b2a9-2460-4e48-8c52-1d5cf3975dc6",
+    "like_30000": "https://commentboost-ai.lemonsqueezy.com/checkout/buy/a6ef8e7b-a7c8-42c1-942c-7d255a9754ac",
+    "like_50000": "https://commentboost-ai.lemonsqueezy.com/checkout/buy/5785f4d1-3085-42d4-b5fd-b806366530bd",
+}
+
 
 class LemonSqueezyClient:
     def __init__(self):
@@ -39,54 +52,56 @@ class LemonSqueezyClient:
         }
 
     def _load_direct_checkout_urls(self):
-        """환경변수에서 직접 체크아웃 URL 로드 (API 생성 불필요)"""
-        direct_urls = {
-            "starter": os.getenv("LEMONSQUEEZY_CHECKOUT_STARTER", ""),
-            "business": os.getenv("LEMONSQUEEZY_CHECKOUT_BUSINESS", ""),
-            "agency": os.getenv("LEMONSQUEEZY_CHECKOUT_AGENCY", ""),
-        }
+        """환경변수에서 직접 체크아웃 URL 로드, 없으면 기본값 사용"""
         loaded = 0
-        for plan_id, url in direct_urls.items():
+
+        # 구독 플랜
+        plan_keys = {
+            "starter": "LEMONSQUEEZY_CHECKOUT_STARTER",
+            "business": "LEMONSQUEEZY_CHECKOUT_BUSINESS",
+            "agency": "LEMONSQUEEZY_CHECKOUT_AGENCY",
+        }
+        for plan_id, env_key in plan_keys.items():
+            url = os.getenv(env_key, "") or DEFAULT_CHECKOUT_URLS.get(plan_id, "")
             if url:
                 self.checkout_urls[plan_id] = url
                 loaded += 1
-                print(f"[LemonSqueezy] 직접 체크아웃 URL 로드: {plan_id}")
 
-        # 토큰 충전 상품 URL 로드
-        token_urls = {
-            "token_500": os.getenv("LEMONSQUEEZY_CHECKOUT_TOKEN_500", ""),
-            "token_1200": os.getenv("LEMONSQUEEZY_CHECKOUT_TOKEN_1200", ""),
-            "token_3000": os.getenv("LEMONSQUEEZY_CHECKOUT_TOKEN_3000", ""),
-            "token_7000": os.getenv("LEMONSQUEEZY_CHECKOUT_TOKEN_7000", ""),
+        # 토큰 충전
+        token_keys = {
+            "token_500": "LEMONSQUEEZY_CHECKOUT_TOKEN_500",
+            "token_1200": "LEMONSQUEEZY_CHECKOUT_TOKEN_1200",
+            "token_3000": "LEMONSQUEEZY_CHECKOUT_TOKEN_3000",
+            "token_7000": "LEMONSQUEEZY_CHECKOUT_TOKEN_7000",
         }
-        for token_id, url in token_urls.items():
+        for token_id, env_key in token_keys.items():
+            url = os.getenv(env_key, "")
             if url:
                 self.checkout_urls[token_id] = url
                 loaded += 1
-                print(f"[LemonSqueezy] 토큰 충전 URL 로드: {token_id}")
 
-        # 좋아요 크레딧 충전 상품 URL 로드
-        like_credit_urls = {
-            "like_5000": os.getenv("LEMONSQUEEZY_CHECKOUT_LIKE_5000", ""),
-            "like_10000": os.getenv("LEMONSQUEEZY_CHECKOUT_LIKE_10000", ""),
-            "like_30000": os.getenv("LEMONSQUEEZY_CHECKOUT_LIKE_30000", ""),
-            "like_50000": os.getenv("LEMONSQUEEZY_CHECKOUT_LIKE_50000", ""),
+        # 좋아요 크레딧
+        like_keys = {
+            "like_5000": "LEMONSQUEEZY_CHECKOUT_LIKE_5000",
+            "like_10000": "LEMONSQUEEZY_CHECKOUT_LIKE_10000",
+            "like_30000": "LEMONSQUEEZY_CHECKOUT_LIKE_30000",
+            "like_50000": "LEMONSQUEEZY_CHECKOUT_LIKE_50000",
         }
-        for like_id, url in like_credit_urls.items():
+        for like_id, env_key in like_keys.items():
+            url = os.getenv(env_key, "") or DEFAULT_CHECKOUT_URLS.get(like_id, "")
             if url:
                 self.checkout_urls[like_id] = url
                 loaded += 1
-                print(f"[LemonSqueezy] 좋아요 크레딧 URL 로드: {like_id}")
 
         return loaded
 
     def initialize(self):
         """앱 시작 시 호출: 스토어/상품/variant 정보 자동 로드"""
-        # 1. 먼저 환경변수에서 직접 체크아웃 URL 확인
+        # 1. 먼저 환경변수 + 기본값에서 직접 체크아웃 URL 로드
         direct_count = self._load_direct_checkout_urls()
         if direct_count > 0:
             self._initialized = True
-            print(f"[LemonSqueezy] 직접 URL 모드: {direct_count}개 플랜 결제 준비됨")
+            print(f"[LemonSqueezy] 결제 준비 완료: {direct_count}개 상품 ({', '.join(self.checkout_urls.keys())})")
             # API 키가 있으면 variant_map도 로드 시도 (웹훅 처리용)
             if self.api_key:
                 self._load_variants_for_webhook()
