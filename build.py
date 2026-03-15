@@ -13,6 +13,7 @@ import sys
 import subprocess
 import shutil
 import json
+import time
 
 APP_NAME = "CommentBoost"
 ENTRY_POINT = "desktop.py"
@@ -36,7 +37,6 @@ HIDDEN_IMPORTS = [
     "notion_client",
     "rich",
     "webview",
-    "engineio.async_drivers.threading",
 ]
 
 # 제외할 모듈 (빌드 크기 줄이기)
@@ -70,12 +70,28 @@ def build():
     # 이전 빌드 정리
     for d in ["build", "dist"]:
         if os.path.exists(d):
-            try:
-                shutil.rmtree(d, ignore_errors=True)
-                print(f"[빌드] {d}/ 폴더 정리")
-            except Exception:
-                print(f"[빌드] {d}/ 폴더 정리 실패 (무시하고 계속)")
-                pass
+            for attempt in range(3):
+                try:
+                    shutil.rmtree(d)
+                    print(f"[빌드] {d}/ 폴더 정리")
+                    break
+                except PermissionError as e:
+                    if attempt < 2:
+                        print(f"[빌드] {d}/ 폴더가 잠겨있습니다. 재시도 {attempt + 1}/3... (3초 대기)")
+                        # Windows에서 잠긴 파일 해제 시도
+                        if sys.platform == "win32":
+                            subprocess.run(
+                                ["taskkill", "/F", "/IM", f"{APP_NAME}.exe"],
+                                capture_output=True,
+                            )
+                        time.sleep(3)
+                    else:
+                        print(f"[빌드] 오류: {d}/ 폴더 삭제 불가 - {e}")
+                        print(f"[빌드] {APP_NAME}.exe가 실행 중이면 종료 후 다시 시도하세요.")
+                        sys.exit(1)
+                except Exception as e:
+                    print(f"[빌드] {d}/ 폴더 정리 실패: {e}")
+                    break
 
     # PyInstaller 명령 구성
     cmd = [
