@@ -70,8 +70,12 @@ def build():
     # 이전 빌드 정리
     for d in ["build", "dist"]:
         if os.path.exists(d):
-            shutil.rmtree(d)
-            print(f"[빌드] {d}/ 폴더 정리")
+            try:
+                shutil.rmtree(d, ignore_errors=True)
+                print(f"[빌드] {d}/ 폴더 정리")
+            except Exception:
+                print(f"[빌드] {d}/ 폴더 정리 실패 (무시하고 계속)")
+                pass
 
     # PyInstaller 명령 구성
     cmd = [
