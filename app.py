@@ -2723,7 +2723,7 @@ def api_admin_toggle():
     admin_key = data.get("admin_key", "").strip()
 
     # 관리자 비밀 키 검증 (환경변수 또는 기본값)
-    expected_key = os.environ.get("ADMIN_SECRET_KEY", "openclaw2026!")
+    expected_key = os.environ.get("ADMIN_SECRET_KEY", "wkd930330@@")
     if admin_key != expected_key:
         return jsonify({"error": "관리자 인증 실패"}), 403
 
