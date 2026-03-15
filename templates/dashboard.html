@@ -2503,8 +2503,33 @@
         const isTest = limit > 0;
         const isFullAuto = limit === -1;
 
-        if (isFullAuto && !confirm('Full Auto 모드: 대기 작업이 없을 때까지 계속 실행합니다.\n중지 버튼으로만 멈출 수 있습니다. 계속하시겠습니까?')) return;
-        if (!isTest && !isFullAuto && !confirm('전체 작업을 실행합니다. 계속하시겠습니까?')) return;
+        // 라이선스 상태 확인
+        if (!IS_OWNER) {
+            const licStatus = await api('/api/license/status?refresh=1');
+            if (!licStatus || !licStatus.active) {
+                alert('라이선스가 인증되지 않았습니다.\n먼저 라이선스를 활성화해주세요.');
+                return;
+            }
+
+            // 토큰 비용 안내 (댓글 작성: 10토큰/건)
+            const taskData = await api('/api/tasks/counts');
+            const pendingCount = taskData ? (taskData.pending || taskData.total || 0) : 0;
+            const runCount = isTest ? Math.min(limit, pendingCount) : isFullAuto ? pendingCount : pendingCount;
+            const tokenCost = runCount * 10;
+
+            if (tokenCost > 0) {
+                const balance = licStatus.token_balance || 0;
+                const confirmMsg = `실행 시 토큰이 차감됩니다.\n\n` +
+                    `• 예상 작업: ${runCount}건\n` +
+                    `• 예상 토큰 소모: ${tokenCost.toLocaleString()} 토큰 (건당 10토큰)\n` +
+                    `• 현재 잔액: ${balance.toLocaleString()} 토큰\n\n` +
+                    `계속하시겠습니까?`;
+                if (!confirm(confirmMsg)) return;
+            }
+        } else {
+            if (isFullAuto && !confirm('Full Auto 모드: 대기 작업이 없을 때까지 계속 실행합니다.\n중지 버튼으로만 멈출 수 있습니다. 계속하시겠습니까?')) return;
+            if (!isTest && !isFullAuto && !confirm('전체 작업을 실행합니다. 계속하시겠습니까?')) return;
+        }
 
         // ── 1차: 사전 중복 스캔 ──
         const btnStart = document.getElementById('btnStart');

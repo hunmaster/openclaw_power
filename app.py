@@ -116,6 +116,15 @@ def _check_tracking_allowed():
     return None
 
 
+def _check_license_active():
+    """라이선스 활성 상태 확인. 미인증 시 에러 메시지 반환"""
+    if license_client.owner_mode:
+        return None
+    if not license_client.is_active():
+        return "라이선스가 인증되지 않았습니다. 먼저 라이선스를 활성화해주세요."
+    return None
+
+
 def _tracking_progress_callback(progress, total):
     """comment_tracker에서 호출되는 진행 상태 콜백"""
     tracking_state["progress"] = progress
@@ -602,6 +611,11 @@ def api_notion_debug():
 @app.route("/api/run", methods=["POST"])
 def api_run():
     """자동화를 백그라운드에서 시작합니다. limit 파라미터로 테스트 실행 가능."""
+    # 라이선스 인증 확인
+    lic_err = _check_license_active()
+    if lic_err:
+        return jsonify({"error": lic_err}), 403
+
     with automation_lock:
         if automation_state["running"]:
             return jsonify({"error": "이미 실행 중입니다."}), 409
@@ -658,6 +672,10 @@ def api_stop():
 @app.route("/api/reply/run", methods=["POST"])
 def api_reply_run():
     """대댓글 자동화를 백그라운드에서 시작합니다."""
+    lic_err = _check_license_active()
+    if lic_err:
+        return jsonify({"error": lic_err}), 403
+
     with reply_lock:
         if reply_state["running"]:
             return jsonify({"error": "대댓글 자동화가 이미 실행 중입니다."}), 409
@@ -2530,6 +2548,11 @@ _scheduler_started = False
 
 def _daily_tracking_job():
     """매일 아침 8시에 전체 댓글 트래킹을 실행합니다."""
+    # 라이선스 미인증 시 자동 트래킹 스킵
+    if not license_client.owner_mode and not license_client.is_active():
+        add_log("[스케줄] 라이선스 미인증 → 자동 트래킹 스킵", "warning")
+        return
+
     with tracking_lock:
         if tracking_state["running"]:
             add_log("[스케줄] 이미 트래킹 진행 중 - 스킵", "warning")
@@ -2553,6 +2576,10 @@ def _daily_tracking_job():
 
 def _check_pending_tracking():
     """4시간이 지난 'pending_tracking' 댓글을 자동으로 트래킹합니다."""
+    # 라이선스 미인증 시 자동 트래킹 스킵
+    if not license_client.owner_mode and not license_client.is_active():
+        return
+
     try:
         summary = comment_tracker.get_summary()
         pending = [c for c in summary if c["status"] == "pending_tracking"]
@@ -3117,8 +3144,10 @@ def api_payment_confirm():
                     plan_id = plan_map.get(product_id)
                     if plan_id:
                         try:
+                            upgrade_url = f"{license_client.server_url}/api/license/plan/upgrade"
+                            print(f"[결제] 플랜 업그레이드 요청: {upgrade_url}, plan={plan_id}")
                             plan_resp = _requests.post(
-                                f"{license_client.server_url}/api/license/plan/upgrade",
+                                upgrade_url,
                                 json={
                                     "license_key": license_client.license_key,
                                     "plan_id": plan_id,
@@ -3126,15 +3155,20 @@ def api_payment_confirm():
                                 },
                                 timeout=10,
                             )
-                            plan_data = plan_resp.json()
-                            if plan_data.get("success"):
-                                # verify 재호출하여 로컬 캐시 갱신
-                                license_client.verify()
-                                print(f"[결제] 플랜 업그레이드 완료: {plan_data.get('plan')}")
+                            print(f"[결제] 플랜 업그레이드 응답: HTTP {plan_resp.status_code}, body={plan_resp.text[:200]}")
+                            if plan_resp.status_code == 200:
+                                plan_data = plan_resp.json()
+                                if plan_data.get("success"):
+                                    license_client.verify()
+                                    print(f"[결제] 플랜 업그레이드 완료: {plan_data.get('plan')}")
+                                else:
+                                    print(f"[결제] 플랜 업그레이드 실패: {plan_data}")
                             else:
-                                print(f"[결제] 플랜 업그레이드 실패: {plan_data}")
+                                print(f"[결제] 플랜 업그레이드 서버 오류: HTTP {plan_resp.status_code}")
                         except Exception as e:
+                            import traceback
                             print(f"[결제] 플랜 업그레이드 오류: {e}")
+                            traceback.print_exc()
 
                 add_log(f"[결제] 결제 완료: {product['name']} (₩{amount:,})", "success")
 
