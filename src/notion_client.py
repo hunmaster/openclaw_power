@@ -132,8 +132,22 @@ class NotionManager:
 
             console.print(f"[dim]DB 속성 목록: {', '.join(prop_names)}[/dim]")
 
+            # 상태 컬럼의 실제 옵션값 저장 (상태값 자동 매핑용)
+            status_prop = self._db_properties.get(self.col_status, {})
+            status_type = status_prop.get("type", "select")
+            if status_type in ("select", "status"):
+                opts = status_prop.get(status_type, {}).get("options", [])
+                self._status_options = [o["name"] for o in opts]
+                console.print(f"[dim]상태 옵션값: {self._status_options}[/dim]")
+                self._auto_map_statuses()
+
         except Exception as e:
-            console.print(f"[yellow]DB 스키마 조회 실패 (기본 컬럼명 사용): {e}[/yellow]")
+            error_msg = str(e)
+            if "403" in error_msg or "Forbidden" in error_msg:
+                console.print(f"[red]노션 DB 접근 권한 없음 (403): Integration이 해당 DB에 연결되어 있는지 확인하세요.[/red]")
+                console.print(f"[yellow]해결 방법: 노션 DB 페이지 → 우측 상단 '...' → '연결 추가' → Integration 선택[/yellow]")
+            else:
+                console.print(f"[yellow]DB 스키마 조회 실패 (기본 컬럼명 사용): {e}[/yellow]")
             self.col_checkbox = "댓글 완료"  # 기본값
             self.col_reply_checkbox = "대댓글 완료"  # 기본값
             self.col_like_checkbox = "좋아요 완료"  # 기본값
