@@ -1,28 +1,12 @@
-app = "commentboost-app"
-primary_region = "nrt"
-
-[build]
-  dockerfile = "Dockerfile"
-
-[env]
-  LICENSE_MODE = "client"
-  LICENSE_SERVER_URL = "https://api.commentboost.cloud"
-  FLASK_ENV = "production"
-  PYTHONUNBUFFERED = "1"
-  ACCOUNTS_FILE = "/data/config/accounts.json"
-
-[http_service]
-  internal_port = 5000
-  force_https = true
-  auto_stop_machines = "stop"
-  auto_start_machines = true
-  min_machines_running = 1
-
-[mounts]
-  source = "app_data"
-  destination = "/data"
-
-[[vm]]
-  memory = "1gb"
-  cpu_kind = "shared"
-  cpus = 1
+# ============================================
+# 이 파일은 더 이상 사용되지 않습니다.
+# ============================================
+# 메인 앱은 로컬 PC에서 실행됩니다 (start.bat).
+#
+# Fly.io 배포 대상:
+#   - 랜딩 페이지: landing/fly.toml  (commentboost.cloud)
+#   - 라이선스 서버: license_server/fly.toml (api.commentboost.cloud)
+#
+# 배포 방법:
+#   cd landing && fly deploy
+#   cd license_server && fly deploy

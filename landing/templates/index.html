@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CommentBoost - 유튜브 댓글 자동화 프로그램</title>
+    <style>
+        :root {
+            --primary: #6366f1;
+            --primary-dark: #4f46e5;
+            --bg: #0f0f13;
+            --bg-card: #1a1a24;
+            --bg-card-hover: #22223a;
+            --text: #e4e4e7;
+            --text-muted: #a1a1aa;
+            --border: #2a2a3a;
+            --accent-green: #22c55e;
+            --accent-orange: #f59e0b;
+            --accent-blue: #3b82f6;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+        .container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+
+        /* Nav */
+        nav {
+            position: fixed; top: 0; width: 100%; z-index: 100;
+            background: rgba(15,15,19,0.9); backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border);
+        }
+        nav .container {
+            display: flex; align-items: center; justify-content: space-between;
+            height: 64px;
+        }
+        .logo { font-size: 1.3rem; font-weight: 700; color: var(--primary); }
+        .nav-links a {
+            color: var(--text-muted); text-decoration: none; margin-left: 28px;
+            font-size: 0.95rem; transition: color 0.2s;
+        }
+        .nav-links a:hover { color: var(--text); }
+
+        /* Hero */
+        .hero {
+            padding: 140px 0 80px; text-align: center;
+        }
+        .hero h1 {
+            font-size: 3rem; font-weight: 800; line-height: 1.2;
+            background: linear-gradient(135deg, #818cf8, #6366f1, #a78bfa);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            margin-bottom: 20px;
+        }
+        .hero p {
+            font-size: 1.2rem; color: var(--text-muted); max-width: 600px;
+            margin: 0 auto 36px;
+        }
+        .btn {
+            display: inline-block; padding: 14px 36px; border-radius: 10px;
+            font-size: 1rem; font-weight: 600; text-decoration: none;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: var(--primary); color: #fff;
+        }
+        .btn-primary:hover { background: var(--primary-dark); transform: translateY(-1px); }
+        .btn-outline {
+            border: 1px solid var(--border); color: var(--text); margin-left: 12px;
+        }
+        .btn-outline:hover { border-color: var(--primary); color: var(--primary); }
+
+        /* Features */
+        .section { padding: 80px 0; }
+        .section-title {
+            text-align: center; font-size: 2rem; font-weight: 700; margin-bottom: 12px;
+        }
+        .section-subtitle {
+            text-align: center; color: var(--text-muted); margin-bottom: 48px;
+            font-size: 1.05rem;
+        }
+        .features-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 24px;
+        }
+        .feature-card {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 14px; padding: 32px;
+            transition: all 0.2s;
+        }
+        .feature-card:hover {
+            border-color: var(--primary); background: var(--bg-card-hover);
+        }
+        .feature-icon {
+            width: 48px; height: 48px; border-radius: 12px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.5rem; margin-bottom: 16px;
+        }
+        .feature-card h3 { font-size: 1.15rem; margin-bottom: 8px; }
+        .feature-card p { color: var(--text-muted); font-size: 0.95rem; }
+
+        /* Pricing */
+        .pricing-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 20px;
+        }
+        .plan-card {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 14px; padding: 32px; text-align: center;
+            position: relative;
+        }
+        .plan-card.popular {
+            border-color: var(--primary);
+            box-shadow: 0 0 30px rgba(99,102,241,0.15);
+        }
+        .plan-badge {
+            position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
+            background: var(--primary); color: #fff; font-size: 0.75rem;
+            padding: 4px 16px; border-radius: 20px; font-weight: 600;
+        }
+        .plan-name { font-size: 1.2rem; font-weight: 700; margin-bottom: 8px; }
+        .plan-price { font-size: 2.2rem; font-weight: 800; margin-bottom: 4px; }
+        .plan-price span { font-size: 0.9rem; font-weight: 400; color: var(--text-muted); }
+        .plan-desc { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 20px; }
+        .plan-features { list-style: none; text-align: left; margin-bottom: 24px; }
+        .plan-features li {
+            padding: 6px 0; font-size: 0.9rem; color: var(--text-muted);
+            border-bottom: 1px solid var(--border);
+        }
+        .plan-features li::before { content: "\2713 "; color: var(--accent-green); font-weight: 700; }
+        .plan-features li.locked { opacity: 0.4; }
+        .plan-features li.locked::before { content: "\2717 "; color: #666; }
+
+        /* How it works */
+        .steps {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 24px; counter-reset: step;
+        }
+        .step {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 14px; padding: 28px; text-align: center;
+            counter-increment: step;
+        }
+        .step::before {
+            content: counter(step);
+            display: inline-flex; width: 40px; height: 40px;
+            border-radius: 50%; background: var(--primary);
+            color: #fff; font-weight: 700; font-size: 1.1rem;
+            align-items: center; justify-content: center;
+            margin-bottom: 14px;
+        }
+        .step h3 { font-size: 1rem; margin-bottom: 8px; }
+        .step p { color: var(--text-muted); font-size: 0.88rem; }
+
+        /* FAQ */
+        .faq-item {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 12px; margin-bottom: 12px; overflow: hidden;
+        }
+        .faq-q {
+            padding: 18px 24px; cursor: pointer; font-weight: 600;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .faq-q:hover { background: var(--bg-card-hover); }
+        .faq-a {
+            max-height: 0; overflow: hidden; transition: max-height 0.3s;
+            padding: 0 24px; color: var(--text-muted); font-size: 0.95rem;
+        }
+        .faq-item.open .faq-a {
+            max-height: 300px; padding: 0 24px 18px;
+        }
+        .faq-item.open .faq-arrow { transform: rotate(180deg); }
+        .faq-arrow { transition: transform 0.2s; }
+
+        /* Footer */
+        footer {
+            border-top: 1px solid var(--border); padding: 40px 0;
+            text-align: center; color: var(--text-muted); font-size: 0.85rem;
+        }
+
+        /* Code block */
+        .code-block {
+            background: #0d0d14; border: 1px solid var(--border);
+            border-radius: 10px; padding: 20px; font-family: 'Consolas', monospace;
+            font-size: 0.9rem; color: #a5b4fc; overflow-x: auto;
+            margin: 16px 0;
+        }
+
+        @media (max-width: 768px) {
+            .hero h1 { font-size: 2rem; }
+            .hero p { font-size: 1rem; }
+            .nav-links { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav>
+    <div class="container">
+        <div class="logo">CommentBoost</div>
+        <div class="nav-links">
+            <a href="#features">기능</a>
+            <a href="#pricing">가격</a>
+            <a href="#howto">시작하기</a>
+            <a href="#faq">FAQ</a>
+            <a href="/guide">설치 가이드</a>
+        </div>
+    </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+    <div class="container">
+        <h1>유튜브 댓글 자동화의<br>새로운 기준</h1>
+        <p>
+            Notion으로 관리하고, 브라우저로 자동 작성하고,<br>
+            좋아요까지 한번에. 당신의 PC에서 안전하게 실행됩니다.
+        </p>
+        <a href="#howto" class="btn btn-primary">무료로 시작하기</a>
+        <a href="/guide" class="btn btn-outline">설치 가이드</a>
+    </div>
+</section>
+
+<!-- Features -->
+<section class="section" id="features">
+    <div class="container">
+        <h2 class="section-title">왜 CommentBoost인가?</h2>
+        <p class="section-subtitle">로컬 실행 기반으로 계정 안전성을 최우선으로 합니다</p>
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon" style="background:rgba(99,102,241,0.15);">&#128640;</div>
+                <h3>Notion 연동 자동화</h3>
+                <p>Notion DB에 영상 링크와 댓글을 입력하면 자동으로 댓글이 작성됩니다. 결과 URL도 Notion에 자동 기록.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon" style="background:rgba(34,197,94,0.15);">&#128274;</div>
+                <h3>안티디텍트 브라우저</h3>
+                <p>계정마다 고유한 브라우저 지문(핑거프린트)을 생성. IP 변경(ADB 비행기모드) + 프록시 로테이션 지원.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon" style="background:rgba(245,158,11,0.15);">&#128077;</div>
+                <h3>좋아요 자동 구매</h3>
+                <p>댓글 작성 후 SMM API로 좋아요를 자동 주문. 3개 티어(베이직/스탠다드/프리미엄) 선택 가능.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon" style="background:rgba(59,130,246,0.15);">&#128187;</div>
+                <h3>로컬 실행, 내 PC에서</h3>
+                <p>클라우드가 아닌 당신의 PC에서 실행됩니다. 브라우저 세션, 쿠키, 데이터가 모두 내 컴퓨터에 안전하게 보관.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon" style="background:rgba(168,85,247,0.15);">&#128200;</div>
+                <h3>노출 트래킹</h3>
+                <p>작성한 댓글이 노출되고 있는지 자동 확인. 댓글 순위 체크와 중복 영상 스캔까지.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon" style="background:rgba(236,72,153,0.15);">&#128736;</div>
+                <h3>웹 대시보드</h3>
+                <p>localhost:5000에서 모든 걸 관리. 계정 상태, 작업 현황, SMM 잔액, 설정을 한눈에.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Pricing -->
+<section class="section" id="pricing" style="background:rgba(99,102,241,0.03);">
+    <div class="container">
+        <h2 class="section-title">합리적인 가격</h2>
+        <p class="section-subtitle">필요한 만큼만 선택하세요</p>
+        <div class="pricing-grid">
+            <div class="plan-card">
+                <div class="plan-name">Free</div>
+                <div class="plan-price">0<span>원</span></div>
+                <div class="plan-desc">체험용</div>
+                <ul class="plan-features">
+                    <li>유튜브 계정 1개</li>
+                    <li>댓글 자동 작성</li>
+                    <li>Notion 연동</li>
+                    <li class="locked">노출 트래킹</li>
+                    <li class="locked">리포스팅</li>
+                    <li class="locked">좋아요 구매</li>
+                </ul>
+            </div>
+            <div class="plan-card">
+                <div class="plan-name">Starter</div>
+                <div class="plan-price">10<span>만원/월</span></div>
+                <div class="plan-desc">개인 운영자</div>
+                <ul class="plan-features">
+                    <li>유튜브 계정 3개</li>
+                    <li>댓글 자동 작성</li>
+                    <li>Notion 연동</li>
+                    <li>노출 트래킹 (월 3회)</li>
+                    <li>좋아요 구매</li>
+                    <li class="locked">리포스팅 / 중복 스캔</li>
+                </ul>
+            </div>
+            <div class="plan-card popular">
+                <div class="plan-badge">인기</div>
+                <div class="plan-name">Business</div>
+                <div class="plan-price">29<span>만원/월</span></div>
+                <div class="plan-desc">전문 마케터</div>
+                <ul class="plan-features">
+                    <li>유튜브 계정 10개</li>
+                    <li>댓글 자동 작성</li>
+                    <li>리포스팅 / 중복 스캔</li>
+                    <li>노출 트래킹 (월 10회)</li>
+                    <li>좋아요 구매 + 미리보기</li>
+                    <li>순위 체크</li>
+                </ul>
+            </div>
+            <div class="plan-card">
+                <div class="plan-name">Agency</div>
+                <div class="plan-price">59<span>만원/월</span></div>
+                <div class="plan-desc">대행사 / 팀</div>
+                <ul class="plan-features">
+                    <li>유튜브 계정 30개</li>
+                    <li>모든 기능 포함</li>
+                    <li>무제한 트래킹</li>
+                    <li>다중 계정 병렬 실행</li>
+                    <li>작업 예약 스케줄링</li>
+                    <li>자동 노출 체크</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- How it works -->
+<section class="section" id="howto">
+    <div class="container">
+        <h2 class="section-title">5분이면 시작할 수 있습니다</h2>
+        <p class="section-subtitle">Windows PC만 있으면 됩니다</p>
+        <div class="steps">
+            <div class="step">
+                <h3>다운로드</h3>
+                <p>CommentBoost ZIP 파일을 다운받고 원하는 폴더에 압축을 풀어주세요.</p>
+            </div>
+            <div class="step">
+                <h3>설치</h3>
+                <p><code>install.bat</code>을 더블클릭하면 Python과 필요한 모듈이 자동 설치됩니다.</p>
+            </div>
+            <div class="step">
+                <h3>실행</h3>
+                <p><code>start.bat</code>을 더블클릭하면 브라우저에서 대시보드가 열립니다.</p>
+            </div>
+            <div class="step">
+                <h3>설정</h3>
+                <p>라이선스 키 입력 &rarr; Notion 연결 &rarr; 유튜브 계정 추가하면 끝!</p>
+            </div>
+        </div>
+
+        <div style="text-align:center; margin-top:40px;">
+            <a href="/guide" class="btn btn-primary">상세 설치 가이드 보기</a>
+        </div>
+    </div>
+</section>
+
+<!-- FAQ -->
+<section class="section" id="faq">
+    <div class="container">
+        <h2 class="section-title">자주 묻는 질문</h2>
+        <p class="section-subtitle"></p>
+
+        <div class="faq-item">
+            <div class="faq-q" onclick="this.parentElement.classList.toggle('open')">
+                <span>클라우드 서비스인가요?</span>
+                <span class="faq-arrow">&#9660;</span>
+            </div>
+            <div class="faq-a">
+                아닙니다. CommentBoost는 <b>내 PC에서 직접 실행</b>되는 프로그램입니다.
+                유튜브 로그인, 댓글 작성, 브라우저 조작이 모두 내 컴퓨터에서 이뤄지므로
+                계정 정보가 외부 서버로 전송되지 않습니다.
+                라이선스 검증과 결제만 클라우드에서 처리됩니다.
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-q" onclick="this.parentElement.classList.toggle('open')">
+                <span>Mac에서도 사용할 수 있나요?</span>
+                <span class="faq-arrow">&#9660;</span>
+            </div>
+            <div class="faq-a">
+                현재는 <b>Windows</b>를 공식 지원합니다.
+                Mac/Linux에서도 Python이 설치되어 있다면 수동으로 실행할 수 있지만,
+                ADB IP 변경 등 일부 기능은 Windows 환경에 최적화되어 있습니다.
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-q" onclick="this.parentElement.classList.toggle('open')">
+                <span>유튜브 계정이 정지되지 않나요?</span>
+                <span class="faq-arrow">&#9660;</span>
+            </div>
+            <div class="faq-a">
+                CommentBoost는 안전을 최우선으로 설계되었습니다.
+                <b>안티디텍트 지문</b>, <b>인간형 랜덤 딜레이</b>, <b>계정별 IP 분리</b>,
+                <b>1일 댓글 제한</b>, <b>같은 영상 간격 제한</b> 등 다중 안전장치가 적용됩니다.
+                다만, 자동화 도구의 특성상 100% 보장은 할 수 없으며
+                적절한 설정과 운영이 중요합니다.
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-q" onclick="this.parentElement.classList.toggle('open')">
+                <span>Notion이 필수인가요?</span>
+                <span class="faq-arrow">&#9660;</span>
+            </div>
+            <div class="faq-a">
+                네, 현재 버전은 <b>Notion DB를 작업 관리 도구</b>로 사용합니다.
+                Notion 무료 계정으로 충분하며, 제공되는 템플릿을 복제하면 바로 시작할 수 있습니다.
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-q" onclick="this.parentElement.classList.toggle('open')">
+                <span>라이선스 키는 어떻게 받나요?</span>
+                <span class="faq-arrow">&#9660;</span>
+            </div>
+            <div class="faq-a">
+                프로그램 설치 후 대시보드에서 원하는 플랜을 선택하고 결제하면
+                라이선스 키가 자동으로 발급됩니다. Free 플랜은 라이선스 키 없이 바로 체험할 수 있습니다.
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Footer -->
+<footer>
+    <div class="container">
+        <p>&copy; 2026 CommentBoost. All rights reserved.</p>
+        <p style="margin-top:8px;">
+            문의: support@commentboost.cloud
+        </p>
+    </div>
+</footer>
+
+</body>
+</html>
