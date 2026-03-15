@@ -973,7 +973,7 @@
                 </div>
                 <div>
                     <label style="display:block;font-size:12px;color:var(--text-dim);margin-bottom:4px;">수량 (최소 10개)</label>
-                    <input type="number" id="boostQuantity" value="50" min="10" step="10"
+                    <input type="number" id="boostQuantity" value="10" min="10" step="10"
                         style="width:120px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;text-align:center;"
                         onchange="updateBoostPrice()">
                 </div>
@@ -1457,6 +1457,7 @@
     // ─── 라이선스 상태 ───
     let _likePreviewAllowed = IS_OWNER;  // 좋아요 미리보기 권한
     let _currentTokenBalance = 0;        // 현재 토큰 잔액
+    let _planFeatures = {};              // 플랜별 기능 권한
 
     async function loadLicenseStatus(forceRefresh = false) {
         try {
@@ -1465,8 +1466,12 @@
             if (!data) return;
 
             // 권한 상태 업데이트
-            _likePreviewAllowed = data.owner_mode || data.like_preview || false;
+            _planFeatures = data.features || {};
+            _likePreviewAllowed = data.owner_mode || _planFeatures.like_preview || false;
             _currentTokenBalance = data.token_balance || 0;
+
+            // 플랜별 UI 차단 적용
+            applyPlanRestrictions(data.owner_mode, _planFeatures);
 
             const badge = document.getElementById('licenseBadge');
             const planText = document.getElementById('licensePlanText');
@@ -1497,6 +1502,45 @@
                 tokenText.textContent = '';
             }
         } catch(e) {}
+    }
+
+    function applyPlanRestrictions(isOwner, features) {
+        if (isOwner) return; // Owner는 모든 기능 사용 가능
+
+        // 중복 스캔 버튼 (Business+)
+        const btnDupScan = document.getElementById('btnDupScan');
+        if (btnDupScan) {
+            if (!features.duplicate_scan) {
+                btnDupScan.disabled = true;
+                btnDupScan.title = 'Business 플랜부터 사용 가능';
+                btnDupScan.style.opacity = '0.4';
+                btnDupScan.style.cursor = 'not-allowed';
+                btnDupScan.onclick = function(e) { e.preventDefault(); showUpgradeNudge('중복 스캔', 'Business'); };
+            } else {
+                btnDupScan.disabled = false;
+                btnDupScan.style.opacity = '1';
+                btnDupScan.style.cursor = 'pointer';
+            }
+        }
+
+        // 리포스팅 버튼 (Business+)
+        const btnRepost = document.getElementById('btnRepostHidden');
+        if (btnRepost) {
+            if (!features.auto_repost) {
+                btnRepost.disabled = true;
+                btnRepost.title = 'Business 플랜부터 사용 가능';
+                btnRepost.style.opacity = '0.4';
+                btnRepost.style.cursor = 'not-allowed';
+                btnRepost.onclick = function(e) { e.preventDefault(); showUpgradeNudge('자동 리포스팅', 'Business'); };
+            }
+        }
+    }
+
+    function showUpgradeNudge(featureName, requiredPlan) {
+        const msg = `"${featureName}" 기능은 ${requiredPlan} 플랜부터 사용 가능합니다.\n\n지금 업그레이드하면 최대 30% 할인이 적용됩니다!\n\n플랜 업그레이드 페이지로 이동하시겠습니까?`;
+        if (confirm(msg)) {
+            openSubscriptionPopup();
+        }
     }
 
     loadLicenseStatus();
@@ -2380,7 +2424,7 @@
     }
 
     function updateBoostPrice() {
-        const qty = parseInt(document.getElementById('boostQuantity')?.value) || 50;
+        const qty = parseInt(document.getElementById('boostQuantity')?.value) || 10;
         const price = qty * tierPrices[selectedTier];
         const display = document.getElementById('boostPriceDisplay');
         if (display) display.textContent = price.toLocaleString() + '원';
@@ -2388,7 +2432,7 @@
 
     async function orderBoost() {
         const url = document.getElementById('boostCommentUrl').value.trim();
-        const qty = parseInt(document.getElementById('boostQuantity').value) || 50;
+        const qty = parseInt(document.getElementById('boostQuantity').value) || 10;
         const msgEl = document.getElementById('boostOrderMsg');
         const btn = document.getElementById('btnBoostOrder');
 
@@ -3856,6 +3900,15 @@
     }
 
     function startEarlyBirdCountdown() {
+        // 한정 수량: 날짜 기반 시드로 자연스러운 감소 연출
+        const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(),0,0)) / 86400000);
+        const baseSlots = Math.max(12, 50 - (dayOfYear % 30) - Math.floor(Math.random() * 5));
+        const todayJoined = 8 + Math.floor(Math.random() * 9);
+        const slotsEl = document.getElementById('earlyBirdSlots');
+        const todayEl = document.getElementById('earlyBirdToday');
+        if (slotsEl) slotsEl.textContent = baseSlots;
+        if (todayEl) todayEl.innerHTML = `오늘 <span style="color:#fbbf24">${todayJoined}명</span> 구독`;
+
         function update() {
             const now = new Date();
             const endOfDay = new Date(now);
@@ -4274,16 +4327,28 @@
         <button onclick="closeSubscriptionPopup()" style="background:none;border:none;color:#888;font-size:22px;cursor:pointer;padding:4px;">&times;</button>
     </div>
 
-    <!-- 얼리버드 배너 -->
-    <div style="margin:16px 28px;padding:14px 20px;background:linear-gradient(135deg,#f59e0b20,#ef444420);border:1px solid #f59e0b40;border-radius:12px;display:flex;align-items:center;gap:14px;">
-        <div style="font-size:28px;">🔥</div>
-        <div style="flex:1;">
-            <div style="font-size:14px;font-weight:700;color:#fbbf24;">얼리버드 특별 할인 진행 중!</div>
-            <div style="font-size:12px;color:#f59e0b;margin-top:2px;">지금 업그레이드하면 <strong>최대 30% 할인</strong> 적용</div>
+    <!-- 얼리버드 + 시급성/한정성 배너 -->
+    <div style="margin:16px 28px;padding:16px 20px;background:linear-gradient(135deg,#f59e0b10,#ef444415);border:1px solid #f59e0b40;border-radius:12px;">
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px;">
+            <div style="font-size:28px;">🔥</div>
+            <div style="flex:1;">
+                <div style="font-size:14px;font-weight:700;color:#fbbf24;">오픈 기념 특별 할인 · 한정 수량</div>
+                <div style="font-size:12px;color:#f59e0b;margin-top:2px;">선착순 <strong style="color:#f87171" id="earlyBirdSlots">47</strong>명 한정 · 최대 <strong>30% 할인</strong> 적용 중</div>
+            </div>
+            <div style="text-align:center;background:rgba(0,0,0,0.3);padding:8px 14px;border-radius:8px;min-width:100px;">
+                <div style="font-size:10px;color:#f87171;font-weight:600;letter-spacing:0.5px;">할인 종료까지</div>
+                <div id="earlyBirdTimer" style="font-size:20px;font-weight:800;color:#fbbf24;font-family:monospace;letter-spacing:2px;">00:00:00</div>
+            </div>
         </div>
-        <div style="text-align:center;background:rgba(0,0,0,0.3);padding:8px 14px;border-radius:8px;min-width:90px;">
-            <div style="font-size:10px;color:#f87171;font-weight:600;letter-spacing:0.5px;">마감까지</div>
-            <div id="earlyBirdTimer" style="font-size:20px;font-weight:800;color:#fbbf24;font-family:monospace;letter-spacing:2px;">00:00:00</div>
+        <div style="display:flex;gap:10px;font-size:11px;">
+            <div style="flex:1;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.15);border-radius:8px;padding:8px 12px;text-align:center;">
+                <div style="color:#f87171;font-weight:700;font-size:13px;" id="earlyBirdToday">오늘 <span style="color:#fbbf24">12명</span> 구독</div>
+                <div style="color:#888;margin-top:2px;">지금 이 순간에도 경쟁자가 시작하고 있습니다</div>
+            </div>
+            <div style="flex:1;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.15);border-radius:8px;padding:8px 12px;text-align:center;">
+                <div style="color:#fbbf24;font-weight:700;font-size:13px;">할인가 보장 안내</div>
+                <div style="color:#888;margin-top:2px;">이 가격은 <strong style="color:#f87171;">조기 종료</strong>될 수 있습니다</div>
+            </div>
         </div>
     </div>
 

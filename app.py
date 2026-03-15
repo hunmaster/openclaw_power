@@ -749,6 +749,9 @@ def api_reply_preview():
 @app.route("/api/duplicate-scan", methods=["POST"])
 def api_duplicate_scan():
     """사전 중복 스캔: 대기 작업의 영상 링크를 전체 DB 완료 목록과 비교합니다."""
+    if not license_client.can_use_feature("duplicate_scan") and not license_client.owner_mode:
+        return jsonify({"error": "중복 스캔은 Business 플랜부터 사용 가능합니다.", "upgrade_required": True}), 403
+
     try:
         notion = NotionManager()
         tasks = notion.get_pending_tasks()
@@ -2252,6 +2255,9 @@ def api_repost():
     요청 body:
         comment_ids: [댓글ID 배열] - 리포스팅할 댓글 ID 목록
     """
+    if not license_client.can_use_feature("auto_repost"):
+        return jsonify({"error": "자동 리포스팅은 Business 플랜부터 사용 가능합니다."}), 403
+
     with repost_lock:
         if repost_state["running"]:
             return jsonify({"ok": False, "error": "이미 리포스팅 진행 중입니다."})
@@ -2696,7 +2702,16 @@ def api_license_status():
         "max_accounts": license_client.get_max_accounts(),
         "token_balance": license_client.token_balance,
         "license_key": (license_client.license_key or "")[:8] + "..." if license_client.license_key else None,
-        "like_preview": license_client.can_use_feature("like_preview"),
+        "features": {
+            "like_preview": license_client.can_use_feature("like_preview"),
+            "auto_repost": license_client.can_use_feature("auto_repost"),
+            "duplicate_scan": license_client.can_use_feature("duplicate_scan"),
+            "rank_check": license_client.can_use_feature("rank_check"),
+            "auto_exposure_schedule": license_client.can_use_feature("auto_exposure_schedule"),
+            "multi_account_parallel": license_client.can_use_feature("multi_account_parallel"),
+            "task_scheduling": license_client.can_use_feature("task_scheduling"),
+            "tracking_unlimited": license_client.can_use_feature("tracking_unlimited"),
+        },
     })
 
 
