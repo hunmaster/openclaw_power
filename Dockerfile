@@ -16,8 +16,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Playwright 브라우저 설치
-RUN playwright install chromium
-RUN playwright install-deps chromium
+RUN playwright install --with-deps chromium || \
+    (apt-get update && apt-get install -y --no-install-recommends \
+    fonts-unifont fonts-ubuntu && playwright install chromium)
 
 # 소스 코드 복사
 COPY . .
