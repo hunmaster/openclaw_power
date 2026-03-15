@@ -55,7 +55,7 @@ EXCLUDES = [
 def get_version():
     """version.json에서 버전 정보 읽기"""
     try:
-        with open(VERSION_FILE, "r") as f:
+        with open(VERSION_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
         return data.get("version", "1.0.0")
     except FileNotFoundError:
