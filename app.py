@@ -34,7 +34,7 @@ from src.safety_rules import SafetyRules
 from src.smm_client import SMMClient
 from src.adb_ip_changer import ADBIPChanger
 from src.comment_tracker import CommentTracker
-from src.license_client import license_client, is_owner_mode, LIKE_TIERS
+from src.license_client import license_client, is_owner_mode, LIKE_TIERS, PLAN_FEATURES
 from src.lemonsqueezy_client import LemonSqueezyClient
 
 # Lemon Squeezy 클라이언트 초기화
@@ -555,6 +555,7 @@ def api_tasks():
         sort_param = request.args.get("sort", "last_edited:desc")  # 기본: 최근 작업순
         page = int(request.args.get("page", 1))
         force_refresh = request.args.get("refresh", "0") == "1"
+        max_results = int(request.args.get("max_results", 0))  # 0=전체, 양수=제한
         page_size = 100
 
         # 캐시 키: 상태만 사용 (날짜/검색/정렬은 캐시 후 필터링)
@@ -603,7 +604,7 @@ def api_tasks():
                     tasks = notion.get_all_tasks(progress_callback=on_progress)
                 else:
                     # 날짜 없이 전체 상태 로드 (캐시 후 날짜는 필터링)
-                    tasks = notion.get_tasks_by_status(status_filter, date_filter=None, progress_callback=on_progress)
+                    tasks = notion.get_tasks_by_status(status_filter, date_filter=None, progress_callback=on_progress, max_results=max_results)
 
                     # 상태 필터 결과가 0건이면 → 전체 로드 후 실제 상태값 감지
                     if not tasks and status_filter == "댓글작업전":
@@ -673,6 +674,9 @@ def api_tasks():
         end_idx = start_idx + page_size
         paged_tasks = tasks[start_idx:end_idx]
 
+        # max_results 제한으로 잘린 경우 표시
+        truncated = max_results > 0 and total_count >= max_results
+
         return jsonify({
             "tasks": paged_tasks,
             "count": len(paged_tasks),
@@ -685,6 +689,8 @@ def api_tasks():
             "sort": sort_param,
             "from_cache": from_cache,
             "cached_ago": cached_ago,
+            "truncated": truncated,
+            "max_results": max_results if truncated else 0,
         })
     except Exception as e:
         return jsonify({"error": str(e), "tasks": [], "count": 0}), 500
@@ -2987,23 +2993,45 @@ def api_license_status():
             license_client.verify()
         except Exception:
             pass
+
+    # DB에 저장된 유저 플랜을 우선 적용 (관리자가 변경한 경우 즉시 반영)
+    plan_name = license_client.get_plan_name()
+    features = {
+        "like_preview": license_client.can_use_feature("like_preview"),
+        "auto_repost": license_client.can_use_feature("auto_repost"),
+        "duplicate_scan": license_client.can_use_feature("duplicate_scan"),
+        "rank_check": license_client.can_use_feature("rank_check"),
+        "auto_exposure_schedule": license_client.can_use_feature("auto_exposure_schedule"),
+        "multi_account_parallel": license_client.can_use_feature("multi_account_parallel"),
+        "task_scheduling": license_client.can_use_feature("task_scheduling"),
+        "tracking_unlimited": license_client.can_use_feature("tracking_unlimited"),
+    }
+
+    try:
+        if current_user and current_user.is_authenticated:
+            db_plan = current_user.plan
+            if db_plan and db_plan != "Free" and db_plan != plan_name:
+                # DB 플랜이 license_client와 다르면 DB 우선 (관리자 변경 반영)
+                plan_name = db_plan
+                # license_client 캐시도 동기화
+                plan_key = db_plan.lower()
+                if plan_key in PLAN_FEATURES:
+                    if license_client.license_info is None:
+                        license_client.license_info = {}
+                    license_client.license_info["plan"] = db_plan
+                    license_client.license_info["plan_name"] = plan_key
+                    features = {feat: PLAN_FEATURES[plan_key].get(feat, False) for feat in features}
+    except Exception:
+        pass
+
     return jsonify({
-        "active": license_client.is_active(),
+        "active": license_client.is_active() or (plan_name and plan_name != "Free"),
         "owner_mode": license_client.owner_mode,
-        "plan": license_client.get_plan_name(),
+        "plan": plan_name,
         "max_accounts": license_client.get_max_accounts(),
         "token_balance": license_client.token_balance,
         "license_key": (license_client.license_key or "")[:8] + "..." if license_client.license_key else None,
-        "features": {
-            "like_preview": license_client.can_use_feature("like_preview"),
-            "auto_repost": license_client.can_use_feature("auto_repost"),
-            "duplicate_scan": license_client.can_use_feature("duplicate_scan"),
-            "rank_check": license_client.can_use_feature("rank_check"),
-            "auto_exposure_schedule": license_client.can_use_feature("auto_exposure_schedule"),
-            "multi_account_parallel": license_client.can_use_feature("multi_account_parallel"),
-            "task_scheduling": license_client.can_use_feature("task_scheduling"),
-            "tracking_unlimited": license_client.can_use_feature("tracking_unlimited"),
-        },
+        "features": features,
     })
 
 
@@ -3094,6 +3122,14 @@ def api_admin_update_user():
         if new_plan not in User.VALID_PLANS:
             return jsonify({"error": f"유효하지 않은 플랜: {new_plan}"}), 400
         user.plan = new_plan
+
+        # license_client 캐시 즉시 동기화 (사용자 모드 전환 시 바로 반영)
+        plan_key = new_plan.lower()
+        if plan_key in PLAN_FEATURES:
+            if license_client.license_info is None:
+                license_client.license_info = {}
+            license_client.license_info["plan"] = new_plan
+            license_client.license_info["plan_name"] = plan_key
 
     # 활성/비활성 변경
     if "is_active" in data:

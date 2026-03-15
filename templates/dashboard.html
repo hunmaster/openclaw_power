@@ -357,10 +357,21 @@
                     <label style="font-size:11px">Notion API 토큰</label>
                     <input type="password" id="setupNotionToken" placeholder="ntn_xxxx..." style="font-size:12px">
                 </div>
-                <div class="form-group" style="margin-bottom:12px">
-                    <label style="font-size:11px">데이터베이스 ID</label>
-                    <input type="text" id="setupNotionDbId" placeholder="30d35cfd83d3..." style="font-size:12px">
+
+                <!-- 데이터베이스 설정: 템플릿 or 직접 입력 -->
+                <div style="margin-bottom:12px">
+                    <label style="font-size:11px;display:block;margin-bottom:6px">데이터베이스 설정</label>
+                    <a href="https://www.notion.so/templates/f0e7b4e5c3a84d6f9e2a1b8c5d7f3e9a" target="_blank" id="setupTemplateLink"
+                       style="display:flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:8px 12px;background:linear-gradient(135deg,var(--accent),#7c3aed);color:#fff;border-radius:8px;font-size:12px;font-weight:600;text-decoration:none;margin-bottom:8px;cursor:pointer;transition:opacity 0.2s"
+                       onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+                        &#128196; 노션 템플릿 복제하기 (추천)
+                    </a>
+                    <p style="font-size:10px;color:var(--text-dim);text-align:center;margin-bottom:8px">템플릿 복제 후 아래에 데이터베이스 ID를 입력하세요</p>
+                    <div class="form-group" style="margin-bottom:0">
+                        <input type="text" id="setupNotionDbId" placeholder="30d35cfd83d3..." style="font-size:12px">
+                    </div>
                 </div>
+
                 <button class="btn btn-sm btn-primary" onclick="saveSetupNotion()" style="width:100%">저장 및 연결 테스트</button>
                 <div id="setupNotionResult" style="margin-top:8px;font-size:11px"></div>
             </div>
@@ -1635,13 +1646,18 @@
         },
         {
             title: '3단계: Notion 작업 목록 준비',
-            body: `<p>Notion 데이터베이스에 댓글 작업을 등록하세요. 필수 컬럼:</p>
-            <ul style="margin:8px 0 0 16px;list-style:disc">
-                <li><b style="color:var(--text)">영상 링크</b> — YouTube URL</li>
-                <li><b style="color:var(--text)">댓글 원고</b> — 작성할 댓글 내용</li>
-                <li><b style="color:var(--text)">상태</b> — "댓글작업전"으로 설정</li>
-            </ul>
-            <p style="margin-top:8px">&#128073; "작업 목록" 탭 > "노션에서 불러오기" 버튼으로 목록을 가져올 수 있습니다.</p>`
+            body: `<p>아래 버튼으로 <b style="color:var(--text)">미리 만들어진 템플릿</b>을 노션에 복제하세요. 컬럼이 자동으로 세팅됩니다.</p>
+            <a href="https://www.notion.so/templates/f0e7b4e5c3a84d6f9e2a1b8c5d7f3e9a" target="_blank" id="guideTemplateLink"
+               style="display:flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:10px 12px;background:linear-gradient(135deg,var(--accent),#7c3aed);color:#fff;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;margin:12px 0;cursor:pointer;transition:opacity 0.2s"
+               onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+                &#128196; 노션 템플릿 복제하기
+            </a>
+            <div style="margin-top:8px;padding:10px;background:rgba(108,92,231,0.08);border-radius:8px;font-size:12px;line-height:1.7">
+                <b style="color:var(--text)">복제 후 할 일:</b><br>
+                &#10102; 복제한 DB 페이지에서 <code style="font-size:11px;background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px">···</code> → 연결 → 인테그레이션 추가<br>
+                &#10103; <b style="color:var(--text)">영상 링크</b>, <b style="color:var(--text)">댓글 원고</b> 입력 후 <b style="color:var(--text)">상태</b>를 "댓글작업전"으로 설정<br>
+                &#10104; "작업 목록" 탭 → "노션에서 불러오기" 클릭
+            </div>`
         },
         {
             title: '4단계: 테스트 실행',
@@ -2029,8 +2045,18 @@
         }
     }
 
+    let _taskFetching = false; // 수집 중 동시 호출 방지 플래그
+
     async function fetchNotionTasks(page, forceRefresh) {
         if (!_initDone) { showInitBlockMsg(); return; }
+
+        // 이미 수집 중이면 팝업으로 안내 후 차단
+        if (_taskFetching) {
+            alert('현재 데이터를 수집 중입니다.\n수집이 완료된 후 다시 시도해주세요.');
+            return;
+        }
+
+        _taskFetching = true;
         if (page !== undefined) currentTaskPage = page;
         else currentTaskPage = 1;
         if (forceRefresh !== undefined) _taskRefresh = forceRefresh;
@@ -2058,7 +2084,11 @@
 
         msgEl.textContent = '로딩 중...';
         tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-dim)">조회 중...</td></tr>';
-        await loadTasks(currentTaskStatus);
+        try {
+            await loadTasks(currentTaskStatus);
+        } finally {
+            _taskFetching = false;
+        }
         if (typeof _slowTimer !== 'undefined') clearTimeout(_slowTimer);
         msgEl.textContent = '';
         if (overlayShown) showLoadingOverlay(false);
@@ -2081,6 +2111,7 @@
         currentTaskStatus = status;
         currentTaskPage = 1;
         _taskRefresh = false; // 탭 전환은 캐시 사용 (불러오기 버튼으로 강제 새로고침)
+        _taskLimitLoad = true; // 캐시 미스 시 빠른 로딩을 위해 100건 제한
         document.querySelectorAll('.task-filter').forEach(b => b.classList.remove('active'));
         if (btn) btn.classList.add('active');
         document.getElementById('taskTableTitle').textContent = status === '전체' ? '노션 DB 전체 리스트' : `노션 DB 작업 (${status})`;
@@ -2177,11 +2208,18 @@
         content.innerHTML = html;
     }
 
+    let _taskLimitLoad = false; // true면 최근 100건만 로드 (탭 전환 시 빠른 로딩)
+
     async function loadTasks(status) {
         const statusParam = status || currentTaskStatus;
         const searchQuery = document.getElementById('taskSearchInput').value.trim();
         let url = `/api/tasks?status=${encodeURIComponent(statusParam)}&page=${currentTaskPage}`;
         if (_taskRefresh) url += '&refresh=1';
+        // 탭 전환 시 댓글작업전 외 상태는 최근 100건만 빠르게 로드
+        if (_taskLimitLoad && statusParam !== '댓글작업전' && statusParam !== '전체') {
+            url += '&max_results=100';
+        }
+        _taskLimitLoad = false;
         if (currentDateFilter) url += `&date=${encodeURIComponent(currentDateFilter)}`;
         if (searchQuery) url += `&search=${encodeURIComponent(searchQuery)}`;
         url += `&sort=${encodeURIComponent(currentSort)}`;
@@ -2212,7 +2250,11 @@
             const agoText = mins > 0 ? `${mins}분 ${secs}초` : `${secs}초`;
             cacheLabel = ` <span style="color:var(--yellow);font-size:12px;margin-left:8px" title="캐시된 데이터입니다. [불러오기] 버튼으로 최신 데이터를 가져올 수 있습니다.">⚡ ${agoText} 전 캐시</span>`;
         }
-        if (msgEl) msgEl.innerHTML = `<span style="color:var(--green)">전체 ${totalCount}개${dateLabel}${searchLabel}</span>${cacheLabel}`;
+        let truncLabel = '';
+        if (data.truncated) {
+            truncLabel = ` <span style="color:var(--yellow);font-size:11px;margin-left:6px" title="빠른 로딩을 위해 최근 ${data.max_results}건만 표시됩니다. [불러오기] 버튼으로 전체를 불러올 수 있습니다.">&#9888; 최근 ${data.max_results}건만 표시 (전체 보기: 불러오기 클릭)</span>`;
+        }
+        if (msgEl) msgEl.innerHTML = `<span style="color:var(--green)">전체 ${totalCount}개${dateLabel}${searchLabel}</span>${cacheLabel}${truncLabel}`;
 
         // 리스트 제목에 개수 표시
         const titleEl = document.getElementById('taskTableTitle');
@@ -3817,14 +3859,15 @@
             await loadDashboard();
             updateInitStep('dashboard', 'done', '대시보드 로드 완료');
 
-            // 3단계: 작업 목록 (전체 데이터 1회 로드 → 개별 탭 캐시 자동 생성)
+            // 3단계: 작업 목록 (댓글작업전 우선 로드 → 나머지는 백그라운드)
             updateInitStep('tasks', 'loading', '작업 목록 불러오는 중...');
-            // 전체 데이터를 먼저 로드하여 서버 캐시 구축
-            await api('/api/tasks?status=전체&refresh=1');
-            // 기본 탭(댓글작업전) 데이터는 서버 캐시에서 파생됨
-            _taskRefresh = false;
-            await loadTasks();
+            // 댓글작업전 전체를 우선 로드 (핵심 데이터)
+            _taskRefresh = true;
+            currentTaskStatus = '댓글작업전';
+            await loadTasks('댓글작업전');
             updateInitStep('tasks', 'done', '작업 목록 로드 완료');
+            // 나머지 상태 탭 카운트는 캐시 기반으로 표시 (각 탭 클릭 시 실제 로드)
+            updateTabCounts();
 
             // 완료
             updateInitStep('done', 'done', '준비 완료!');
