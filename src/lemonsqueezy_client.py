@@ -167,13 +167,18 @@ class LemonSqueezyClient:
             if resp.status_code in (200, 201):
                 checkout_data = resp.json().get("data", {})
                 url = checkout_data.get("attributes", {}).get("url", "")
+                print(f"[LemonSqueezy] 체크아웃 URL 생성 성공: {url[:80]}...")
                 return url
             else:
-                print(f"[LemonSqueezy] 체크아웃 생성 실패: HTTP {resp.status_code} - {resp.text[:200]}")
+                print(f"[LemonSqueezy] 체크아웃 생성 실패: HTTP {resp.status_code}")
+                print(f"[LemonSqueezy] 응답 본문: {resp.text[:500]}")
+                print(f"[LemonSqueezy] store_id={self.store_id}, variant_id={variant_id}")
                 return None
 
         except Exception as e:
+            import traceback
             print(f"[LemonSqueezy] 체크아웃 생성 오류: {e}")
+            traceback.print_exc()
             return None
 
     def get_checkout_url(self, plan_id, user_email=None, license_key=None):
