@@ -321,7 +321,7 @@
             <div id="manualDbSection" style="display:none;">
                 <div class="form-group">
                     <label>기존 데이터베이스 ID</label>
-                    <input type="text" id="notionDbId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                    <input type="text" id="notionDbId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" oninput="onManualDbInput(this.value)">
                     <div class="hint">노션 DB 페이지 URL에서 ? 앞의 32자리 ID를 복사하세요</div>
                 </div>
             </div>
@@ -480,6 +480,11 @@
         // ─── Step 2: 노션 ───
 
         let createMode = true;
+
+        function onManualDbInput(val) {
+            const cleaned = val.trim().replace(/-/g, '');
+            document.getElementById('notionNextBtn').disabled = cleaned.length < 32;
+        }
 
         function toggleManualDb() {
             const manual = document.getElementById('manualDbSection');
