@@ -83,6 +83,9 @@ tracking_state = {
 }
 tracking_lock = threading.Lock()
 
+# 관리자 뷰 상태 (런타임 전역)
+_admin_view_active = is_owner_mode()
+
 # 트래킹 월간 사용 횟수 (Starter/Business 제한용)
 tracking_usage = {"month": None, "count": 0}
 
@@ -244,7 +247,7 @@ def load_accounts():
 @app.route("/")
 def dashboard():
     """메인 대시보드."""
-    return render_template("dashboard.html", is_owner=is_owner_mode())
+    return render_template("dashboard.html", is_owner=_admin_view_active)
 
 
 # ──────────────────────────── API 라우트 ────────────────────────────
@@ -2688,6 +2691,33 @@ def api_license_status():
         "max_accounts": license_client.get_max_accounts(),
         "token_balance": license_client.token_balance,
         "license_key": (license_client.license_key or "")[:8] + "..." if license_client.license_key else None,
+    })
+
+
+@app.route("/api/admin/toggle", methods=["POST"])
+def api_admin_toggle():
+    """관리자 모드 전환 (비밀 키 검증)."""
+    global _admin_view_active
+    data = request.get_json() or {}
+    admin_key = data.get("admin_key", "").strip()
+
+    # 관리자 비밀 키 검증 (환경변수 또는 기본값)
+    expected_key = os.environ.get("ADMIN_SECRET_KEY", "openclaw2026!")
+    if admin_key != expected_key:
+        return jsonify({"error": "관리자 인증 실패"}), 403
+
+    _admin_view_active = not _admin_view_active
+    return jsonify({
+        "success": True,
+        "admin_view": _admin_view_active,
+    })
+
+
+@app.route("/api/admin/status")
+def api_admin_status():
+    """현재 관리자 뷰 상태."""
+    return jsonify({
+        "admin_view": _admin_view_active,
     })
 
 

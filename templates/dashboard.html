@@ -1313,7 +1313,46 @@
 
 <script>
     // ─── Owner 모드 플래그 (서버에서 주입) ───
-    const IS_OWNER = {{ 'true' if is_owner else 'false' }};
+    let IS_OWNER = {{ 'true' if is_owner else 'false' }};
+
+    // ─── 관리자 모드 비밀 토글 (Ctrl+Shift+A) ───
+    document.addEventListener('keydown', async function(e) {
+        if (e.ctrlKey && e.shiftKey && e.key.toUpperCase() === 'A') {
+            e.preventDefault();
+            const adminKey = prompt('관리자 키를 입력하세요:');
+            if (!adminKey) return;
+            try {
+                const res = await api('/api/admin/toggle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ admin_key: adminKey })
+                });
+                if (res && res.success) {
+                    IS_OWNER = res.admin_view;
+                    // 관리자 모드 표시
+                    let badge = document.getElementById('adminModeBadge');
+                    if (IS_OWNER) {
+                        if (!badge) {
+                            badge = document.createElement('div');
+                            badge.id = 'adminModeBadge';
+                            badge.style.cssText = 'position:fixed;top:8px;right:8px;background:#22c55e30;color:#4ade80;padding:4px 10px;border-radius:6px;font-size:11px;z-index:9999;border:1px solid #22c55e40;cursor:pointer;';
+                            badge.textContent = 'ADMIN';
+                            badge.title = 'Ctrl+Shift+A로 해제';
+                            document.body.appendChild(badge);
+                        }
+                    } else {
+                        if (badge) badge.remove();
+                    }
+                    // 페이지 새로고침하여 UI 반영
+                    location.reload();
+                } else {
+                    alert(res?.error || '인증 실패');
+                }
+            } catch(err) {
+                alert('관리자 인증 실패');
+            }
+        }
+    });
 
     // ─── 복제 방지 (클라이언트 모드) ───
     if (!IS_OWNER) {
@@ -1455,6 +1494,16 @@
 
     loadLicenseStatus();
     setInterval(loadLicenseStatus, 60000);
+
+    // 관리자 모드 뱃지 (페이지 로드 시 복원)
+    if (IS_OWNER) {
+        const badge = document.createElement('div');
+        badge.id = 'adminModeBadge';
+        badge.style.cssText = 'position:fixed;top:8px;right:8px;background:#22c55e30;color:#4ade80;padding:4px 10px;border-radius:6px;font-size:11px;z-index:9999;border:1px solid #22c55e40;cursor:pointer;';
+        badge.textContent = 'ADMIN';
+        badge.title = 'Ctrl+Shift+A로 해제';
+        document.body.appendChild(badge);
+    }
 
     // ─── 대시보드 로드 ───
     async function loadDashboard() {
@@ -3172,7 +3221,14 @@
 
     // ─── 초기화 (단계별 로딩) ───
     async function initApp() {
-        showInitOverlay(true);
+        // 이미 한 번 초기화된 세션이면 오버레이 없이 백그라운드 로딩
+        const alreadyInit = sessionStorage.getItem('openclaw_init_done');
+        if (alreadyInit) {
+            _initSkipped = true;
+            document.getElementById('initOverlay').style.display = 'none';
+        } else {
+            showInitOverlay(true);
+        }
         document.getElementById('tabBtnTasks').classList.add('tab-loading');
 
         try {
@@ -3206,6 +3262,7 @@
             console.error('초기화 실패:', e);
         } finally {
             _initDone = true;
+            sessionStorage.setItem('openclaw_init_done', '1');
             showInitOverlay(false);
             document.getElementById('tabBtnTasks').classList.remove('tab-loading');
             // 초기화 중 막혔던 팝업이 있으면 자동 제거
