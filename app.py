@@ -35,6 +35,10 @@ from src.smm_client import SMMClient
 from src.adb_ip_changer import ADBIPChanger
 from src.comment_tracker import CommentTracker
 from src.license_client import license_client, is_owner_mode, LIKE_TIERS
+from src.lemonsqueezy_client import LemonSqueezyClient
+
+# Lemon Squeezy 클라이언트 초기화
+ls_client = LemonSqueezyClient()
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "commentboost-secret-" + str(uuid.uuid4())[:8])
@@ -3293,19 +3297,14 @@ def _update_env_var(env_path, key, value):
     os.environ[key] = value
 
 
-# ━━━ PortOne V2 결제 연동 ━━━
-
-# PortOne 키 (나중에 .env에서 실제 키로 교체)
-PORTONE_STORE_ID = os.getenv("PORTONE_STORE_ID", "store-ec07c075-083e-4ff1-b301-4ad699b059b5")
-PORTONE_API_SECRET = os.getenv("PORTONE_API_SECRET", "vF5MpTaWMw6k4Ee38pMphS7ufHvSM5JOfw97oKVEqnNy50KBdF2F4QKHPBAuPcbYHtUV5jm2ig4JVu5L")
-PORTONE_CHANNEL_KEY = os.getenv("PORTONE_CHANNEL_KEY", "channel-key-a2ac5369-7591-4055-8411-5970c59a7e66")
+# ━━━ Lemon Squeezy 결제 연동 ━━━
 
 # 결제 상품 정의
 PAYMENT_PRODUCTS = {
-    # 구독 플랜
-    "plan_starter": {"name": "Starter 월 구독", "amount": 79000, "type": "subscription"},
-    "plan_business": {"name": "Business 월 구독", "amount": 199000, "type": "subscription"},
-    "plan_agency": {"name": "Agency 월 구독", "amount": 449000, "type": "subscription"},
+    # 구독 플랜 (Lemon Squeezy)
+    "plan_starter": {"name": "Starter 월 구독", "amount": 79000, "type": "subscription", "plan_id": "starter"},
+    "plan_business": {"name": "Business 월 구독", "amount": 199000, "type": "subscription", "plan_id": "business"},
+    "plan_agency": {"name": "Agency 월 구독", "amount": 449000, "type": "subscription", "plan_id": "agency"},
     # 토큰 충전
     "token_500": {"name": "토큰 500개", "amount": 15000, "tokens": 500, "type": "token"},
     "token_1200": {"name": "토큰 1,200개", "amount": 30000, "tokens": 1200, "type": "token"},
@@ -3316,22 +3315,174 @@ PAYMENT_PRODUCTS = {
 
 @app.route("/api/payment/config")
 def api_payment_config():
-    """프론트엔드에 PortOne 설정 전달"""
+    """프론트엔드에 Lemon Squeezy 설정 전달"""
+    config = ls_client.get_config()
     return jsonify({
-        "storeId": PORTONE_STORE_ID,
-        "channelKey": PORTONE_CHANNEL_KEY,
+        "provider": "lemonsqueezy",
+        "available": config["available"],
+        "checkout_urls": config["checkout_urls"],
     })
+
+
+@app.route("/api/payment/checkout", methods=["POST"])
+def api_payment_checkout():
+    """Lemon Squeezy 체크아웃 URL 생성 (커스텀 데이터 포함)"""
+    data = request.get_json() or {}
+    plan_id = data.get("plan_id", "")
+
+    if plan_id not in ("starter", "business", "agency"):
+        return jsonify({"error": "잘못된 플랜입니다."}), 400
+
+    if not ls_client.is_available():
+        return jsonify({"error": "결제 서비스가 준비되지 않았습니다. 잠시 후 다시 시도해주세요."}), 503
+
+    # 사용자 정보 포함하여 체크아웃 URL 생성
+    user_email = current_user.email if current_user.is_authenticated else None
+    lk = license_client.license_key if license_client.license_key else None
+
+    checkout_url = ls_client.get_checkout_url(plan_id, user_email=user_email, license_key=lk)
+
+    if not checkout_url:
+        return jsonify({"error": "체크아웃 URL 생성 실패"}), 500
+
+    add_log(f"[결제] Lemon Squeezy 체크아웃 생성: {plan_id}", "info")
+
+    return jsonify({
+        "success": True,
+        "checkout_url": checkout_url,
+        "plan_id": plan_id,
+    })
+
+
+@app.route("/api/payment/webhook", methods=["POST"])
+def api_payment_webhook():
+    """Lemon Squeezy 웹훅 수신 (구독 생성/갱신/취소 처리)"""
+    import requests as _requests
+
+    # 서명 검증
+    signature = request.headers.get("X-Signature", "")
+    if not ls_client.verify_webhook(request.get_data(), signature):
+        print("[웹훅] 서명 검증 실패")
+        return jsonify({"error": "Invalid signature"}), 403
+
+    payload = request.get_json() or {}
+    event_name = payload.get("meta", {}).get("event_name", "")
+    custom_data = payload.get("meta", {}).get("custom_data", {})
+    attrs = payload.get("data", {}).get("attributes", {})
+
+    print(f"[웹훅] Lemon Squeezy 이벤트: {event_name}")
+
+    # 라이선스 키 (체크아웃 시 custom_data로 전달됨)
+    lk = custom_data.get("license_key", "") or (license_client.license_key if license_client.license_key else "")
+    user_email = custom_data.get("user_email", "") or attrs.get("user_email", "")
+
+    if event_name == "subscription_created":
+        # 신규 구독 생성
+        variant_id = str(attrs.get("variant_id", ""))
+        plan_id = ls_client.get_plan_from_variant(variant_id)
+        status = attrs.get("status", "")
+        subscription_id = payload.get("data", {}).get("id", "")
+
+        print(f"[웹훅] 구독 생성: plan={plan_id}, status={status}, sub_id={subscription_id}, email={user_email}")
+
+        if plan_id and lk and status == "active":
+            try:
+                plan_resp = _requests.post(
+                    f"{license_client.server_url}/api/license/plan/upgrade",
+                    json={
+                        "license_key": lk,
+                        "plan_id": plan_id,
+                        "payment_id": f"ls_sub_{subscription_id}",
+                    },
+                    timeout=10,
+                )
+                if plan_resp.status_code == 200:
+                    plan_data = plan_resp.json()
+                    if plan_data.get("success"):
+                        license_client.verify()
+                        add_log(f"[결제] 구독 활성화 완료: {plan_id} (Lemon Squeezy)", "success")
+                        print(f"[웹훅] 플랜 업그레이드 성공: {plan_id}")
+                    else:
+                        print(f"[웹훅] 플랜 업그레이드 실패: {plan_data}")
+                else:
+                    print(f"[웹훅] 라이선스 서버 오류: HTTP {plan_resp.status_code}")
+            except Exception as e:
+                print(f"[웹훅] 플랜 업그레이드 오류: {e}")
+
+    elif event_name == "subscription_updated":
+        # 구독 상태 변경 (갱신, 일시정지, 재개 등)
+        status = attrs.get("status", "")
+        variant_id = str(attrs.get("variant_id", ""))
+        plan_id = ls_client.get_plan_from_variant(variant_id)
+        subscription_id = payload.get("data", {}).get("id", "")
+
+        print(f"[웹훅] 구독 업데이트: plan={plan_id}, status={status}")
+
+        if status == "active" and plan_id and lk:
+            try:
+                _requests.post(
+                    f"{license_client.server_url}/api/license/plan/upgrade",
+                    json={"license_key": lk, "plan_id": plan_id, "payment_id": f"ls_renew_{subscription_id}"},
+                    timeout=10,
+                )
+                license_client.verify()
+                add_log(f"[결제] 구독 갱신 완료: {plan_id}", "success")
+            except Exception as e:
+                print(f"[웹훅] 구독 갱신 오류: {e}")
+
+        elif status in ("cancelled", "expired", "past_due"):
+            add_log(f"[결제] 구독 상태 변경: {status}", "warning" if status == "past_due" else "error")
+            print(f"[웹훅] 구독 상태: {status} (email={user_email})")
+
+    elif event_name == "subscription_payment_success":
+        # 정기 결제 성공
+        subscription_id = attrs.get("subscription_id", "")
+        print(f"[웹훅] 정기 결제 성공: sub_id={subscription_id}")
+
+        if lk:
+            try:
+                # 월간 토큰 리필
+                _requests.post(
+                    f"{license_client.server_url}/api/license/tokens/purchase",
+                    json={
+                        "license_key": lk,
+                        "tokens": 0,
+                        "payment_id": f"ls_renewal_{subscription_id}_{int(time.time())}",
+                    },
+                    timeout=10,
+                )
+                license_client.verify()
+                add_log("[결제] 월간 구독 결제 완료", "success")
+            except Exception as e:
+                print(f"[웹훅] 토큰 리필 오류: {e}")
+
+    elif event_name == "subscription_payment_failed":
+        print(f"[웹훅] 결제 실패: email={user_email}")
+        add_log("[결제] 구독 결제 실패 - 확인 필요", "error")
+
+    return jsonify({"success": True}), 200
 
 
 @app.route("/api/payment/request", methods=["POST"])
 def api_payment_request():
-    """결제 요청 정보 생성 (프론트에서 PortOne SDK 호출 전 사용)"""
+    """토큰 충전용 결제 요청 정보 생성"""
     data = request.get_json() or {}
     product_id = data.get("product_id", "")
 
     product = PAYMENT_PRODUCTS.get(product_id)
     if not product:
         return jsonify({"error": "잘못된 상품입니다."}), 400
+
+    # 구독 플랜은 Lemon Squeezy로 리다이렉트
+    if product["type"] == "subscription":
+        plan_id = product.get("plan_id", "")
+        if ls_client.is_available():
+            user_email = current_user.email if current_user.is_authenticated else None
+            lk = license_client.license_key
+            checkout_url = ls_client.get_checkout_url(plan_id, user_email=user_email, license_key=lk)
+            if checkout_url:
+                return jsonify({"redirect": checkout_url, "provider": "lemonsqueezy"})
+        return jsonify({"error": "결제 서비스 준비 중입니다."}), 503
 
     order_id = f"order_{product_id}_{uuid.uuid4().hex[:8]}_{int(time.time())}"
     payment_id = f"payment_{uuid.uuid4().hex[:12]}_{int(time.time())}"
@@ -3345,223 +3496,11 @@ def api_payment_request():
     })
 
 
-@app.route("/api/payment/confirm", methods=["POST"])
-def api_payment_confirm():
-    """PortOne V2 결제 검증 (프론트에서 결제 성공 후 호출)"""
-    data = request.get_json() or {}
-    payment_id = data.get("paymentId", "")
-    order_id = data.get("orderId", "")
-    amount = int(data.get("amount", 0))
-
-    print(f"[결제 디버그] 요청 수신: paymentId={payment_id}, orderId={order_id}, amount={amount}")
-
-    if not payment_id or not order_id or not amount:
-        print(f"[결제 디버그] 필수 파라미터 누락!")
-        return jsonify({"error": "필수 파라미터 누락"}), 400
-
-    import requests as _requests
-
-    try:
-        # PortOne V2 API로 결제 조회
-        resp = _requests.get(
-            f"https://api.portone.io/payments/{payment_id}",
-            headers={
-                "Authorization": f"PortOne {PORTONE_API_SECRET}",
-                "Content-Type": "application/json",
-            },
-            timeout=15,
-        )
-        result = resp.json()
-        print(f"[결제 디버그] PortOne API HTTP {resp.status_code}, 응답: {result}")
-        add_log(f"[결제] PortOne API 응답 (HTTP {resp.status_code}): {result}", "info")
-
-        payment_status = result.get("status")
-        # PAID: 즉시 결제 완료, VIRTUAL_ACCOUNT_ISSUED: 가상계좌 발급됨
-        # 테스트 모드에서 카드결제는 보통 PAID로 돌아옴
-        if resp.status_code == 200 and payment_status == "PAID":
-            # 결제 금액 검증
-            paid_amount = result.get("amount", {}).get("total", 0)
-            if paid_amount != amount:
-                add_log(f"[결제] 금액 불일치: 요청 ₩{amount:,} vs 실제 ₩{paid_amount:,}", "error")
-                return jsonify({"error": "결제 금액이 일치하지 않습니다."}), 400
-
-            # 결제 성공 → 상품 지급
-            product_id = None
-            for pid, prod in PAYMENT_PRODUCTS.items():
-                if prod["amount"] == amount and pid in order_id:
-                    product_id = pid
-                    break
-
-            if product_id:
-                product = PAYMENT_PRODUCTS[product_id]
-                if product["type"] == "token" and license_client.license_key:
-                    # 토큰 충전
-                    tokens = product.get("tokens", 0)
-                    try:
-                        tok_resp = _requests.post(
-                            f"{license_client.server_url}/api/license/tokens/purchase",
-                            json={
-                                "license_key": license_client.license_key,
-                                "tokens": tokens,
-                                "payment_id": payment_id,
-                            },
-                            timeout=10,
-                        )
-                        tok_data = tok_resp.json()
-                        if tok_data.get("success"):
-                            license_client.token_balance = tok_data.get("balance", 0)
-                    except Exception as e:
-                        print(f"[결제] 토큰 충전 오류: {e}")
-
-                elif product["type"] == "subscription" and license_client.license_key:
-                    # 구독 플랜 업그레이드
-                    plan_map = {
-                        "plan_starter": "starter",
-                        "plan_business": "business",
-                        "plan_agency": "agency",
-                    }
-                    plan_id = plan_map.get(product_id)
-                    if plan_id:
-                        try:
-                            upgrade_url = f"{license_client.server_url}/api/license/plan/upgrade"
-                            print(f"[결제] 플랜 업그레이드 요청: {upgrade_url}, plan={plan_id}")
-                            plan_resp = _requests.post(
-                                upgrade_url,
-                                json={
-                                    "license_key": license_client.license_key,
-                                    "plan_id": plan_id,
-                                    "payment_id": payment_id,
-                                },
-                                timeout=10,
-                            )
-                            print(f"[결제] 플랜 업그레이드 응답: HTTP {plan_resp.status_code}, body={plan_resp.text[:200]}")
-                            if plan_resp.status_code == 200:
-                                plan_data = plan_resp.json()
-                                if plan_data.get("success"):
-                                    license_client.verify()
-                                    print(f"[결제] 플랜 업그레이드 완료: {plan_data.get('plan')}")
-                                else:
-                                    print(f"[결제] 플랜 업그레이드 실패: {plan_data}")
-                            else:
-                                print(f"[결제] 플랜 업그레이드 서버 오류: HTTP {plan_resp.status_code}")
-                        except Exception as e:
-                            import traceback
-                            print(f"[결제] 플랜 업그레이드 오류: {e}")
-                            traceback.print_exc()
-
-                add_log(f"[결제] 결제 완료: {product['name']} (₩{amount:,})", "success")
-
-            return jsonify({
-                "success": True,
-                "paymentId": payment_id,
-                "orderId": order_id,
-                "amount": amount,
-                "status": "PAID",
-            })
-        else:
-            status = result.get("status", "UNKNOWN")
-            msg = result.get("message", f"결제 상태: {status}")
-            add_log(f"[결제] 결제 미완료: status={status}, HTTP={resp.status_code}, response={result}", "error")
-            return jsonify({
-                "error": f"결제 상태: {status}" if status != "UNKNOWN" else msg,
-                "status": status,
-                "detail": result.get("message", ""),
-            }), 400
-
-    except Exception as e:
-        import traceback
-        print(f"[결제 디버그] 예외 발생: {str(e)}")
-        traceback.print_exc()
-        add_log(f"[결제] 결제 처리 오류: {str(e)}", "error")
-        return jsonify({"error": f"결제 처리 오류: {str(e)}"}), 500
-
-
 @app.route("/api/payment/success")
 def api_payment_success():
-    """결제 성공 리다이렉트 - PortOne REDIRECTION 모드 결제 완료 처리
-
-    PortOne V2 REDIRECTION 모드: redirectUrl?paymentId=xxx 형태로 리다이렉트
-    Toss PG 직접: orderId, paymentKey, amount 형태로 리다이렉트
-    """
-    # PortOne V2가 추가하는 파라미터
-    payment_id = request.args.get("paymentId", "")
-    # Toss PG가 직접 추가하는 파라미터 (fallback)
-    if not payment_id:
-        payment_id = request.args.get("paymentKey", "")
-    order_id = request.args.get("orderId", "")
-    amount_str = request.args.get("amount", "0")
-    # PortOne V2 에러 파라미터
-    error_code = request.args.get("code", "")
-    error_message = request.args.get("message", "")
-
-    # 에러 코드가 있으면 실패 처리
-    if error_code:
-        add_log(f"[결제] 결제 실패(리다이렉트): {error_code} - {error_message}", "error")
-        return redirect("/?payment_result=fail")
-
-    try:
-        amount = int(amount_str)
-    except (ValueError, TypeError):
-        amount = 0
-
-    if payment_id and order_id and amount:
-        import requests as _requests
-        try:
-            # PortOne V2 API로 결제 조회 및 검증
-            resp = _requests.get(
-                f"https://api.portone.io/payments/{payment_id}",
-                headers={
-                    "Authorization": f"PortOne {PORTONE_API_SECRET}",
-                    "Content-Type": "application/json",
-                },
-                timeout=15,
-            )
-            result = resp.json()
-
-            if resp.status_code == 200 and result.get("status") == "PAID":
-                paid_amount = result.get("amount", {}).get("total", 0)
-                if paid_amount == amount:
-                    # 결제 성공 → 상품 지급
-                    product_id = None
-                    for pid, prod in PAYMENT_PRODUCTS.items():
-                        if prod["amount"] == amount and pid in order_id:
-                            product_id = pid
-                            break
-
-                    if product_id:
-                        product = PAYMENT_PRODUCTS[product_id]
-                        if product["type"] == "token" and license_client.license_key:
-                            tokens = product.get("tokens", 0)
-                            try:
-                                tok_resp = _requests.post(
-                                    f"{license_client.server_url}/api/license/tokens/purchase",
-                                    json={
-                                        "license_key": license_client.license_key,
-                                        "tokens": tokens,
-                                        "payment_id": payment_id,
-                                    },
-                                    timeout=10,
-                                )
-                                tok_data = tok_resp.json()
-                                if tok_data.get("success"):
-                                    license_client.token_balance = tok_data.get("balance", 0)
-                            except Exception:
-                                pass
-
-                        add_log(f"[결제] 결제 완료(리다이렉트): {product['name']} (₩{amount:,})", "success")
-
-                    return redirect("/?payment_result=success")
-                else:
-                    add_log(f"[결제] 금액 불일치: 요청 ₩{amount:,} vs 실제 ₩{paid_amount:,}", "error")
-            else:
-                status = result.get("status", "UNKNOWN")
-                add_log(f"[결제] 결제 상태 이상: {status}", "error")
-
-        except Exception as e:
-            add_log(f"[결제] 결제 검증 오류: {str(e)}", "error")
-
-    # 검증 실패해도 대시보드로 리다이렉트 (사용자가 막히지 않도록)
-    return redirect("/?payment_result=pending")
+    """결제 성공 리다이렉트 (Lemon Squeezy 체크아웃 완료 후)"""
+    add_log("[결제] 결제 완료 (Lemon Squeezy 리다이렉트)", "success")
+    return redirect("/?payment_result=success")
 
 
 @app.route("/api/payment/fail")
@@ -3581,6 +3520,9 @@ if not is_owner_mode():
         print(f"[License] 라이선스 미인증 (셋업 필요): {_lic_result.get('error', '')}")
 else:
     print("[License] Owner 모드 - 라이선스 검증 스킵")
+
+# Lemon Squeezy 결제 초기화
+ls_client.initialize()
 
 
 if __name__ == "__main__":

@@ -287,8 +287,8 @@
             color: var(--text);
         }
     </style>
-    <!-- 토스페이먼츠 SDK -->
-    <script src="https://cdn.portone.io/v2/browser-sdk.js"></script>
+    <!-- Lemon Squeezy JS -->
+    <script src="https://app.lemonsqueezy.com/js/lemon.js" defer></script>
 </head>
 <body>
 
@@ -4013,28 +4013,22 @@
         }
     })();
 
-    // ─── PortOne V2 결제 ───
-    let portoneStoreId = null;
-    let portoneChannelKey = null;
+    // ─── Lemon Squeezy 결제 ───
+    let lsCheckoutUrls = {};
     let selectedPayPlan = null;
     let selectedPayPrice = 0;
-    let selectedPayMethod = 'CARD';
 
-    function selectPayMethod(el, method) {
-        selectedPayMethod = method;
-        document.querySelectorAll('.pay-method-btn').forEach(b => b.classList.remove('pay-method-active'));
-        el.classList.add('pay-method-active');
-    }
-
-    // PortOne 설정 초기화
-    (async function initPortOne() {
+    // Lemon Squeezy 설정 초기화
+    (async function initLemonSqueezy() {
         try {
             const config = await api('/api/payment/config');
-            if (config) {
-                portoneStoreId = config.storeId;
-                portoneChannelKey = config.channelKey;
+            if (config && config.available) {
+                lsCheckoutUrls = config.checkout_urls || {};
+                console.log('[LS] 결제 초기화 완료:', Object.keys(lsCheckoutUrls));
             }
-        } catch(e) { console.log('PortOne config init skipped'); }
+        } catch(e) { console.log('LemonSqueezy config init skipped'); }
+        // Lemon Squeezy JS Setup
+        if (window.createLemonSqueezy) window.createLemonSqueezy();
     })();
 
     function openPaymentPopup(planId, planName, price) {
@@ -4048,11 +4042,6 @@
         document.getElementById('payAmount').textContent = '₩' + price.toLocaleString();
         document.getElementById('paymentOverlay').style.display = 'flex';
         document.getElementById('paymentMsg').textContent = '';
-        // 결제수단 카드결제로 초기화
-        selectedPayMethod = 'CARD';
-        document.querySelectorAll('.pay-method-btn').forEach(b => b.classList.remove('pay-method-active'));
-        const cardBtn = document.querySelector('.pay-method-btn[data-method="CARD"]');
-        if (cardBtn) cardBtn.classList.add('pay-method-active');
     }
 
     function closePaymentPopup() {
@@ -4066,76 +4055,38 @@
         btn.textContent = '결제 준비 중...';
 
         try {
-            const orderData = await api('/api/payment/request', {
+            // Lemon Squeezy 체크아웃 URL 요청
+            msg.innerHTML = '<span style="color:#60a5fa;">결제 페이지를 여는 중...</span>';
+
+            const result = await api('/api/payment/checkout', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({product_id: 'plan_' + selectedPayPlan}),
+                body: JSON.stringify({plan_id: selectedPayPlan}),
             });
 
-            if (!orderData || orderData.error) {
-                msg.innerHTML = `<span style="color:#ef4444;">${orderData?.error || '주문 생성 실패'}</span>`;
+            if (!result || result.error) {
+                msg.innerHTML = `<span style="color:#ef4444;">${result?.error || '결제 준비 실패'}</span>`;
                 btn.disabled = false; btn.textContent = '결제하기';
                 return;
             }
 
-            if (!portoneStoreId) {
-                msg.innerHTML = '<span style="color:#ef4444;">결제 모듈 로딩 중... 잠시 후 다시 시도해주세요.</span>';
-                btn.disabled = false; btn.textContent = '결제하기';
-                return;
-            }
-
-            // PortOne V2 결제 요청
-            msg.innerHTML = '<span style="color:#60a5fa;">결제창을 여는 중...</span>';
-
-            const payParams = {
-                storeId: portoneStoreId,
-                channelKey: portoneChannelKey,
-                paymentId: orderData.paymentId,
-                orderName: orderData.orderName,
-                totalAmount: orderData.amount,
-                currency: 'CURRENCY_KRW',
-                payMethod: selectedPayMethod,
-            };
-            // 토스페이먼츠 간편결제는 easyPay provider 필수
-            if (selectedPayMethod === 'EASY_PAY') {
-                payParams.easyPay = { easyPayProvider: 'TOSSPAY' };
-            }
-            const response = await PortOne.requestPayment(payParams);
-
-            // 사용자 취소 또는 에러
-            if (response.code) {
-                if (response.code === 'USER_CANCEL') {
-                    msg.innerHTML = '<span style="color:#888;">결제가 취소되었습니다.</span>';
+            if (result.checkout_url) {
+                // Lemon Squeezy 오버레이로 결제창 열기
+                if (window.LemonSqueezy) {
+                    window.LemonSqueezy.Url.Open(result.checkout_url);
                 } else {
-                    msg.innerHTML = `<span style="color:#ef4444;">${response.message || '결제 오류'} (${response.code})</span>`;
+                    // fallback: 새 탭으로 열기
+                    window.open(result.checkout_url, '_blank');
                 }
-                btn.disabled = false; btn.textContent = '결제하기';
-                return;
-            }
-
-            // 결제 성공 → 서버에서 검증
-            msg.innerHTML = '<span style="color:#60a5fa;">결제 승인 중...</span>';
-            const result = await api('/api/payment/confirm', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    paymentId: response.paymentId || orderData.paymentId,
-                    orderId: orderData.orderId,
-                    amount: orderData.amount,
-                }),
-            });
-
-            if (result && result.success) {
-                msg.innerHTML = '<span style="color:#4ade80;">결제가 완료되었습니다!</span>';
+                msg.innerHTML = '<span style="color:#4ade80;">결제창이 열렸습니다. 결제를 완료해주세요.</span>';
                 setTimeout(() => {
                     closePaymentPopup();
                     closeSubscriptionPopup();
-                    loadLicenseStatus(true);
-                    if (typeof loadMypage === 'function') loadMypage();
                     btn.disabled = false; btn.textContent = '결제하기';
-                }, 2000);
+                    msg.textContent = '';
+                }, 3000);
             } else {
-                msg.innerHTML = `<span style="color:#ef4444;">${result?.error || '결제 승인 실패'}</span>`;
+                msg.innerHTML = '<span style="color:#ef4444;">체크아웃 URL 생성 실패</span>';
                 btn.disabled = false; btn.textContent = '결제하기';
             }
         } catch(e) {
@@ -4144,6 +4095,15 @@
             btn.disabled = false; btn.textContent = '결제하기';
         }
     }
+
+    // Lemon Squeezy 결제 완료 이벤트 리스너
+    window.addEventListener('message', function(e) {
+        if (e.data && e.data.event === 'Checkout.Success') {
+            showPaymentNotification('결제가 완료되었습니다!', 'success');
+            loadLicenseStatus(true);
+            if (typeof loadMypage === 'function') loadMypage();
+        }
+    });
 
     // ─── 토큰 충전 팝업 ───
     let selectedChargeTokens = 1200;
@@ -4185,70 +4145,8 @@
         }
 
         try {
-            const orderData = await api('/api/payment/request', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({product_id: productId}),
-            });
-
-            if (!orderData || orderData.error) {
-                msg.innerHTML = `<span style="color:#ef4444;">${orderData?.error || '주문 생성 실패'}</span>`;
-                btn.disabled = false; btn.textContent = '충전하기';
-                return;
-            }
-
-            if (!portoneStoreId) {
-                msg.innerHTML = '<span style="color:#ef4444;">결제 모듈 로딩 중... 잠시 후 다시 시도해주세요.</span>';
-                btn.disabled = false; btn.textContent = '충전하기';
-                return;
-            }
-
-            // PortOne V2 결제 요청
-            msg.innerHTML = '<span style="color:#60a5fa;">결제창을 여는 중...</span>';
-
-            const response = await PortOne.requestPayment({
-                storeId: portoneStoreId,
-                channelKey: portoneChannelKey,
-                paymentId: orderData.paymentId,
-                orderName: orderData.orderName,
-                totalAmount: orderData.amount,
-                currency: 'CURRENCY_KRW',
-                payMethod: 'CARD',
-            });
-
-            // 사용자 취소 또는 에러
-            if (response.code) {
-                if (response.code === 'USER_CANCEL') {
-                    msg.innerHTML = '<span style="color:#888;">결제가 취소되었습니다.</span>';
-                } else {
-                    msg.innerHTML = `<span style="color:#ef4444;">${response.message || '결제 오류'} (${response.code})</span>`;
-                }
-                btn.disabled = false; btn.textContent = '충전하기';
-                return;
-            }
-
-            // 결제 성공 → 서버에서 검증
-            msg.innerHTML = '<span style="color:#60a5fa;">결제 승인 중...</span>';
-            const result = await api('/api/payment/confirm', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    paymentId: response.paymentId || orderData.paymentId,
-                    orderId: orderData.orderId,
-                    amount: orderData.amount,
-                }),
-            });
-
-            if (result && result.success) {
-                msg.innerHTML = `<span style="color:#4ade80;">${selectedChargeTokens.toLocaleString()} 토큰 충전 완료!</span>`;
-                loadMypage();
-                loadLicenseStatus(true);
-                setTimeout(() => { closeChargePopup(); btn.disabled = false; btn.textContent = '충전하기'; msg.textContent = ''; }, 2500);
-            } else {
-                msg.innerHTML = `<span style="color:#ef4444;">${result?.error || '충전 실패'}</span>`;
-                btn.disabled = false; btn.textContent = '충전하기';
-            }
-
+            // 토큰 충전도 Lemon Squeezy 체크아웃으로 처리 (추후 토큰 상품 추가 시)
+            msg.innerHTML = '<span style="color:#f59e0b;">토큰 충전 기능은 곧 지원됩니다.</span>';
             btn.disabled = false; btn.textContent = '충전하기';
         } catch(e) {
             console.error('Charge error:', e);
@@ -4578,28 +4476,12 @@
         </div>
     </div>
 
-    <!-- 결제 수단 안내 -->
+    <!-- 결제 안내 -->
     <div style="padding:0 28px;">
-        <div style="font-size:14px;font-weight:600;color:#fff;margin-bottom:12px;">결제 수단</div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;">
-            <div class="pay-method-btn pay-method-active" data-method="CARD" onclick="selectPayMethod(this,'CARD')" style="padding:12px;background:rgba(59,130,246,0.06);border:2px solid rgba(59,130,246,0.15);border-radius:10px;text-align:center;cursor:pointer;transition:all .2s;">
-                <div style="font-size:20px;margin-bottom:4px;">💳</div>
-                <div class="pay-method-label" style="font-size:11px;color:#aaa;">카드결제</div>
-            </div>
-            <div class="pay-method-btn" data-method="TRANSFER" onclick="selectPayMethod(this,'TRANSFER')" style="padding:12px;background:rgba(245,158,11,0.06);border:2px solid rgba(245,158,11,0.15);border-radius:10px;text-align:center;cursor:pointer;transition:all .2s;">
-                <div style="font-size:20px;margin-bottom:4px;">🏦</div>
-                <div class="pay-method-label" style="font-size:11px;color:#aaa;">계좌이체</div>
-            </div>
-            <div class="pay-method-btn" data-method="EASY_PAY" onclick="selectPayMethod(this,'EASY_PAY')" style="padding:12px;background:rgba(34,197,94,0.06);border:2px solid rgba(34,197,94,0.15);border-radius:10px;text-align:center;cursor:pointer;transition:all .2s;">
-                <div style="font-size:20px;margin-bottom:4px;">📱</div>
-                <div class="pay-method-label" style="font-size:11px;color:#aaa;">간편결제</div>
-            </div>
-        </div>
-
         <div style="padding:12px 16px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);border-radius:10px;margin-bottom:16px;">
             <div style="font-size:12px;color:#60a5fa;line-height:1.6;">
-                토스페이먼츠를 통해 안전하게 결제됩니다.<br>
-                카드, 계좌이체, 카카오페이, 네이버페이 등 다양한 결제수단을 지원합니다.
+                Lemon Squeezy를 통해 안전하게 결제됩니다.<br>
+                카드, PayPal 등 다양한 결제수단을 지원합니다.
             </div>
         </div>
     </div>
@@ -4611,7 +4493,7 @@
         </button>
         <div id="paymentMsg" style="margin-top:10px;font-size:12px;text-align:center;"></div>
         <div style="margin-top:12px;text-align:center;font-size:10px;color:#555;">
-            토스페이먼츠 SSL 암호화 결제 &nbsp;|&nbsp; 언제든 해지 가능
+            Lemon Squeezy 보안 결제 &nbsp;|&nbsp; 언제든 해지 가능
         </div>
     </div>
 
