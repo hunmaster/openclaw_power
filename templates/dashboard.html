@@ -288,7 +288,7 @@
         }
     </style>
     <!-- 토스페이먼츠 SDK -->
-    <script src="https://js.tosspayments.com/v1/payment"></script>
+    <script src="https://cdn.portone.io/v2/browser-sdk.js"></script>
 </head>
 <body>
 
@@ -3770,59 +3770,22 @@
         });
     }
 
-    // ─── 토스페이먼츠 결제 ───
-    let tossPayments = null;
+    // ─── PortOne V2 결제 ───
+    let portoneStoreId = null;
+    let portoneChannelKey = null;
     let selectedPayPlan = null;
     let selectedPayPrice = 0;
 
-    // 토스 SDK 초기화
-    (async function initToss() {
+    // PortOne 설정 초기화
+    (async function initPortOne() {
         try {
             const config = await api('/api/payment/config');
-            if (config && config.clientKey) {
-                tossPayments = TossPayments(config.clientKey);
+            if (config) {
+                portoneStoreId = config.storeId;
+                portoneChannelKey = config.channelKey;
             }
-        } catch(e) { console.log('Toss SDK init skipped'); }
+        } catch(e) { console.log('PortOne config init skipped'); }
     })();
-
-    // 결제 성공 메시지 수신
-    window.addEventListener('message', async (e) => {
-        if (e.data && e.data.type === 'payment_success') {
-            const msg = document.getElementById('paymentMsg');
-            const btn = document.getElementById('btnProcessPayment');
-            msg.innerHTML = '<span style="color:#60a5fa;">결제 승인 중...</span>';
-            btn.disabled = true;
-
-            const result = await api('/api/payment/confirm', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    paymentKey: e.data.paymentKey,
-                    orderId: e.data.orderId,
-                    amount: e.data.amount,
-                }),
-            });
-            if (result && result.success) {
-                msg.innerHTML = '<span style="color:#4ade80;">결제가 완료되었습니다!</span>';
-                setTimeout(() => {
-                    closePaymentPopup();
-                    closeSubscriptionPopup();
-                    loadLicenseStatus();
-                    if (typeof loadMypage === 'function') loadMypage();
-                    btn.disabled = false; btn.textContent = '결제하기';
-                }, 2000);
-            } else {
-                msg.innerHTML = `<span style="color:#ef4444;">${result?.error || '결제 승인 실패'}</span>`;
-                btn.disabled = false; btn.textContent = '결제하기';
-            }
-        }
-        if (e.data && e.data.type === 'payment_fail') {
-            const msg = document.getElementById('paymentMsg');
-            msg.innerHTML = `<span style="color:#ef4444;">${e.data.message || '결제가 취소되었습니다.'}</span>`;
-            document.getElementById('btnProcessPayment').disabled = false;
-            document.getElementById('btnProcessPayment').textContent = '결제하기';
-        }
-    });
 
     function openPaymentPopup(planId, planName, price) {
         if (price === 0) {
@@ -3848,7 +3811,6 @@
         btn.textContent = '결제 준비 중...';
 
         try {
-            // 서버에서 주문 정보 생성
             const orderData = await api('/api/payment/request', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -3861,28 +3823,59 @@
                 return;
             }
 
-            if (!tossPayments) {
+            if (!portoneStoreId) {
                 msg.innerHTML = '<span style="color:#ef4444;">결제 모듈 로딩 중... 잠시 후 다시 시도해주세요.</span>';
                 btn.disabled = false; btn.textContent = '결제하기';
                 return;
             }
 
-            // 토스 결제창 호출
-            tossPayments.requestPayment('카드', {
-                amount: orderData.amount,
-                orderId: orderData.orderId,
+            // PortOne V2 결제 요청
+            const response = await PortOne.requestPayment({
+                storeId: portoneStoreId,
+                channelKey: portoneChannelKey,
+                paymentId: orderData.paymentId,
                 orderName: orderData.orderName,
-                customerKey: orderData.customerKey,
-                successUrl: window.location.origin + '/api/payment/success',
-                failUrl: window.location.origin + '/api/payment/fail',
-            }).catch(err => {
-                if (err.code === 'USER_CANCEL') {
+                totalAmount: orderData.amount,
+                currency: 'CURRENCY_KRW',
+                payMethod: 'CARD',
+            });
+
+            if (response.code) {
+                // 에러 또는 취소
+                if (response.code === 'PORTONE_ERROR' || response.code === 'USER_CANCEL') {
                     msg.innerHTML = '<span style="color:#888;">결제가 취소되었습니다.</span>';
                 } else {
-                    msg.innerHTML = `<span style="color:#ef4444;">${err.message || '결제 오류'}</span>`;
+                    msg.innerHTML = `<span style="color:#ef4444;">${response.message || '결제 오류'}</span>`;
                 }
                 btn.disabled = false; btn.textContent = '결제하기';
+                return;
+            }
+
+            // 결제 성공 → 서버에서 검증
+            msg.innerHTML = '<span style="color:#60a5fa;">결제 승인 중...</span>';
+            const result = await api('/api/payment/confirm', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    paymentId: response.paymentId || orderData.paymentId,
+                    orderId: orderData.orderId,
+                    amount: orderData.amount,
+                }),
             });
+
+            if (result && result.success) {
+                msg.innerHTML = '<span style="color:#4ade80;">결제가 완료되었습니다!</span>';
+                setTimeout(() => {
+                    closePaymentPopup();
+                    closeSubscriptionPopup();
+                    loadLicenseStatus();
+                    if (typeof loadMypage === 'function') loadMypage();
+                    btn.disabled = false; btn.textContent = '결제하기';
+                }, 2000);
+            } else {
+                msg.innerHTML = `<span style="color:#ef4444;">${result?.error || '결제 승인 실패'}</span>`;
+                btn.disabled = false; btn.textContent = '결제하기';
+            }
         } catch(e) {
             msg.innerHTML = '<span style="color:#ef4444;">결제 처리 중 오류가 발생했습니다.</span>';
             btn.disabled = false; btn.textContent = '결제하기';
@@ -3919,7 +3912,6 @@
         btn.disabled = true;
         btn.textContent = '결제 준비 중...';
 
-        // 토큰 수량에 맞는 상품 ID 매핑
         const tokenProductMap = {500: 'token_500', 1200: 'token_1200', 3000: 'token_3000', 7000: 'token_7000'};
         const productId = tokenProductMap[selectedChargeTokens];
 
@@ -3942,62 +3934,54 @@
                 return;
             }
 
-            if (!tossPayments) {
+            if (!portoneStoreId) {
                 msg.innerHTML = '<span style="color:#ef4444;">결제 모듈 로딩 중... 잠시 후 다시 시도해주세요.</span>';
                 btn.disabled = false; btn.textContent = '충전하기';
                 return;
             }
 
-            // 충전 결제 성공 메시지 핸들러 (1회용)
-            const chargeHandler = async (e) => {
-                if (e.data && e.data.type === 'payment_success') {
-                    window.removeEventListener('message', chargeHandler);
-                    msg.innerHTML = '<span style="color:#60a5fa;">결제 승인 중...</span>';
-
-                    const result = await api('/api/payment/confirm', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({
-                            paymentKey: e.data.paymentKey,
-                            orderId: e.data.orderId,
-                            amount: e.data.amount,
-                        }),
-                    });
-                    if (result && result.success) {
-                        msg.innerHTML = `<span style="color:#4ade80;">${selectedChargeTokens.toLocaleString()} 토큰 충전 완료!</span>`;
-                        loadMypage();
-                        loadLicenseStatus();
-                        setTimeout(() => { closeChargePopup(); btn.disabled = false; btn.textContent = '충전하기'; msg.textContent = ''; }, 2500);
-                    } else {
-                        msg.innerHTML = `<span style="color:#ef4444;">${result?.error || '충전 실패'}</span>`;
-                        btn.disabled = false; btn.textContent = '충전하기';
-                    }
-                }
-                if (e.data && e.data.type === 'payment_fail') {
-                    window.removeEventListener('message', chargeHandler);
-                    msg.innerHTML = `<span style="color:#ef4444;">${e.data.message || '결제 취소'}</span>`;
-                    btn.disabled = false; btn.textContent = '충전하기';
-                }
-            };
-            window.addEventListener('message', chargeHandler);
-
-            // 토스 결제창 호출
-            tossPayments.requestPayment('카드', {
-                amount: orderData.amount,
-                orderId: orderData.orderId,
+            // PortOne V2 결제 요청
+            const response = await PortOne.requestPayment({
+                storeId: portoneStoreId,
+                channelKey: portoneChannelKey,
+                paymentId: orderData.paymentId,
                 orderName: orderData.orderName,
-                customerKey: orderData.customerKey,
-                successUrl: window.location.origin + '/api/payment/success',
-                failUrl: window.location.origin + '/api/payment/fail',
-            }).catch(err => {
-                window.removeEventListener('message', chargeHandler);
-                if (err.code === 'USER_CANCEL') {
+                totalAmount: orderData.amount,
+                currency: 'CURRENCY_KRW',
+                payMethod: 'CARD',
+            });
+
+            if (response.code) {
+                if (response.code === 'USER_CANCEL') {
                     msg.innerHTML = '<span style="color:#888;">결제가 취소되었습니다.</span>';
                 } else {
-                    msg.innerHTML = `<span style="color:#ef4444;">${err.message || '결제 오류'}</span>`;
+                    msg.innerHTML = `<span style="color:#ef4444;">${response.message || '결제 오류'}</span>`;
                 }
                 btn.disabled = false; btn.textContent = '충전하기';
+                return;
+            }
+
+            // 결제 성공 → 서버 검증
+            msg.innerHTML = '<span style="color:#60a5fa;">결제 승인 중...</span>';
+            const result = await api('/api/payment/confirm', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    paymentId: response.paymentId || orderData.paymentId,
+                    orderId: orderData.orderId,
+                    amount: orderData.amount,
+                }),
             });
+
+            if (result && result.success) {
+                msg.innerHTML = `<span style="color:#4ade80;">${selectedChargeTokens.toLocaleString()} 토큰 충전 완료!</span>`;
+                loadMypage();
+                loadLicenseStatus();
+                setTimeout(() => { closeChargePopup(); btn.disabled = false; btn.textContent = '충전하기'; msg.textContent = ''; }, 2500);
+            } else {
+                msg.innerHTML = `<span style="color:#ef4444;">${result?.error || '충전 실패'}</span>`;
+                btn.disabled = false; btn.textContent = '충전하기';
+            }
         } catch(e) {
             msg.innerHTML = '<span style="color:#ef4444;">결제 처리 중 오류가 발생했습니다.</span>';
             btn.disabled = false; btn.textContent = '충전하기';

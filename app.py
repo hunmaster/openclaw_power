@@ -2981,11 +2981,12 @@ def _update_env_var(env_path, key, value):
     os.environ[key] = value
 
 
-# ━━━ 토스페이먼츠 결제 연동 ━━━
+# ━━━ PortOne V2 결제 연동 ━━━
 
-# 테스트 키 (나중에 .env에서 실제 키로 교체)
-TOSS_CLIENT_KEY = os.getenv("TOSS_CLIENT_KEY", "test_ck_D5GePWvyJnrK0W0k6q8gLzN97Eoq")
-TOSS_SECRET_KEY = os.getenv("TOSS_SECRET_KEY", "test_sk_zXLkKEypNArWmo50nX3lmeaxYG5R")
+# PortOne 키 (나중에 .env에서 실제 키로 교체)
+PORTONE_STORE_ID = os.getenv("PORTONE_STORE_ID", "store-ec07c075-083e-4ff1-b301-4ad699b059b5")
+PORTONE_API_SECRET = os.getenv("PORTONE_API_SECRET", "test_sk_d26DlbXAaV0xQbpa7y1VqY50Q9RB")
+PORTONE_CHANNEL_KEY = os.getenv("PORTONE_CHANNEL_KEY", "")  # PortOne 콘솔에서 채널키 확인
 
 # 결제 상품 정의
 PAYMENT_PRODUCTS = {
@@ -3003,13 +3004,16 @@ PAYMENT_PRODUCTS = {
 
 @app.route("/api/payment/config")
 def api_payment_config():
-    """프론트엔드에 토스 클라이언트 키 전달"""
-    return jsonify({"clientKey": TOSS_CLIENT_KEY})
+    """프론트엔드에 PortOne 설정 전달"""
+    return jsonify({
+        "storeId": PORTONE_STORE_ID,
+        "channelKey": PORTONE_CHANNEL_KEY,
+    })
 
 
 @app.route("/api/payment/request", methods=["POST"])
 def api_payment_request():
-    """결제 요청 정보 생성 (프론트에서 토스 SDK 호출 전 사용)"""
+    """결제 요청 정보 생성 (프론트에서 PortOne SDK 호출 전 사용)"""
     data = request.get_json() or {}
     product_id = data.get("product_id", "")
 
@@ -3018,49 +3022,49 @@ def api_payment_request():
         return jsonify({"error": "잘못된 상품입니다."}), 400
 
     order_id = f"order_{product_id}_{uuid.uuid4().hex[:8]}_{int(time.time())}"
+    payment_id = f"payment_{uuid.uuid4().hex[:12]}_{int(time.time())}"
 
     return jsonify({
         "orderId": order_id,
+        "paymentId": payment_id,
         "orderName": product["name"],
         "amount": product["amount"],
         "productId": product_id,
-        "customerKey": license_client.license_key or f"guest_{uuid.uuid4().hex[:8]}",
     })
 
 
 @app.route("/api/payment/confirm", methods=["POST"])
 def api_payment_confirm():
-    """토스 결제 승인 (프론트에서 결제 성공 후 호출)"""
+    """PortOne V2 결제 검증 (프론트에서 결제 성공 후 호출)"""
     data = request.get_json() or {}
-    payment_key = data.get("paymentKey", "")
+    payment_id = data.get("paymentId", "")
     order_id = data.get("orderId", "")
     amount = int(data.get("amount", 0))
 
-    if not payment_key or not order_id or not amount:
+    if not payment_id or not order_id or not amount:
         return jsonify({"error": "필수 파라미터 누락"}), 400
 
-    # 토스페이먼츠 결제 승인 API 호출
     import requests as _requests
-    import base64
-    auth = base64.b64encode(f"{TOSS_SECRET_KEY}:".encode()).decode()
 
     try:
-        resp = _requests.post(
-            "https://api.tosspayments.com/v1/payments/confirm",
-            json={
-                "paymentKey": payment_key,
-                "orderId": order_id,
-                "amount": amount,
-            },
+        # PortOne V2 API로 결제 조회
+        resp = _requests.get(
+            f"https://api.portone.io/payments/{payment_id}",
             headers={
-                "Authorization": f"Basic {auth}",
+                "Authorization": f"PortOne {PORTONE_API_SECRET}",
                 "Content-Type": "application/json",
             },
             timeout=15,
         )
         result = resp.json()
 
-        if resp.status_code == 200:
+        if resp.status_code == 200 and result.get("status") == "PAID":
+            # 결제 금액 검증
+            paid_amount = result.get("amount", {}).get("total", 0)
+            if paid_amount != amount:
+                add_log(f"[결제] 금액 불일치: 요청 ₩{amount:,} vs 실제 ₩{paid_amount:,}", "error")
+                return jsonify({"error": "결제 금액이 일치하지 않습니다."}), 400
+
             # 결제 성공 → 상품 지급
             product_id = None
             for pid, prod in PAYMENT_PRODUCTS.items():
@@ -3071,7 +3075,6 @@ def api_payment_confirm():
             if product_id:
                 product = PAYMENT_PRODUCTS[product_id]
                 if product["type"] == "token" and license_client.license_key:
-                    # 토큰 충전
                     tokens = product.get("tokens", 0)
                     try:
                         tok_resp = _requests.post(
@@ -3079,8 +3082,7 @@ def api_payment_confirm():
                             json={
                                 "license_key": license_client.license_key,
                                 "tokens": tokens,
-                                "amount": amount,
-                                "payment_key": payment_key,
+                                "payment_id": payment_id,
                             },
                             timeout=10,
                         )
@@ -3094,16 +3096,18 @@ def api_payment_confirm():
 
             return jsonify({
                 "success": True,
-                "paymentKey": payment_key,
+                "paymentId": payment_id,
                 "orderId": order_id,
                 "amount": amount,
-                "status": result.get("status", ""),
+                "status": "PAID",
             })
         else:
-            add_log(f"[결제] 결제 실패: {result.get('message', '알 수 없는 오류')}", "error")
+            status = result.get("status", "UNKNOWN")
+            msg = result.get("message", f"결제 상태: {status}")
+            add_log(f"[결제] 결제 실패: {msg}", "error")
             return jsonify({
-                "error": result.get("message", "결제 승인 실패"),
-                "code": result.get("code", ""),
+                "error": msg,
+                "status": status,
             }), 400
 
     except Exception as e:
@@ -3113,75 +3117,23 @@ def api_payment_confirm():
 
 @app.route("/api/payment/success")
 def api_payment_success():
-    """토스 결제 성공 리다이렉트 페이지"""
-    payment_key = request.args.get("paymentKey", "")
-    order_id = request.args.get("orderId", "")
-    amount = request.args.get("amount", "0")
-    return f"""
+    """결제 성공 리다이렉트 (PortOne V2는 SPA 방식이라 보통 여기 안 옴)"""
+    return """
     <html><body>
-    <p id="statusMsg" style="font-family:sans-serif;padding:20px;">결제 승인 처리 중...</p>
-    <script>
-    if (window.opener) {{
-        // 팝업 모드: 부모 창에 메시지 전달 후 닫기
-        window.opener.postMessage({{
-            type: 'payment_success',
-            paymentKey: '{payment_key}',
-            orderId: '{order_id}',
-            amount: {amount}
-        }}, '*');
-        window.close();
-    }} else {{
-        // 같은 창 리다이렉트 모드: 직접 결제 승인 처리 후 대시보드로 이동
-        fetch('/api/payment/confirm', {{
-            method: 'POST',
-            headers: {{'Content-Type': 'application/json'}},
-            body: JSON.stringify({{
-                paymentKey: '{payment_key}',
-                orderId: '{order_id}',
-                amount: {amount}
-            }})
-        }})
-        .then(r => r.json())
-        .then(data => {{
-            if (data.success) {{
-                document.getElementById('statusMsg').innerText = '결제가 완료되었습니다! 대시보드로 이동합니다...';
-                setTimeout(() => {{ window.location.href = '/'; }}, 1500);
-            }} else {{
-                document.getElementById('statusMsg').innerText = '결제 승인 실패: ' + (data.error || '알 수 없는 오류');
-                setTimeout(() => {{ window.location.href = '/'; }}, 3000);
-            }}
-        }})
-        .catch(err => {{
-            document.getElementById('statusMsg').innerText = '결제 처리 중 오류가 발생했습니다.';
-            setTimeout(() => {{ window.location.href = '/'; }}, 3000);
-        }});
-    }}
-    </script>
+    <p style="font-family:sans-serif;padding:20px;color:#4ade80;">결제가 완료되었습니다! 대시보드로 이동합니다...</p>
+    <script>setTimeout(function(){ window.location.href = '/'; }, 1500);</script>
     </body></html>
     """
 
 
 @app.route("/api/payment/fail")
 def api_payment_fail():
-    """토스 결제 실패 리다이렉트 페이지"""
-    code = request.args.get("code", "")
+    """결제 실패 리다이렉트"""
     message = request.args.get("message", "결제가 취소되었습니다.")
     return f"""
     <html><body>
-    <p id="statusMsg" style="font-family:sans-serif;padding:20px;">결제 실패: {message}</p>
-    <script>
-    if (window.opener) {{
-        window.opener.postMessage({{
-            type: 'payment_fail',
-            code: '{code}',
-            message: '{message}'
-        }}, '*');
-        window.close();
-    }} else {{
-        // 같은 창 리다이렉트 모드: 대시보드로 돌아가기
-        setTimeout(function() {{ window.location.href = '/'; }}, 2000);
-    }}
-    </script>
+    <p style="font-family:sans-serif;padding:20px;color:#ef4444;">결제 실패: {message}</p>
+    <script>setTimeout(function(){{ window.location.href = '/'; }}, 2000);</script>
     </body></html>
     """
 
