@@ -3340,11 +3340,9 @@ def api_payment_checkout():
     user_email = current_user.email if current_user.is_authenticated else None
     lk = license_client.license_key if license_client.license_key else None
 
-    print(f"[결제] 체크아웃 요청: plan={plan_id}, email={user_email}, variant_map={ls_client.variant_map}")
     checkout_url = ls_client.get_checkout_url(plan_id, user_email=user_email, license_key=lk)
 
     if not checkout_url:
-        print(f"[결제] 체크아웃 URL 생성 실패 - checkout_urls={ls_client.checkout_urls}")
         return jsonify({"error": "체크아웃 URL 생성 실패"}), 500
 
     add_log(f"[결제] Lemon Squeezy 체크아웃 생성: {plan_id}", "info")

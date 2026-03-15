@@ -38,14 +38,40 @@ class LemonSqueezyClient:
             "Content-Type": "application/vnd.api+json",
         }
 
+    def _load_direct_checkout_urls(self):
+        """환경변수에서 직접 체크아웃 URL 로드 (API 생성 불필요)"""
+        direct_urls = {
+            "starter": os.getenv("LEMONSQUEEZY_CHECKOUT_STARTER", ""),
+            "business": os.getenv("LEMONSQUEEZY_CHECKOUT_BUSINESS", ""),
+            "agency": os.getenv("LEMONSQUEEZY_CHECKOUT_AGENCY", ""),
+        }
+        loaded = 0
+        for plan_id, url in direct_urls.items():
+            if url:
+                self.checkout_urls[plan_id] = url
+                loaded += 1
+                print(f"[LemonSqueezy] 직접 체크아웃 URL 로드: {plan_id}")
+        return loaded
+
     def initialize(self):
         """앱 시작 시 호출: 스토어/상품/variant 정보 자동 로드"""
+        # 1. 먼저 환경변수에서 직접 체크아웃 URL 확인
+        direct_count = self._load_direct_checkout_urls()
+        if direct_count > 0:
+            self._initialized = True
+            print(f"[LemonSqueezy] 직접 URL 모드: {direct_count}개 플랜 결제 준비됨")
+            # API 키가 있으면 variant_map도 로드 시도 (웹훅 처리용)
+            if self.api_key:
+                self._load_variants_for_webhook()
+            return True
+
+        # 2. 직접 URL이 없으면 API로 자동 로드
         if not self.api_key:
-            print("[LemonSqueezy] API 키 미설정 - 결제 기능 비활성화")
+            print("[LemonSqueezy] API 키 미설정, 직접 URL도 없음 - 결제 기능 비활성화")
             return False
 
         try:
-            # 1. 스토어 정보 가져오기
+            # 스토어 정보 가져오기
             if not self.store_id:
                 resp = requests.get(
                     f"{LEMONSQUEEZY_API_BASE}/stores",
@@ -62,7 +88,7 @@ class LemonSqueezyClient:
                     print(f"[LemonSqueezy] 스토어 조회 실패: HTTP {resp.status_code}")
                     return False
 
-            # 2. 상품 목록 가져오기
+            # 상품 목록 가져오기
             resp = requests.get(
                 f"{LEMONSQUEEZY_API_BASE}/products",
                 headers=self._headers(),
@@ -76,12 +102,11 @@ class LemonSqueezyClient:
             products = resp.json().get("data", [])
             print(f"[LemonSqueezy] 상품 {len(products)}개 발견")
 
-            # 3. 각 상품의 variant 가져오기
+            # 각 상품의 variant 가져오기
             for product in products:
                 product_id = product["id"]
                 product_name = product["attributes"]["name"].lower()
 
-                # 상품명에서 플랜 식별 (예: "Starter 월 구독" → "starter")
                 plan_id = None
                 for key in PRODUCT_NAME_TO_PLAN:
                     if key in product_name:
@@ -92,7 +117,6 @@ class LemonSqueezyClient:
                     print(f"[LemonSqueezy] 알 수 없는 상품: {product['attributes']['name']}")
                     continue
 
-                # variant 목록 조회
                 var_resp = requests.get(
                     f"{LEMONSQUEEZY_API_BASE}/variants",
                     headers=self._headers(),
@@ -107,7 +131,7 @@ class LemonSqueezyClient:
                         self.variant_map[variant_id] = plan_id
                         print(f"[LemonSqueezy]   {plan_id}: variant_id={variant_id}")
 
-            # 4. 각 variant에 대해 체크아웃 URL 생성
+            # 각 variant에 대해 체크아웃 URL 생성
             for variant_id, plan_id in self.variant_map.items():
                 checkout_url = self._create_checkout(variant_id)
                 if checkout_url:
@@ -120,6 +144,55 @@ class LemonSqueezyClient:
         except Exception as e:
             print(f"[LemonSqueezy] 초기화 오류: {e}")
             return False
+
+    def _load_variants_for_webhook(self):
+        """웹훅 처리를 위한 variant_map 로드 (선택적)"""
+        try:
+            if not self.store_id:
+                resp = requests.get(
+                    f"{LEMONSQUEEZY_API_BASE}/stores",
+                    headers=self._headers(),
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    stores = resp.json().get("data", [])
+                    if stores:
+                        self.store_id = stores[0]["id"]
+
+            resp = requests.get(
+                f"{LEMONSQUEEZY_API_BASE}/products",
+                headers=self._headers(),
+                params={"filter[store_id]": self.store_id},
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                return
+
+            for product in resp.json().get("data", []):
+                product_id = product["id"]
+                product_name = product["attributes"]["name"].lower()
+                plan_id = None
+                for key in PRODUCT_NAME_TO_PLAN:
+                    if key in product_name:
+                        plan_id = PRODUCT_NAME_TO_PLAN[key]
+                        break
+                if not plan_id:
+                    continue
+
+                var_resp = requests.get(
+                    f"{LEMONSQUEEZY_API_BASE}/variants",
+                    headers=self._headers(),
+                    params={"filter[product_id]": product_id},
+                    timeout=10,
+                )
+                if var_resp.status_code == 200:
+                    variants = var_resp.json().get("data", [])
+                    if variants:
+                        self.variant_map[variants[0]["id"]] = plan_id
+
+            print(f"[LemonSqueezy] variant_map 로드 완료: {len(self.variant_map)}개")
+        except Exception as e:
+            print(f"[LemonSqueezy] variant_map 로드 실패 (무시): {e}")
 
     def _create_checkout(self, variant_id, custom_data=None):
         """Lemon Squeezy Checkout URL 생성"""
@@ -167,18 +240,13 @@ class LemonSqueezyClient:
             if resp.status_code in (200, 201):
                 checkout_data = resp.json().get("data", {})
                 url = checkout_data.get("attributes", {}).get("url", "")
-                print(f"[LemonSqueezy] 체크아웃 URL 생성 성공: {url[:80]}...")
                 return url
             else:
-                print(f"[LemonSqueezy] 체크아웃 생성 실패: HTTP {resp.status_code}")
-                print(f"[LemonSqueezy] 응답 본문: {resp.text[:500]}")
-                print(f"[LemonSqueezy] store_id={self.store_id}, variant_id={variant_id}")
+                print(f"[LemonSqueezy] 체크아웃 생성 실패: HTTP {resp.status_code} - {resp.text[:200]}")
                 return None
 
         except Exception as e:
-            import traceback
             print(f"[LemonSqueezy] 체크아웃 생성 오류: {e}")
-            traceback.print_exc()
             return None
 
     def get_checkout_url(self, plan_id, user_email=None, license_key=None):
@@ -186,29 +254,41 @@ class LemonSqueezyClient:
         if not self._initialized:
             return None
 
-        # 해당 플랜의 variant_id 찾기
+        # 직접 URL이 있으면 쿼리파라미터로 커스텀 데이터 추가
+        direct_url = self.checkout_urls.get(plan_id)
+
+        # variant_id가 있고 API 키가 있으면 커스텀 데이터 포함 체크아웃 시도
         variant_id = None
         for vid, pid in self.variant_map.items():
             if pid == plan_id:
                 variant_id = vid
                 break
 
-        if not variant_id:
-            return self.checkout_urls.get(plan_id)
+        if variant_id and self.api_key:
+            custom_data = {}
+            if user_email:
+                custom_data["user_email"] = user_email
+            if license_key:
+                custom_data["license_key"] = license_key
 
-        # 커스텀 데이터가 있으면 새 체크아웃 URL 생성
-        custom_data = {}
-        if user_email:
-            custom_data["user_email"] = user_email
-        if license_key:
-            custom_data["license_key"] = license_key
+            if custom_data:
+                url = self._create_checkout(variant_id, custom_data)
+                if url:
+                    return url
 
-        if custom_data:
-            url = self._create_checkout(variant_id, custom_data)
-            if url:
-                return url
+        # 폴백: 직접 URL에 쿼리파라미터 추가
+        if direct_url:
+            params = []
+            if user_email:
+                params.append(f"checkout[email]={user_email}")
+            if license_key:
+                params.append(f"checkout[custom][license_key]={license_key}")
+            if params:
+                separator = "&" if "?" in direct_url else "?"
+                return direct_url + separator + "&".join(params)
+            return direct_url
 
-        return self.checkout_urls.get(plan_id)
+        return None
 
     def verify_webhook(self, payload_body, signature):
         """웹훅 서명 검증"""
@@ -245,7 +325,7 @@ class LemonSqueezyClient:
 
     def is_available(self):
         """결제 기능 사용 가능 여부"""
-        return self._initialized and bool(self.api_key)
+        return self._initialized and bool(self.checkout_urls)
 
     def get_config(self):
         """프론트엔드에 전달할 설정"""
