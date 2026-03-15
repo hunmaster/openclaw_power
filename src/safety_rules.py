@@ -316,3 +316,12 @@ class SafetyRules:
             "max_count": self.max_comments_per_day,
             "remaining": self.max_comments_per_day - len(today_comments),
         }
+
+    def get_today_total_success(self):
+        """모든 계정의 오늘 총 성공 댓글 수를 반환합니다."""
+        today = datetime.now().strftime("%Y-%m-%d")
+        total = 0
+        for account_data in self.history.get("accounts", {}).values():
+            today_comments = account_data.get(today, [])
+            total += len(today_comments)
+        return total

@@ -52,7 +52,7 @@ app.config["REMEMBER_COOKIE_DURATION"] = timedelta(days=30)
 
 os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"), exist_ok=True)
 
-from src.models import db, User, UserSettings, YouTubeAccount, UserActivityLog
+from src.models import db, User, UserSettings, YouTubeAccount, UserActivityLog, LikeOrder
 db.init_app(app)
 
 login_manager = LoginManager()
@@ -125,6 +125,27 @@ automation_lock = threading.Lock()
 # 좋아요 승인 대기 리스트 (MAX 초과 건)
 like_pending_list = []  # [{id, comment_url, page_id, qty, top_likes, video_url, video_title, account, created_at}]
 like_pending_lock = threading.Lock()
+
+
+def _save_like_order(order_id, comment_url, quantity, source="auto", tier="standard", cost=0):
+    """좋아요 주문을 DB에 저장하는 헬퍼 함수."""
+    try:
+        with app.app_context():
+            user_id = current_user.id if current_user and current_user.is_authenticated else 1
+            order = LikeOrder(
+                user_id=user_id,
+                order_id=str(order_id),
+                comment_url=comment_url,
+                quantity=quantity,
+                tier=tier,
+                cost=cost,
+                status="Pending",
+                source=source,
+            )
+            db.session.add(order)
+            db.session.commit()
+    except Exception:
+        pass
 
 # 대댓글 자동화 상태
 reply_state = {
@@ -426,6 +447,7 @@ def dashboard():
         "dashboard.html",
         is_owner=_admin_view_active,
         setup_completed=current_user.setup_completed,
+        notion_template_url=os.environ.get("NOTION_TEMPLATE_URL", ""),
     )
 
 
@@ -521,12 +543,16 @@ def api_dashboard():
     except Exception:
         pass
 
+    # 오늘 총 성공 댓글 수 (comment_history.json 기반, 새로고침해도 유지됨)
+    today_success = safety_rules.get_today_total_success()
+
     return jsonify({
         "accounts": account_stats,
         "account_count": len(accounts),
         "pending_count": status_counts.get("댓글작업전", 0),
         "reply_done_count": status_counts.get("댓글완료", 0),
         "like_pending_count": status_counts.get("대댓글완료", 0),
+        "today_success": today_success,
         "status_counts": status_counts,
         "smm_enabled": smm.enabled,
         "smm_balance": smm_balance,
@@ -1110,6 +1136,7 @@ def api_likes_approve():
                     f"주문ID: {order.get('order_id')} | {item['video_title'][:30]}",
                     "success"
                 )
+                _save_like_order(order.get("order_id"), item["comment_url"], qty, source="approval")
                 # 좋아요 체크박스 업데이트
                 try:
                     notion = NotionManager()
@@ -2002,6 +2029,7 @@ def _run_automation(limit=0, selected_ids=None):
                             if single.get("success"):
                                 automation_state["results"]["likes"] += 1
                                 add_log(f"[3/3 좋아요 기본 주문] {default_qty}개 | 주문ID: {single.get('order_id')}", "success")
+                                _save_like_order(single.get("order_id"), comment_url, default_qty, source="auto")
                             else:
                                 add_log(f"[3/3 좋아요 주문 실패] {single.get('error', '?')}", "warning")
 
@@ -2038,6 +2066,7 @@ def _run_automation(limit=0, selected_ids=None):
                                     f"[3/3 좋아요 주문 성공] {dynamic_qty}개 | 주문ID: {single.get('order_id')}",
                                     "success"
                                 )
+                                _save_like_order(single.get("order_id"), comment_url, dynamic_qty, source="auto")
                                 try:
                                     notion.update_like_checkbox(task["page_id"])
                                 except Exception:
@@ -2750,6 +2779,7 @@ def api_repost():
                             single = smm_client.order_likes(new_comment_url)
                             if single.get("success"):
                                 add_log(f"[리포스팅] 좋아요 주문 완료: {single.get('order_id')}", "success")
+                                _save_like_order(single.get("order_id"), new_comment_url, int(os.getenv("SMM_LIKE_QUANTITY", "20")), source="repost")
 
                         repost_state["results"]["success"] += 1
                         add_log(
@@ -2981,7 +3011,7 @@ def _start_scheduler():
 @app.route("/setup")
 def setup_page():
     """셋업 위자드 페이지."""
-    return render_template("setup.html")
+    return render_template("setup.html", notion_template_url=os.environ.get("NOTION_TEMPLATE_URL", ""))
 
 
 @app.route("/api/license/status")
@@ -3304,6 +3334,23 @@ def api_like_boost_order():
     result = smm.order_likes(comment_url, quantity, tier=tier)
 
     if result.get("success"):
+        # DB에 주문 이력 저장
+        try:
+            order = LikeOrder(
+                user_id=current_user.id,
+                order_id=str(result.get("order_id", "")),
+                comment_url=comment_url,
+                quantity=quantity,
+                tier=tier,
+                cost=cost,
+                status="Pending",
+                source="boost",
+            )
+            db.session.add(order)
+            db.session.commit()
+        except Exception:
+            pass
+
         return jsonify({
             "success": True,
             "order_id": result.get("order_id"),
@@ -3313,6 +3360,44 @@ def api_like_boost_order():
         })
     else:
         return jsonify({"error": result.get("error", "주문 실패")}), 500
+
+
+@app.route("/api/like-orders")
+@login_required
+def api_like_orders():
+    """좋아요 주문 이력 조회."""
+    orders = LikeOrder.query.filter_by(user_id=current_user.id).order_by(LikeOrder.created_at.desc()).limit(50).all()
+    return jsonify({"orders": [o.to_dict() for o in orders]})
+
+
+@app.route("/api/like-orders/refresh-status", methods=["POST"])
+@login_required
+def api_like_orders_refresh_status():
+    """SMM에서 주문 상태를 최신으로 업데이트합니다."""
+    orders = LikeOrder.query.filter_by(user_id=current_user.id).filter(
+        LikeOrder.status.in_(["Pending", "In progress", "Processing"])
+    ).all()
+
+    if not orders:
+        return jsonify({"updated": 0, "message": "업데이트할 진행중 주문이 없습니다."})
+
+    smm = SMMClient()
+    order_ids = [o.order_id for o in orders]
+    statuses = smm.check_multiple_orders(order_ids)
+
+    updated = 0
+    for order in orders:
+        status_data = statuses.get(str(order.order_id))
+        if status_data and isinstance(status_data, dict):
+            new_status = status_data.get("status", order.status)
+            order.status = new_status
+            order.remains = status_data.get("remains")
+            updated += 1
+
+    if updated:
+        db.session.commit()
+
+    return jsonify({"updated": updated, "message": f"{updated}건 상태 업데이트 완료"})
 
 
 @app.route("/api/setup/check")

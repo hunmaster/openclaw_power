@@ -166,6 +166,39 @@ class CommentTracking(db.Model):
         }
 
 
+class LikeOrder(db.Model):
+    """좋아요 주문 이력 (SMM 주문 추적)."""
+    __tablename__ = "like_orders"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    order_id = db.Column(db.String(50), nullable=False)  # SMM 주문 ID
+    comment_url = db.Column(db.String(500), nullable=False)
+    quantity = db.Column(db.Integer, default=0)
+    tier = db.Column(db.String(50), default="standard")
+    cost = db.Column(db.Integer, default=0)  # 원 단위
+    status = db.Column(db.String(50), default="Pending")  # Pending, In progress, Completed, Partial, Canceled
+    remains = db.Column(db.Integer, nullable=True)  # 남은 수량
+    source = db.Column(db.String(50), default="manual")  # manual, auto, boost
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "order_id": self.order_id,
+            "comment_url": self.comment_url,
+            "quantity": self.quantity,
+            "tier": self.tier,
+            "cost": self.cost,
+            "status": self.status,
+            "remains": self.remains,
+            "source": self.source,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 class UserActivityLog(db.Model):
     """유저 활동 로그 (가입, 로그인, 탈퇴 등)."""
     __tablename__ = "user_activity_log"
