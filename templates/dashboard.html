@@ -670,6 +670,15 @@
 
     <!-- ━━━ 댓글 트래킹 탭 ━━━ -->
     <div class="tab-content" id="tab-tracking">
+        <!-- 트래킹 사용 제한 안내 -->
+        <div id="trackingLimitBanner" style="display:none;margin-bottom:16px;padding:12px 16px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:10px;display:flex;justify-content:space-between;align-items:center;">
+            <div style="font-size:12px;color:#f59e0b;">
+                <strong>트래킹 무료 사용:</strong> <span id="trackingUsedCount">0</span> / <span id="trackingLimitCount">3</span>회 사용
+                <span style="color:#888;margin-left:8px;">(Agency 플랜부터 무제한)</span>
+            </div>
+            <button class="btn btn-sm" onclick="openSubscriptionPopup()" style="background:#f59e0b;color:#000;font-size:11px;font-weight:600;">업그레이드</button>
+        </div>
+
         <div class="cards" style="grid-template-columns:repeat(4,1fr)">
             <div class="card">
                 <div class="card-label">총 등록</div>
@@ -735,6 +744,7 @@
                         <option value="all">전체</option>
                         <option value="active">정상노출</option>
                         <option value="hidden">숨김</option>
+                        <option value="pending_tracking">트래킹 예정</option>
                         <option value="unchecked">미확인</option>
                         <option value="reposted">리포스팅됨</option>
                     </select>
@@ -3204,6 +3214,18 @@
             document.getElementById('trackStatus').textContent = '대기';
         }
 
+        // 트래킹 사용 제한 배너
+        const limitBanner = document.getElementById('trackingLimitBanner');
+        if (limitBanner) {
+            if (data.tracking_unlimited) {
+                limitBanner.style.display = 'none';
+            } else {
+                limitBanner.style.display = 'flex';
+                document.getElementById('trackingUsedCount').textContent = data.tracking_used || 0;
+                document.getElementById('trackingLimitCount').textContent = data.tracking_limit || 3;
+            }
+        }
+
         const tbody = document.getElementById('trackingTableBody');
         if (!data.comments || data.comments.length === 0) {
             tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--text-dim)">
@@ -3258,6 +3280,8 @@
                 statusBadge = '<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(255,59,48,0.15);color:#ff3b30;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600"><span style="width:6px;height:6px;border-radius:50%;background:#ff3b30;display:inline-block"></span>숨김</span>';
             } else if (c.status === 'reposted') {
                 statusBadge = '<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(108,92,231,0.15);color:var(--accent-light);padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent-light);display:inline-block"></span>리포스팅됨</span>';
+            } else if (c.status === 'pending_tracking') {
+                statusBadge = '<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(245,158,11,0.15);color:#f59e0b;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600"><span style="width:6px;height:6px;border-radius:50%;background:#f59e0b;display:inline-block;animation:pulse 1.5s infinite"></span>트래킹 예정</span>';
             } else {
                 statusBadge = '<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(255,255,255,0.08);color:var(--text-dim);padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600"><span style="width:6px;height:6px;border-radius:50%;background:var(--text-dim);display:inline-block"></span>미확인</span>';
             }
@@ -3484,7 +3508,11 @@
             btn.disabled = false;
             btn.textContent = '전체 노출확인';
             document.getElementById('trackProgressArea').style.display = 'none';
-            alert(data?.error || '트래킹 시작 실패');
+            if (data?.upgrade_required) {
+                if (confirm(data.error + '\n\n플랜 업그레이드 페이지로 이동하시겠습니까?')) openSubscriptionPopup();
+            } else {
+                alert(data?.error || '트래킹 시작 실패');
+            }
         }
     }
 

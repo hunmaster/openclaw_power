@@ -68,6 +68,7 @@ PLAN_FEATURES = {
         "multi_account_parallel": False,  # Agency부터
         "task_scheduling": False,      # Agency부터
         "like_boost": False,           # Business부터
+        "tracking_unlimited": False,   # Agency부터 (Starter/Business는 월 3회 무료)
         "api_access": False,           # Enterprise만
     },
     "business": {
@@ -81,6 +82,7 @@ PLAN_FEATURES = {
         "multi_account_parallel": True,   # 2계정
         "task_scheduling": False,
         "like_boost": True,
+        "tracking_unlimited": False,   # Business도 월 3회 무료
         "api_access": False,
     },
     "agency": {
@@ -94,6 +96,7 @@ PLAN_FEATURES = {
         "multi_account_parallel": True,   # 5계정
         "task_scheduling": True,
         "like_boost": True,
+        "tracking_unlimited": True,    # Agency부터 무제한
         "api_access": False,
     },
     "enterprise": {
@@ -107,9 +110,13 @@ PLAN_FEATURES = {
         "multi_account_parallel": True,
         "task_scheduling": True,
         "like_boost": True,
+        "tracking_unlimited": True,    # 무제한
         "api_access": True,
     },
 }
+
+# 트래킹 무료 횟수 제한 (Starter/Business)
+TRACKING_FREE_LIMIT = 3
 
 LICENSE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config", ".license")
 

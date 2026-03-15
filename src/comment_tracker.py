@@ -174,7 +174,7 @@ class CommentTracker:
         except Exception:
             pass
 
-    def register_comment(self, comment_url, video_url, account_label, comment_text):
+    def register_comment(self, comment_url, video_url, account_label, comment_text, initial_status="active"):
         """
         작성된 댓글을 트래킹 대상으로 등록합니다.
 
@@ -183,6 +183,7 @@ class CommentTracker:
             video_url: 영상 URL
             account_label: 작성 계정
             comment_text: 댓글 내용
+            initial_status: 초기 상태 ("active" 또는 "pending_tracking")
         """
         comment_id = self._extract_comment_id(comment_url)
         if not comment_id:
@@ -208,13 +209,14 @@ class CommentTracker:
             "comment_text": comment_text[:200] if comment_text else "",
             "registered_at": datetime.now().isoformat(),
             "checks": [],
-            "status": "active",
+            "status": initial_status,
             "best_position": None,
             "last_position": None,
         }
 
         self._save_history()
-        console.print(f"[green]트래킹 등록: {comment_id}[/green]")
+        status_label = "트래킹 예정" if initial_status == "pending_tracking" else "등록"
+        console.print(f"[green]트래킹 {status_label}: {comment_id}[/green]")
         return True
 
     def check_comment(self, comment_id, reuse_browser=False):

@@ -83,6 +83,38 @@ tracking_state = {
 }
 tracking_lock = threading.Lock()
 
+# 트래킹 월간 사용 횟수 (Starter/Business 제한용)
+tracking_usage = {"month": None, "count": 0}
+
+def _get_tracking_usage_count():
+    """이번 달 트래킹 사용 횟수 반환"""
+    current_month = datetime.now().strftime("%Y-%m")
+    if tracking_usage["month"] != current_month:
+        tracking_usage["month"] = current_month
+        tracking_usage["count"] = 0
+    return tracking_usage["count"]
+
+def _increment_tracking_usage():
+    """트래킹 사용 횟수 증가"""
+    current_month = datetime.now().strftime("%Y-%m")
+    if tracking_usage["month"] != current_month:
+        tracking_usage["month"] = current_month
+        tracking_usage["count"] = 0
+    tracking_usage["count"] += 1
+
+def _check_tracking_allowed():
+    """트래킹 사용 가능 여부 확인. 불가 시 에러 메시지 반환"""
+    if license_client.owner_mode:
+        return None  # Owner는 무제한
+    if license_client.can_use_feature("tracking_unlimited"):
+        return None  # Agency 이상은 무제한
+    from src.license_client import TRACKING_FREE_LIMIT
+    used = _get_tracking_usage_count()
+    if used >= TRACKING_FREE_LIMIT:
+        return (f"이번 달 무료 트래킹 {TRACKING_FREE_LIMIT}회를 모두 사용했습니다. "
+                f"Agency 플랜으로 업그레이드하면 무제한 이용 가능합니다.")
+    return None
+
 
 def _tracking_progress_callback(progress, total):
     """comment_tracker에서 호출되는 진행 상태 콜백"""
@@ -1708,11 +1740,12 @@ def _run_automation(limit=0, selected_ids=None):
 
                     safety_rules.record_comment(current_label, task["youtube_url"], task["comment_text"])
 
-                    # 트래킹 자동 등록
+                    # 트래킹 자동 등록 (상태: 트래킹 예정 - 4시간 후 자동 확인)
                     if comment_url:
                         comment_tracker.register_comment(
                             comment_url, task["youtube_url"],
-                            current_label, task["comment_text"]
+                            current_label, task["comment_text"],
+                            initial_status="pending_tracking"
                         )
 
                     automation_state["results"]["success"] += 1
@@ -2016,13 +2049,22 @@ def api_tracking_summary():
     """트래킹 등록된 댓글 목록과 상태 요약"""
     try:
         summary = comment_tracker.get_summary()
+        # 트래킹 사용 제한 정보
+        from src.license_client import TRACKING_FREE_LIMIT
+        tracking_unlimited = license_client.owner_mode or license_client.can_use_feature("tracking_unlimited")
+        tracking_used = _get_tracking_usage_count()
+
         return jsonify({
             "ok": True,
             "comments": summary,
             "total": len(summary),
             "active": sum(1 for c in summary if c["status"] == "active"),
             "hidden": sum(1 for c in summary if c["status"] == "hidden"),
+            "pending_tracking": sum(1 for c in summary if c["status"] == "pending_tracking"),
             "tracking_running": tracking_state["running"],
+            "tracking_unlimited": tracking_unlimited,
+            "tracking_used": tracking_used,
+            "tracking_limit": 0 if tracking_unlimited else TRACKING_FREE_LIMIT,
         })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
@@ -2031,11 +2073,18 @@ def api_tracking_summary():
 @app.route("/api/tracking/check-all", methods=["POST"])
 def api_tracking_check_all():
     """모든 등록된 댓글의 노출 상태를 확인 (백그라운드)"""
+    # 트래킹 사용 횟수 제한 체크
+    err = _check_tracking_allowed()
+    if err:
+        return jsonify({"ok": False, "error": err, "upgrade_required": True})
+
     with tracking_lock:
         if tracking_state["running"]:
             return jsonify({"ok": False, "error": "이미 트래킹 진행 중입니다."})
         tracking_state["running"] = True
         tracking_state["progress"] = 0
+
+    _increment_tracking_usage()
 
     def run_tracking():
         try:
@@ -2059,10 +2108,17 @@ def api_tracking_check_all():
 @app.route("/api/tracking/check-selected", methods=["POST"])
 def api_tracking_check_selected():
     """선택된 댓글만 트래킹 (백그라운드)"""
+    # 트래킹 사용 횟수 제한 체크
+    err = _check_tracking_allowed()
+    if err:
+        return jsonify({"ok": False, "error": err, "upgrade_required": True})
+
     data = request.json or {}
     comment_ids = data.get("comment_ids", [])
     if not comment_ids:
         return jsonify({"ok": False, "error": "선택된 댓글이 없습니다."})
+
+    _increment_tracking_usage()
 
     with tracking_lock:
         if tracking_state["running"]:
@@ -2495,6 +2551,54 @@ def _daily_tracking_job():
         tracking_state["running"] = False
 
 
+def _check_pending_tracking():
+    """4시간이 지난 'pending_tracking' 댓글을 자동으로 트래킹합니다."""
+    try:
+        summary = comment_tracker.get_summary()
+        pending = [c for c in summary if c["status"] == "pending_tracking"]
+        if not pending:
+            return
+
+        now = datetime.now()
+        ready_ids = []
+        for c in pending:
+            registered = datetime.fromisoformat(c.get("registered_at", now.isoformat()))
+            elapsed_hours = (now - registered).total_seconds() / 3600
+            if elapsed_hours >= 4:
+                ready_ids.append(c["comment_id"])
+
+        if not ready_ids:
+            return
+
+        with tracking_lock:
+            if tracking_state["running"]:
+                return  # 이미 트래킹 중이면 다음 주기에 실행
+            tracking_state["running"] = True
+            tracking_state["progress"] = 0
+
+        add_log(f"[자동 트래킹] {len(ready_ids)}건 트래킹 예정 → 확인 시작 (4시간 경과)", "info")
+
+        def run_delayed():
+            try:
+                result = comment_tracker.check_selected(ready_ids)
+                tracking_state["last_result"] = result
+                add_log(
+                    f"[자동 트래킹] 완료: {result.get('active', 0)}개 정상노출, "
+                    f"{result.get('hidden', 0)}개 숨김",
+                    "info"
+                )
+            except Exception as e:
+                add_log(f"[자동 트래킹] 오류: {str(e)}", "error")
+            finally:
+                tracking_state["running"] = False
+
+        thread = threading.Thread(target=run_delayed, daemon=True)
+        thread.start()
+
+    except Exception as e:
+        add_log(f"[자동 트래킹] 예정 확인 오류: {str(e)}", "error")
+
+
 def _start_scheduler():
     """백그라운드 스케줄러 스레드 시작"""
     global _scheduler_started
@@ -2511,6 +2615,7 @@ def _start_scheduler():
             now = datetime.now()
             today = now.date()
 
+            # 매일 오전 8시 전체 트래킹
             if now.hour == target_hour and last_run_date != today:
                 last_run_date = today
                 add_log(f"[스케줄] 오전 {target_hour}시 자동 트래킹 실행", "info")
@@ -2519,11 +2624,17 @@ def _start_scheduler():
                 except Exception as e:
                     add_log(f"[스케줄] 오류: {str(e)}", "error")
 
-            _time.sleep(60)  # 1분마다 체크
+            # 10분마다 트래킹 예정 댓글 확인 (4시간 경과 체크)
+            try:
+                _check_pending_tracking()
+            except Exception:
+                pass
+
+            _time.sleep(600)  # 10분마다 체크
 
     t = threading.Thread(target=scheduler_loop, daemon=True)
     t.start()
-    add_log("[스케줄] 매일 오전 8시 자동 트래킹 스케줄러 시작됨", "info")
+    add_log("[스케줄] 스케줄러 시작됨 (매일 8시 전체 트래킹 + 10분마다 예정 트래킹 확인)", "info")
 
 
 # ──────────────────────────── 라이선스 & 셋업 ────────────────────────────
