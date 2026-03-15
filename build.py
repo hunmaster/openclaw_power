@@ -83,6 +83,8 @@ def build():
         "--onedir",
         # 콘솔 창 숨기기
         "--noconsole",
+        # 앱 아이콘
+        "--icon", "app_icon.ico",
     ]
 
     # 데이터 파일 추가
