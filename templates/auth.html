@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenClaw - 로그인</title>
+    <style>
+        :root {
+            --bg: #0a0a0a;
+            --card: #141414;
+            --border: #262626;
+            --text: #e5e5e5;
+            --text-muted: #737373;
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --red: #ef4444;
+            --green: #22c55e;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .auth-container {
+            width: 100%;
+            max-width: 420px;
+            padding: 20px;
+        }
+        .auth-logo {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+        .auth-logo h1 {
+            font-size: 28px;
+            font-weight: 800;
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.5px;
+        }
+        .auth-logo p {
+            color: var(--text-muted);
+            font-size: 13px;
+            margin-top: 6px;
+        }
+        .auth-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 32px 28px;
+        }
+        .auth-tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 28px;
+            background: var(--bg);
+            border-radius: 10px;
+            padding: 3px;
+        }
+        .auth-tab {
+            flex: 1;
+            padding: 10px;
+            text-align: center;
+            font-size: 14px;
+            font-weight: 600;
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .auth-tab.active {
+            background: var(--primary);
+            color: #fff;
+        }
+        .form-group {
+            margin-bottom: 16px;
+        }
+        .form-group label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            letter-spacing: 0.3px;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 12px 14px;
+            font-size: 14px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: var(--bg);
+            color: var(--text);
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .form-group input:focus {
+            border-color: var(--primary);
+        }
+        .form-group input::placeholder {
+            color: #525252;
+        }
+        .btn-submit {
+            width: 100%;
+            padding: 13px;
+            font-size: 15px;
+            font-weight: 700;
+            border: none;
+            border-radius: 10px;
+            background: var(--primary);
+            color: #fff;
+            cursor: pointer;
+            transition: background 0.2s;
+            margin-top: 8px;
+        }
+        .btn-submit:hover { background: var(--primary-hover); }
+        .btn-submit:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .error-msg {
+            color: var(--red);
+            font-size: 12px;
+            text-align: center;
+            margin-top: 12px;
+            min-height: 18px;
+        }
+        .success-msg {
+            color: var(--green);
+            font-size: 12px;
+            text-align: center;
+            margin-top: 12px;
+        }
+        .auth-footer {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        .promo-banner {
+            margin-top: 20px;
+            padding: 14px 16px;
+            background: linear-gradient(135deg, #f59e0b10, #ef444415);
+            border: 1px solid #f59e0b30;
+            border-radius: 12px;
+            text-align: center;
+        }
+        .promo-banner .title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #fbbf24;
+        }
+        .promo-banner .desc {
+            font-size: 11px;
+            color: #f59e0b;
+            margin-top: 4px;
+        }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-6px); }
+            75% { transform: translateX(6px); }
+        }
+        .shake { animation: shake 0.3s ease; }
+    </style>
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-logo">
+            <h1>OpenClaw</h1>
+            <p>YouTube 댓글 마케팅 자동화 솔루션</p>
+        </div>
+
+        <div class="auth-card">
+            <div class="auth-tabs">
+                <button class="auth-tab active" onclick="switchAuthTab('login')">로그인</button>
+                <button class="auth-tab" onclick="switchAuthTab('register')">회원가입</button>
+            </div>
+
+            <!-- 로그인 폼 -->
+            <form id="loginForm" onsubmit="handleLogin(event)">
+                <div class="form-group">
+                    <label>이메일</label>
+                    <input type="email" id="loginEmail" placeholder="example@email.com" required autocomplete="email">
+                </div>
+                <div class="form-group">
+                    <label>비밀번호</label>
+                    <input type="password" id="loginPassword" placeholder="비밀번호 입력" required autocomplete="current-password">
+                </div>
+                <button type="submit" class="btn-submit" id="loginBtn">로그인</button>
+                <div class="error-msg" id="loginError"></div>
+            </form>
+
+            <!-- 회원가입 폼 -->
+            <form id="registerForm" style="display:none;" onsubmit="handleRegister(event)">
+                <div class="form-group">
+                    <label>이메일</label>
+                    <input type="email" id="regEmail" placeholder="example@email.com" required autocomplete="email">
+                </div>
+                <div class="form-group">
+                    <label>닉네임 (선택)</label>
+                    <input type="text" id="regNickname" placeholder="닉네임을 입력하세요" autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label>비밀번호</label>
+                    <input type="password" id="regPassword" placeholder="6자 이상" required minlength="6" autocomplete="new-password">
+                </div>
+                <div class="form-group">
+                    <label>비밀번호 확인</label>
+                    <input type="password" id="regPasswordConfirm" placeholder="비밀번호를 다시 입력" required autocomplete="new-password">
+                </div>
+                <button type="submit" class="btn-submit" id="registerBtn">가입하기</button>
+                <div class="error-msg" id="registerError"></div>
+            </form>
+        </div>
+
+        <div class="promo-banner">
+            <div class="title">지금 가입하면 무료 체험 제공</div>
+            <div class="desc">선착순 한정 - 가입 즉시 기본 기능을 무료로 사용해보세요</div>
+        </div>
+
+        <div class="auth-footer">
+            가입 시 서비스 이용약관에 동의하는 것으로 간주됩니다.
+        </div>
+    </div>
+
+    <script>
+        function switchAuthTab(tab) {
+            document.querySelectorAll('.auth-tab').forEach((t, i) => {
+                t.classList.toggle('active', (tab === 'login' && i === 0) || (tab === 'register' && i === 1));
+            });
+            document.getElementById('loginForm').style.display = tab === 'login' ? 'block' : 'none';
+            document.getElementById('registerForm').style.display = tab === 'register' ? 'block' : 'none';
+            document.getElementById('loginError').textContent = '';
+            document.getElementById('registerError').textContent = '';
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const btn = document.getElementById('loginBtn');
+            const errEl = document.getElementById('loginError');
+            errEl.textContent = '';
+            btn.disabled = true;
+            btn.textContent = '로그인 중...';
+
+            try {
+                const res = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: document.getElementById('loginEmail').value.trim(),
+                        password: document.getElementById('loginPassword').value,
+                    })
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    window.location.href = '/';
+                } else {
+                    errEl.textContent = data.error || '로그인에 실패했습니다.';
+                    document.querySelector('.auth-card').classList.add('shake');
+                    setTimeout(() => document.querySelector('.auth-card').classList.remove('shake'), 300);
+                }
+            } catch (err) {
+                errEl.textContent = '서버에 연결할 수 없습니다.';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '로그인';
+            }
+        }
+
+        async function handleRegister(e) {
+            e.preventDefault();
+            const btn = document.getElementById('registerBtn');
+            const errEl = document.getElementById('registerError');
+            errEl.textContent = '';
+
+            const password = document.getElementById('regPassword').value;
+            const confirm = document.getElementById('regPasswordConfirm').value;
+            if (password !== confirm) {
+                errEl.textContent = '비밀번호가 일치하지 않습니다.';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = '가입 처리 중...';
+
+            try {
+                const res = await fetch('/api/auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: document.getElementById('regEmail').value.trim(),
+                        password: password,
+                        nickname: document.getElementById('regNickname').value.trim(),
+                    })
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    window.location.href = '/';
+                } else {
+                    errEl.textContent = data.error || '가입에 실패했습니다.';
+                    document.querySelector('.auth-card').classList.add('shake');
+                    setTimeout(() => document.querySelector('.auth-card').classList.remove('shake'), 300);
+                }
+            } catch (err) {
+                errEl.textContent = '서버에 연결할 수 없습니다.';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '가입하기';
+            }
+        }
+
+        // Enter 키로 폼 전환 안 되도록
+        document.querySelectorAll('input').forEach(input => {
+            input.addEventListener('keydown', e => {
+                if (e.key === 'Enter') e.target.closest('form').requestSubmit();
+            });
+        });
+
+        // 이메일 자동 포커스
+        document.getElementById('loginEmail').focus();
+    </script>
+</body>
+</html>

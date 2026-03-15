@@ -299,6 +299,7 @@
             <span id="licensePlanText">-</span>
             <span id="licenseTokenText" style="color:#888;font-weight:400;"></span>
         </span>
+        <button onclick="handleLogout()" style="background:transparent;border:1px solid #333;color:#888;padding:4px 10px;border-radius:8px;font-size:11px;cursor:pointer;" title="로그아웃">로그아웃</button>
         <span id="statusIndicator">
             <span class="status-dot stopped"></span>
             <span style="font-size:13px;color:var(--text-dim)">대기 중</span>
@@ -1452,6 +1453,13 @@
             console.error('API error:', e);
             return { error: '서버에 연결할 수 없습니다.' };
         }
+    }
+
+    // ─── 로그아웃 ───
+    async function handleLogout() {
+        if (!confirm('로그아웃 하시겠습니까?')) return;
+        await fetch('/api/auth/logout', { method: 'POST' });
+        window.location.href = '/auth';
     }
 
     // ─── 라이선스 상태 ───

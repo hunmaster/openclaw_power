@@ -19,7 +19,8 @@ import threading
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
 
-from flask import Flask, render_template, jsonify, request, redirect
+from flask import Flask, render_template, jsonify, request, redirect, url_for
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from dotenv import load_dotenv
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -36,6 +37,39 @@ from src.comment_tracker import CommentTracker
 from src.license_client import license_client, is_owner_mode, LIKE_TIERS
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", "openclaw-secret-" + str(uuid.uuid4())[:8])
+
+# ─── 데이터베이스 & 로그인 매니저 ───
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "data", "users.db"
+)
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["REMEMBER_COOKIE_DURATION"] = timedelta(days=30)
+
+os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"), exist_ok=True)
+
+from src.models import db, User
+db.init_app(app)
+
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = "auth_page"
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    return db.session.get(User, int(user_id))
+
+
+@login_manager.unauthorized_handler
+def unauthorized():
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+    return redirect(url_for("auth_page"))
+
+
+with app.app_context():
+    db.create_all()
 
 # 글로벌 상태
 automation_state = {
@@ -249,7 +283,92 @@ def load_accounts():
 
 # ──────────────────────────── 페이지 라우트 ────────────────────────────
 
+# ──────────────────────────── 인증 라우트 ────────────────────────────
+
+@app.route("/auth")
+def auth_page():
+    """로그인/회원가입 페이지."""
+    if current_user.is_authenticated:
+        return redirect(url_for("dashboard"))
+    return render_template("auth.html")
+
+
+@app.route("/api/auth/register", methods=["POST"])
+def api_register():
+    """회원가입."""
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip().lower()
+    password = data.get("password") or ""
+    nickname = (data.get("nickname") or "").strip()
+
+    if not email or "@" not in email:
+        return jsonify({"error": "올바른 이메일을 입력해주세요."}), 400
+    if len(password) < 6:
+        return jsonify({"error": "비밀번호는 최소 6자 이상이어야 합니다."}), 400
+
+    if User.query.filter_by(email=email).first():
+        return jsonify({"error": "이미 가입된 이메일입니다."}), 409
+
+    user = User(email=email, nickname=nickname or email.split("@")[0])
+    user.set_password(password)
+    db.session.add(user)
+    db.session.commit()
+
+    login_user(user, remember=True)
+    return jsonify({"success": True, "user": user.to_dict()})
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def api_login():
+    """로그인."""
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip().lower()
+    password = data.get("password") or ""
+
+    user = User.query.filter_by(email=email).first()
+    if not user or not user.check_password(password):
+        return jsonify({"error": "이메일 또는 비밀번호가 올바르지 않습니다."}), 401
+
+    user.last_login = datetime.utcnow()
+    db.session.commit()
+
+    login_user(user, remember=True)
+    return jsonify({"success": True, "user": user.to_dict()})
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+@login_required
+def api_logout():
+    """로그아웃."""
+    logout_user()
+    return jsonify({"success": True})
+
+
+@app.route("/api/auth/me")
+@login_required
+def api_auth_me():
+    """현재 로그인한 사용자 정보."""
+    return jsonify({"user": current_user.to_dict()})
+
+
+@app.route("/api/auth/bind-license", methods=["POST"])
+@login_required
+def api_bind_license():
+    """라이선스 키를 현재 유저 계정에 바인딩."""
+    data = request.get_json() or {}
+    key = (data.get("license_key") or "").strip()
+    if not key:
+        return jsonify({"error": "라이선스 키를 입력해주세요."}), 400
+
+    current_user.license_key = key
+    db.session.commit()
+    return jsonify({"success": True, "user": current_user.to_dict()})
+
+
+# ──────────────────────────── 메인 페이지 ────────────────────────────
+
 @app.route("/")
+@login_required
 def dashboard():
     """메인 대시보드."""
     return render_template("dashboard.html", is_owner=_admin_view_active)
@@ -2751,6 +2870,12 @@ def api_license_activate():
         return jsonify({"error": "라이선스 키를 입력해주세요."}), 400
 
     result = license_client.activate(key)
+
+    # 로그인 유저에게 라이선스 키 자동 바인딩
+    if current_user.is_authenticated and result.get("success"):
+        current_user.license_key = key
+        db.session.commit()
+
     return jsonify(result)
 
 
