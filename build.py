@@ -143,6 +143,25 @@ def build():
         if os.path.exists(src_path):
             shutil.copy2(src_path, os.path.join(dist_dir, "config", f))
 
+    # install_adb.bat 복사
+    if os.path.exists("install_adb.bat"):
+        shutil.copy2("install_adb.bat", os.path.join(dist_dir, "install_adb.bat"))
+        print("[빌드] install_adb.bat 복사 완료")
+
+    # 폴더 아이콘 설정 (app_icon.ico + desktop.ini)
+    if os.path.exists("app_icon.ico"):
+        shutil.copy2("app_icon.ico", os.path.join(dist_dir, "app_icon.ico"))
+        desktop_ini = os.path.join(dist_dir, "desktop.ini")
+        with open(desktop_ini, "w", encoding="utf-8") as f:
+            f.write("[.ShellClassInfo]\n")
+            f.write("IconResource=app_icon.ico,0\n")
+        # desktop.ini와 폴더에 시스템 속성 설정 (Windows에서 폴더 아이콘 표시 필요)
+        if sys.platform == "win32":
+            import ctypes
+            ctypes.windll.kernel32.SetFileAttributesW(desktop_ini, 0x02 | 0x04)  # HIDDEN | SYSTEM
+            ctypes.windll.kernel32.SetFileAttributesW(dist_dir, 0x01)  # READONLY (폴더 커스텀 아이콘 트리거)
+        print("[빌드] 폴더 아이콘 설정 완료 (app_icon.ico)")
+
     # Playwright 브라우저 번들링 안내
     print()
     print("=" * 60)

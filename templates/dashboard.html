@@ -756,6 +756,24 @@
             </div>
             <button class="btn btn-primary" onclick="addAccount()">계정 추가</button>
             <span id="addAccountMsg" style="margin-left:12px;font-size:13px"></span>
+
+            <!-- 대량 등록 토글 -->
+            <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">
+                <button class="btn btn-sm btn-secondary" onclick="toggleBulkAdd()" id="bulkAddToggle">대량 등록</button>
+                <div id="bulkAddSection" style="display:none;margin-top:12px">
+                    <div style="background:rgba(116,185,255,0.06);border:1px solid rgba(116,185,255,0.15);border-radius:8px;padding:10px;margin-bottom:10px;font-size:11px;color:var(--text-dim);line-height:1.7">
+                        <b style="color:var(--blue)">입력 형식:</b> 한 줄에 하나씩, <code style="background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">이메일:비밀번호</code> 또는 <code style="background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">이메일:비밀번호:라벨</code><br>
+                        <span style="color:var(--text-dim)">예시:</span><br>
+                        <code style="background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">user1@gmail.com:password123</code><br>
+                        <code style="background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">user2@gmail.com:mypass456:부계정2</code>
+                    </div>
+                    <textarea id="bulkAccountInput" rows="6" style="width:100%;background:var(--card-hover);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px;font-size:12px;font-family:monospace;resize:vertical" placeholder="이메일:비밀번호&#10;이메일:비밀번호:라벨&#10;..."></textarea>
+                    <div style="margin-top:8px;display:flex;align-items:center;gap:12px">
+                        <button class="btn btn-primary" onclick="bulkAddAccounts()">일괄 등록</button>
+                        <span id="bulkAddMsg" style="font-size:13px"></span>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- 계정 목록 -->
@@ -1722,12 +1740,12 @@
 
         // 연결 테스트
         const testRes = await api('/api/check-connections');
-        if (testRes && testRes.notion_api && testRes.notion_api.ok) {
+        if (testRes && testRes.notion && testRes.notion.ok) {
             resultEl.innerHTML = '<span style="color:var(--green)">&#10004; Notion 연결 성공!</span>';
             const step1 = document.getElementById('setupStep1');
             if (step1) step1.style.borderColor = 'var(--green)';
         } else {
-            resultEl.innerHTML = `<span style="color:var(--yellow)">저장 완료. 연결 확인: ${testRes?.notion_api?.message || '확인 불가'}</span>`;
+            resultEl.innerHTML = `<span style="color:var(--yellow)">저장 완료. 연결 확인: ${testRes?.notion?.message || '확인 불가'}</span>`;
         }
     }
 
@@ -2565,6 +2583,76 @@
             }
         } catch (e) {
             msgEl.innerHTML = `<span style="color:var(--red)">네트워크 오류: ${e.message}</span>`;
+        }
+    }
+
+    // ─── 대량 등록 ───
+    function toggleBulkAdd() {
+        const section = document.getElementById('bulkAddSection');
+        section.style.display = section.style.display === 'none' ? 'block' : 'none';
+    }
+
+    async function bulkAddAccounts() {
+        const input = document.getElementById('bulkAccountInput').value.trim();
+        const msgEl = document.getElementById('bulkAddMsg');
+
+        if (!input) {
+            msgEl.innerHTML = '<span style="color:var(--red)">계정 정보를 입력하세요.</span>';
+            return;
+        }
+
+        const lines = input.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+        if (lines.length === 0) {
+            msgEl.innerHTML = '<span style="color:var(--red)">유효한 계정이 없습니다.</span>';
+            return;
+        }
+
+        msgEl.innerHTML = `<span style="color:var(--yellow)">0/${lines.length} 등록 중...</span>`;
+        let success = 0, fail = 0, errors = [];
+
+        for (let i = 0; i < lines.length; i++) {
+            const parts = lines[i].split(':');
+            if (parts.length < 2) {
+                fail++;
+                errors.push(`${lines[i]} — 형식 오류 (이메일:비밀번호 필요)`);
+                continue;
+            }
+
+            const email = parts[0].trim();
+            const password = parts[1].trim();
+            const label = parts[2] ? parts[2].trim() : undefined;
+
+            try {
+                const res = await api('/api/accounts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password, label, account_type: 'sub' }),
+                });
+                if (res && !res.error) {
+                    success++;
+                } else {
+                    fail++;
+                    errors.push(`${email} — ${res?.error || '실패'}`);
+                }
+            } catch (e) {
+                fail++;
+                errors.push(`${email} — 네트워크 오류`);
+            }
+            msgEl.innerHTML = `<span style="color:var(--yellow)">${i + 1}/${lines.length} 처리 중...</span>`;
+        }
+
+        let msg = `<span style="color:var(--green)">완료! 성공 ${success}개`;
+        if (fail > 0) msg += `, <span style="color:var(--red)">실패 ${fail}개</span>`;
+        msg += '</span>';
+        if (errors.length > 0) {
+            msg += `<div style="margin-top:6px;font-size:11px;color:var(--red)">${errors.join('<br>')}</div>`;
+        }
+        msgEl.innerHTML = msg;
+
+        if (success > 0) {
+            document.getElementById('bulkAccountInput').value = '';
+            await loadAccountList();
+            loadDashboard();
         }
     }
 

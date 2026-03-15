@@ -178,13 +178,15 @@ class YouTubeBot:
         except Exception:
             return False
 
-    def manual_login(self, email=None, timeout=300):
+    def manual_login(self, email=None, password=None, timeout=300):
         """
         수동 로그인 - 브라우저 화면에서 사용자가 직접 로그인합니다.
+        이메일과 비밀번호를 자동 입력하고, 추가 인증(2FA 등)은 사용자가 직접 처리합니다.
         로그인 완료 후 쿠키를 저장합니다.
 
         Args:
             email: 이메일 (자동 입력용, 선택)
+            password: 비밀번호 (자동 입력용, 선택)
             timeout: 최대 대기 시간 (초)
 
         Returns:
@@ -203,8 +205,20 @@ class YouTubeBot:
                     email_input.fill(email)
                     self.page.click("#identifierNext")
                     console.print(f"[blue]이메일 자동 입력됨: {email[:5]}***[/blue]")
+                    time.sleep(3)
                 except Exception:
                     pass
+
+            # 비밀번호 자동 입력 (선택)
+            if password:
+                try:
+                    pw_input = self.page.wait_for_selector('input[type="password"]', timeout=5000)
+                    pw_input.fill(password)
+                    self.page.click("#passwordNext")
+                    console.print("[blue]비밀번호 자동 입력됨[/blue]")
+                    time.sleep(3)
+                except Exception:
+                    console.print("[yellow]비밀번호 자동 입력 실패 - 직접 입력해주세요[/yellow]")
 
             # 사용자가 로그인 완료할 때까지 대기
             console.print(f"[yellow]{timeout}초 내에 로그인을 완료해주세요...[/yellow]")

@@ -851,13 +851,15 @@ def api_task_counts():
 
 
 @app.route("/api/notion/debug")
+@login_required
 def api_notion_debug():
     """노션 DB 구조를 확인합니다 (디버깅용)."""
     try:
         from notion_client import Client
         load_dotenv(override=True)
-        token = os.getenv("NOTION_API_TOKEN", "")
-        db_id = os.getenv("NOTION_DATABASE_ID", "")
+        # 유저별 DB 설정 우선, os.getenv 폴백
+        token = _get_user_setting(current_user.id, "NOTION_API_TOKEN") or os.getenv("NOTION_API_TOKEN", "")
+        db_id = _get_user_setting(current_user.id, "NOTION_DATABASE_ID") or os.getenv("NOTION_DATABASE_ID", "")
 
         if not token or not db_id:
             return jsonify({"error": "NOTION_API_TOKEN 또는 NOTION_DATABASE_ID 미설정"}), 400
@@ -1389,21 +1391,29 @@ def api_save_settings():
 
 
 @app.route("/api/check-connections", methods=["GET"])
+@login_required
 def api_check_connections():
     """모든 API 연동 상태를 확인합니다."""
     results = {}
 
-    # 1. .env 파일 존재 여부
-    env_exists = os.path.exists(os.path.join(os.path.dirname(__file__), ".env"))
+    # 1. .env 파일 존재 여부 (여러 경로 확인)
+    env_candidates = [
+        os.path.join(os.path.dirname(__file__), ".env"),
+        os.path.join(os.getcwd(), ".env"),
+    ]
+    env_exists = any(os.path.exists(p) for p in env_candidates)
     results["env_file"] = {"ok": env_exists, "message": ".env 파일 존재" if env_exists else ".env 파일이 없습니다. .env.example을 복사하세요."}
 
-    # 2. Notion API 연결 테스트
-    notion_token = os.getenv("NOTION_API_TOKEN", "")
-    notion_db_id = os.getenv("NOTION_DATABASE_ID", "")
+    # 2. Notion API 연결 테스트 (유저별 DB 설정 우선)
+    notion_token = _get_user_setting(current_user.id, "NOTION_API_TOKEN") or os.getenv("NOTION_API_TOKEN", "")
+    notion_db_id = _get_user_setting(current_user.id, "NOTION_DATABASE_ID") or os.getenv("NOTION_DATABASE_ID", "")
     if not notion_token or not notion_db_id:
         results["notion"] = {"ok": False, "message": "NOTION_API_TOKEN 또는 NOTION_DATABASE_ID 미설정"}
     else:
         try:
+            # 유저 설정을 os.environ에 반영하여 NotionManager가 올바른 토큰 사용
+            os.environ["NOTION_API_TOKEN"] = notion_token
+            os.environ["NOTION_DATABASE_ID"] = notion_db_id
             notion = NotionManager()
             tasks = notion.get_pending_tasks()
             results["notion"] = {"ok": True, "message": f"연결 성공! 대기 작업 {len(tasks)}개"}
@@ -1750,7 +1760,8 @@ def api_manual_login():
             bot.start_browser()
             manual_login_state["message"] = "브라우저가 열렸습니다. 로그인을 완료해주세요."
             print(f"[manual_login] 브라우저 시작됨, email={email}")
-            login_ok = bot.manual_login(email=email, timeout=300)
+            password = account.get("password", "")
+            login_ok = bot.manual_login(email=email, password=password, timeout=300)
             print(f"[manual_login] 결과: {login_ok}")
 
             if login_ok:
