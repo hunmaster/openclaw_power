@@ -2578,6 +2578,94 @@ def api_license_features():
     return jsonify(features)
 
 
+@app.route("/api/mypage")
+def api_mypage():
+    """마이페이지 정보 반환."""
+    plan = license_client.get_plan_name()
+    balance = license_client.get_balance()
+    features = {}
+    for feat in ["comment_post", "auto_repost", "rank_check", "duplicate_scan",
+                 "like_boost", "auto_exposure_schedule", "multi_account_parallel",
+                 "task_scheduling", "api_access"]:
+        features[feat] = license_client.can_use_feature(feat)
+
+    # 토큰 비용 정보
+    from src.license_client import TOKEN_COSTS
+    token_prices = [
+        {"tokens": 500, "price": 15000, "label": "500 토큰", "per_token": 30},
+        {"tokens": 1200, "price": 30000, "label": "1,200 토큰", "per_token": 25, "popular": True},
+        {"tokens": 3000, "price": 60000, "label": "3,000 토큰", "per_token": 20, "discount": "33%"},
+        {"tokens": 7000, "price": 105000, "label": "7,000 토큰", "per_token": 15, "discount": "50%"},
+    ]
+
+    return jsonify({
+        "plan": plan or "미인증",
+        "owner_mode": license_client.owner_mode,
+        "token_balance": balance,
+        "max_accounts": license_client.get_max_accounts(),
+        "license_key": (license_client.license_key or "")[:8] + "..." if license_client.license_key else None,
+        "features": features,
+        "token_costs": TOKEN_COSTS,
+        "token_prices": token_prices,
+        "like_tiers": LIKE_TIERS,
+    })
+
+
+@app.route("/api/mypage/usage-history")
+def api_mypage_usage_history():
+    """토큰 사용/충전 내역 조회."""
+    if license_client.owner_mode:
+        return jsonify({"usage": [], "purchases": []})
+    if not license_client.license_key:
+        return jsonify({"error": "라이선스 미인증"}), 401
+    try:
+        import requests as _requests
+        resp = _requests.post(
+            f"{license_client.server_url}/api/license/usage-history",
+            json={"license_key": license_client.license_key},
+            timeout=10,
+        )
+        return jsonify(resp.json())
+    except Exception as e:
+        return jsonify({"usage": [], "purchases": [], "error": str(e)})
+
+
+@app.route("/api/mypage/purchase-tokens", methods=["POST"])
+def api_mypage_purchase_tokens():
+    """토큰 충전 (결제 후 호출)."""
+    if license_client.owner_mode:
+        return jsonify({"error": "Owner 모드에서는 충전이 필요 없습니다."}), 400
+    if not license_client.license_key:
+        return jsonify({"error": "라이선스 미인증"}), 401
+
+    data = request.get_json() or {}
+    tokens = int(data.get("tokens", 0))
+    amount = int(data.get("amount", 0))
+    payment_key = data.get("payment_key", "")
+
+    if tokens <= 0 or amount <= 0:
+        return jsonify({"error": "유효하지 않은 요청"}), 400
+
+    try:
+        import requests as _requests
+        resp = _requests.post(
+            f"{license_client.server_url}/api/license/tokens/purchase",
+            json={
+                "license_key": license_client.license_key,
+                "tokens": tokens,
+                "amount": amount,
+                "payment_key": payment_key,
+            },
+            timeout=10,
+        )
+        result = resp.json()
+        if result.get("success"):
+            license_client.token_balance = result.get("balance", 0)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": f"충전 실패: {str(e)}"}), 500
+
+
 @app.route("/api/like-boost/tiers")
 def api_like_boost_tiers():
     """좋아요 부스팅 티어 정보."""

@@ -323,6 +323,7 @@
         <button class="tab" onclick="switchTab('tracking')">댓글 트래킹</button>
         {% if is_owner %}<button class="tab" onclick="switchTab('smm')">SMM 좋아요</button>{% endif %}
         {% if not is_owner %}<button class="tab" onclick="switchTab('boost')">좋아요 부스팅</button>{% endif %}
+        <button class="tab" onclick="switchTab('mypage')">마이페이지</button>
         <button class="tab" onclick="switchTab('settings')">설정</button>
         <button class="tab" onclick="switchTab('logs')">실행 로그</button>
     </div>
@@ -997,6 +998,75 @@
         </div>
     </div>
     {% endif %}
+
+    <!-- ━━━ 마이페이지 탭 ━━━ -->
+    <div class="tab-content" id="tab-mypage">
+
+        <!-- 내 구독 정보 카드 -->
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px;">
+            <div class="card" style="text-align:center;cursor:pointer;" onclick="openSubscriptionPopup()">
+                <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">현재 플랜</div>
+                <div id="myPlan" style="font-size:24px;font-weight:800;color:var(--accent-light);">-</div>
+                <div style="font-size:11px;color:#888;margin-top:6px;">클릭하여 업그레이드</div>
+            </div>
+            <div class="card" style="text-align:center;cursor:pointer;" onclick="openChargePopup()">
+                <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">잔여 토큰</div>
+                <div id="myTokens" style="font-size:24px;font-weight:800;color:#fbbf24;">-</div>
+                <div style="font-size:11px;color:#888;margin-top:6px;">클릭하여 충전</div>
+            </div>
+            <div class="card" style="text-align:center;">
+                <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">최대 계정 수</div>
+                <div id="myMaxAccounts" style="font-size:24px;font-weight:800;color:#4ade80;">-</div>
+                <div style="font-size:11px;color:#888;margin-top:6px;">현재 플랜 기준</div>
+            </div>
+        </div>
+
+        <!-- 토큰 소모 비용표 -->
+        <div class="card" style="margin-bottom:20px;">
+            <h3 style="font-size:15px;margin-bottom:16px;">작업별 토큰 소모</h3>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;" id="myTokenCosts">
+            </div>
+        </div>
+
+        <!-- 사용 가능 기능 -->
+        <div class="card" style="margin-bottom:20px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <h3 style="font-size:15px;">사용 가능 기능</h3>
+                <button class="btn btn-sm btn-primary" onclick="openSubscriptionPopup()">플랜 업그레이드</button>
+            </div>
+            <div id="myFeatureList" style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;">
+            </div>
+        </div>
+
+        <!-- 토큰 충전 상품 -->
+        <div class="card" style="margin-bottom:20px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <h3 style="font-size:15px;">토큰 충전</h3>
+                <span style="font-size:11px;color:#f59e0b;">지금 충전 시 보너스 토큰 지급!</span>
+            </div>
+            <div id="myTokenPackages" style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
+            </div>
+        </div>
+
+        <!-- 사용/충전 내역 -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+            <!-- 충전 내역 -->
+            <div class="card">
+                <h3 style="font-size:15px;margin-bottom:16px;">충전 내역</h3>
+                <div id="myPurchaseHistory" style="max-height:300px;overflow-y:auto;">
+                    <p style="color:var(--text-dim);font-size:13px;text-align:center;padding:20px;">내역이 없습니다</p>
+                </div>
+            </div>
+            <!-- 사용 내역 -->
+            <div class="card">
+                <h3 style="font-size:15px;margin-bottom:16px;">토큰 사용 내역</h3>
+                <div id="myUsageHistory" style="max-height:300px;overflow-y:auto;">
+                    <p style="color:var(--text-dim);font-size:13px;text-align:center;padding:20px;">내역이 없습니다</p>
+                </div>
+            </div>
+        </div>
+
+    </div>
 
     <!-- ━━━ 설정 탭 ━━━ -->
     <div class="tab-content" id="tab-settings">
@@ -3619,6 +3689,17 @@
     function openSubscriptionPopup() {
         document.getElementById('subscriptionOverlay').style.display = 'flex';
         startEarlyBirdCountdown();
+        // 현재 플랜 표시
+        (async () => {
+            try {
+                const data = await api('/api/license/status');
+                if (data && data.plan) highlightCurrentPlan(data.plan);
+                const tokenEl = document.getElementById('subCurrentTokens');
+                if (tokenEl && data) tokenEl.textContent = data.token_balance ? data.token_balance.toLocaleString() : '0';
+                const planEl = document.getElementById('subCurrentPlan');
+                if (planEl && data) planEl.textContent = data.plan || '미인증';
+            } catch(e) {}
+        })();
     }
 
     function closeSubscriptionPopup() {
@@ -3627,17 +3708,14 @@
     }
 
     function startEarlyBirdCountdown() {
-        // 매일 자정 기준으로 남은 시간 계산 (항상 촉박하게 보이도록)
         function update() {
             const now = new Date();
             const endOfDay = new Date(now);
             endOfDay.setHours(23, 59, 59, 999);
             const diff = endOfDay - now;
-
             const h = String(Math.floor(diff / 3600000)).padStart(2, '0');
             const m = String(Math.floor((diff % 3600000) / 60000)).padStart(2, '0');
             const s = String(Math.floor((diff % 60000) / 1000)).padStart(2, '0');
-
             const el = document.getElementById('earlyBirdTimer');
             if (el) el.textContent = `${h}:${m}:${s}`;
         }
@@ -3651,34 +3729,252 @@
         const currentIdx = plans.findIndex(p => p.toLowerCase() === (planName || '').toLowerCase());
         document.querySelectorAll('.sub-plan-card').forEach((card, idx) => {
             card.classList.remove('current-plan', 'upgrade-available');
+            const btn = card.querySelector('.sub-plan-btn');
             if (idx === currentIdx) {
                 card.classList.add('current-plan');
-                card.querySelector('.sub-plan-btn').textContent = '현재 플랜';
-                card.querySelector('.sub-plan-btn').disabled = true;
+                btn.textContent = '현재 플랜';
+                btn.disabled = true;
             } else if (idx > currentIdx) {
                 card.classList.add('upgrade-available');
             }
         });
     }
 
-    // 팝업 열릴 때 현재 플랜 표시
-    const origOpen = openSubscriptionPopup;
-    openSubscriptionPopup = async function() {
-        origOpen();
+    // ─── 결제 팝업 ───
+    let selectedPayPlan = null;
+    let selectedPayPrice = 0;
+
+    function openPaymentPopup(planId, planName, price) {
+        if (price === 0) {
+            // Enterprise는 문의
+            alert('Enterprise 플랜은 별도 문의가 필요합니다.\n관리자에게 연락해주세요.');
+            return;
+        }
+        selectedPayPlan = planId;
+        selectedPayPrice = price;
+        document.getElementById('payPlanName').textContent = planName;
+        document.getElementById('payAmount').textContent = '₩' + price.toLocaleString();
+        document.getElementById('paymentOverlay').style.display = 'flex';
+        document.getElementById('paymentMsg').textContent = '';
+    }
+
+    function closePaymentPopup() {
+        document.getElementById('paymentOverlay').style.display = 'none';
+    }
+
+    function selectPayMethod(method) {
+        document.getElementById('payCardForm').style.display = method === 'card' ? 'block' : 'none';
+        document.getElementById('payTransferForm').style.display = method === 'transfer' ? 'block' : 'none';
+    }
+
+    async function processPayment() {
+        const agree = document.getElementById('payAutoAgree').checked;
+        if (!agree) {
+            document.getElementById('paymentMsg').innerHTML = '<span style="color:#ef4444;">자동 결제 동의가 필요합니다.</span>';
+            return;
+        }
+
+        const method = document.querySelector('input[name="payMethod"]:checked').value;
+        const btn = document.getElementById('btnProcessPayment');
+        const msg = document.getElementById('paymentMsg');
+
+        if (method === 'card') {
+            const cardNum = document.getElementById('payCardNumber').value.replace(/-/g, '');
+            const expiry = document.getElementById('payExpiry').value;
+            const cvc = document.getElementById('payCvc').value;
+
+            if (cardNum.length < 16 || !expiry || cvc.length < 3) {
+                msg.innerHTML = '<span style="color:#ef4444;">카드 정보를 모두 입력해주세요.</span>';
+                return;
+            }
+        }
+
+        btn.disabled = true;
+        btn.textContent = '결제 처리 중...';
+        msg.innerHTML = '<span style="color:#60a5fa;">결제를 처리하고 있습니다...</span>';
+
+        // 결제 처리 시뮬레이션 (실제로는 PG사 연동)
+        setTimeout(async () => {
+            try {
+                if (method === 'transfer') {
+                    msg.innerHTML = '<span style="color:#fbbf24;">입금 확인 후 자동으로 플랜이 활성화됩니다.</span>';
+                    btn.textContent = '입금 대기 중';
+                } else {
+                    msg.innerHTML = '<span style="color:#4ade80;">결제가 완료되었습니다! 플랜이 활성화됩니다.</span>';
+                    btn.textContent = '결제 완료';
+                    // 3초 후 팝업 닫기
+                    setTimeout(() => {
+                        closePaymentPopup();
+                        closeSubscriptionPopup();
+                        loadLicenseStatus();
+                        btn.disabled = false;
+                        btn.textContent = '결제하기';
+                    }, 3000);
+                }
+            } catch(e) {
+                msg.innerHTML = '<span style="color:#ef4444;">결제 처리 중 오류가 발생했습니다.</span>';
+                btn.disabled = false;
+                btn.textContent = '결제하기';
+            }
+        }, 2000);
+    }
+
+    // ─── 토큰 충전 팝업 ───
+    let selectedChargeTokens = 1200;
+    let selectedChargePrice = 30000;
+
+    function openChargePopup() {
+        document.getElementById('chargeOverlay').style.display = 'flex';
+        const bal = document.getElementById('chargeCurrentBalance');
+        if (bal) {
+            const myTok = document.getElementById('myTokens');
+            bal.textContent = myTok ? myTok.textContent : '-';
+        }
+    }
+
+    function closeChargePopup() {
+        document.getElementById('chargeOverlay').style.display = 'none';
+    }
+
+    function selectChargePackage(el, tokens, price) {
+        selectedChargeTokens = tokens;
+        selectedChargePrice = price;
+        document.querySelectorAll('.charge-pkg').forEach(p => p.classList.remove('selected-pkg'));
+        el.classList.add('selected-pkg');
+    }
+
+    async function processTokenCharge() {
+        const btn = document.getElementById('btnChargeTokens');
+        const msg = document.getElementById('chargeMsg');
+        btn.disabled = true;
+        btn.textContent = '충전 처리 중...';
+
         try {
-            const data = await api('/api/license/status');
-            if (data && data.plan) highlightCurrentPlan(data.plan);
-            const tokenEl = document.getElementById('subCurrentTokens');
-            if (tokenEl && data) tokenEl.textContent = data.token_balance ? data.token_balance.toLocaleString() : '0';
-            const planEl = document.getElementById('subCurrentPlan');
-            if (planEl && data) planEl.textContent = data.plan || '미인증';
+            const data = await api('/api/mypage/purchase-tokens', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    tokens: selectedChargeTokens,
+                    amount: selectedChargePrice,
+                    payment_key: 'direct_' + Date.now(),
+                }),
+            });
+            if (data && data.success) {
+                msg.innerHTML = `<span style="color:#4ade80;">${selectedChargeTokens.toLocaleString()} 토큰 충전 완료! 잔액: ${data.balance.toLocaleString()}</span>`;
+                loadMypage();
+                loadLicenseStatus();
+                setTimeout(() => { closeChargePopup(); btn.disabled = false; btn.textContent = '충전하기'; msg.textContent = ''; }, 3000);
+            } else {
+                msg.innerHTML = `<span style="color:#ef4444;">${data?.error || '충전 실패'}</span>`;
+                btn.disabled = false;
+                btn.textContent = '충전하기';
+            }
+        } catch(e) {
+            msg.innerHTML = '<span style="color:#ef4444;">충전 처리 중 오류가 발생했습니다.</span>';
+            btn.disabled = false;
+            btn.textContent = '충전하기';
+        }
+    }
+
+    // ─── 마이페이지 ───
+    const FEATURE_NAMES = {
+        comment_post: '댓글 작성', auto_repost: '자동 리포스팅', rank_check: '랭킹 체크',
+        duplicate_scan: '중복 스캔', like_boost: '좋아요 부스트', auto_exposure_schedule: '자동 노출 스케줄',
+        multi_account_parallel: '멀티 계정 동시작업', task_scheduling: '작업 예약', api_access: 'API 접근',
+    };
+    const ACTION_NAMES = {
+        comment_post: '댓글 작성', comment_repost: '리포스팅', exposure_check: '노출 확인',
+        rank_check: '순위 체크', duplicate_scan: '중복 스캔', notion_sync: '노션 동기화',
+    };
+
+    async function loadMypage() {
+        try {
+            const data = await api('/api/mypage');
+            if (!data) return;
+
+            document.getElementById('myPlan').textContent = data.plan || '-';
+            document.getElementById('myTokens').textContent = data.token_balance ? data.token_balance.toLocaleString() : '0';
+            document.getElementById('myMaxAccounts').textContent = data.max_accounts || '-';
+
+            // 토큰 비용표
+            const costsEl = document.getElementById('myTokenCosts');
+            if (costsEl && data.token_costs) {
+                costsEl.innerHTML = Object.entries(data.token_costs).map(([k, v]) =>
+                    `<div style="display:flex;justify-content:space-between;padding:8px 12px;background:var(--bg);border-radius:8px;font-size:12px;">
+                        <span style="color:#aaa;">${ACTION_NAMES[k] || k}</span>
+                        <span style="color:#fbbf24;font-weight:600;">${v} 토큰</span>
+                    </div>`
+                ).join('');
+            }
+
+            // 기능 목록
+            const featEl = document.getElementById('myFeatureList');
+            if (featEl && data.features) {
+                featEl.innerHTML = Object.entries(data.features).map(([k, v]) =>
+                    `<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg);border-radius:8px;font-size:12px;">
+                        <span style="color:${v ? '#4ade80' : '#ef4444'};">${v ? '✅' : '🔒'}</span>
+                        <span style="color:${v ? '#ccc' : '#666'};">${FEATURE_NAMES[k] || k}</span>
+                    </div>`
+                ).join('');
+            }
+
+            // 토큰 충전 상품
+            const pkgEl = document.getElementById('myTokenPackages');
+            if (pkgEl && data.token_prices) {
+                pkgEl.innerHTML = data.token_prices.map(p =>
+                    `<div onclick="openChargePopup()" style="padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px;text-align:center;cursor:pointer;transition:all .2s;${p.popular ? 'border-color:rgba(139,92,246,0.4);' : ''}" onmouseover="this.style.borderColor='rgba(139,92,246,0.6)'" onmouseout="this.style.borderColor='${p.popular ? 'rgba(139,92,246,0.4)' : 'var(--border)'}'"">
+                        <div style="font-size:16px;font-weight:800;color:#fff;">${p.label}</div>
+                        <div style="font-size:14px;font-weight:700;color:#fbbf24;margin-top:6px;">₩${p.price.toLocaleString()}</div>
+                        <div style="font-size:10px;color:#888;margin-top:2px;">토큰당 ${p.per_token}원${p.discount ? ' ('+p.discount+' 할인)' : ''}</div>
+                    </div>`
+                ).join('');
+            }
+
+            // 사용/충전 내역 로드
+            loadUsageHistory();
         } catch(e) {}
+    }
+
+    async function loadUsageHistory() {
+        try {
+            const data = await api('/api/mypage/usage-history');
+            if (!data) return;
+
+            // 충전 내역
+            const purchaseEl = document.getElementById('myPurchaseHistory');
+            if (purchaseEl && data.purchases && data.purchases.length > 0) {
+                purchaseEl.innerHTML = data.purchases.map(p =>
+                    `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:12px;">
+                        <span style="color:#4ade80;">+${p.tokens.toLocaleString()} 토큰</span>
+                        <span style="color:#888;">${p.purchased_at ? p.purchased_at.slice(0,10) : '-'}</span>
+                    </div>`
+                ).join('');
+            }
+
+            // 사용 내역
+            const usageEl = document.getElementById('myUsageHistory');
+            if (usageEl && data.usage && data.usage.length > 0) {
+                usageEl.innerHTML = data.usage.map(u =>
+                    `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:12px;">
+                        <span style="color:#aaa;">${ACTION_NAMES[u.action] || u.action}</span>
+                        <span style="color:#ef4444;">-${u.tokens_used} 토큰</span>
+                    </div>`
+                ).join('');
+            }
+        } catch(e) {}
+    }
+
+    // 마이페이지 탭 전환 시 로드
+    const origSwitchTab = switchTab;
+    switchTab = function(tab) {
+        origSwitchTab(tab);
+        if (tab === 'mypage') loadMypage();
     };
 </script>
 
 <!-- 구독 업그레이드 팝업 모달 -->
 <div id="subscriptionOverlay" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);align-items:center;justify-content:center;" onclick="if(event.target===this)closeSubscriptionPopup()">
-<div style="background:var(--card,#1a1a2e);border-radius:16px;max-width:820px;width:95%;max-height:90vh;overflow-y:auto;padding:0;box-shadow:0 25px 60px rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.08);">
+<div style="background:var(--card,#1a1a2e);border-radius:16px;max-width:860px;width:95%;max-height:90vh;overflow-y:auto;padding:0;box-shadow:0 25px 60px rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.08);">
 
     <!-- 헤더 -->
     <div style="padding:24px 28px 0;display:flex;justify-content:space-between;align-items:center;">
@@ -3694,7 +3990,7 @@
         <div style="font-size:28px;">🔥</div>
         <div style="flex:1;">
             <div style="font-size:14px;font-weight:700;color:#fbbf24;">얼리버드 특별 할인 진행 중!</div>
-            <div style="font-size:12px;color:#f59e0b;margin-top:2px;">지금 업그레이드하면 <strong>최대 40% 할인</strong> 적용</div>
+            <div style="font-size:12px;color:#f59e0b;margin-top:2px;">지금 업그레이드하면 <strong>최대 30% 할인</strong> 적용</div>
         </div>
         <div style="text-align:center;background:rgba(0,0,0,0.3);padding:8px 14px;border-radius:8px;min-width:90px;">
             <div style="font-size:10px;color:#f87171;font-weight:600;letter-spacing:0.5px;">마감까지</div>
@@ -3705,88 +4001,246 @@
     <!-- 플랜 카드 그리드 -->
     <div style="padding:8px 28px 28px;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
 
-        <!-- Starter -->
-        <div class="sub-plan-card" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2);border-radius:12px;padding:20px 16px;text-align:center;transition:all .2s;position:relative;">
+        <!-- Starter: 정가 100,000 → 할인 79,000 -->
+        <div class="sub-plan-card" data-plan="starter" data-price="79000" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2);border-radius:12px;padding:20px 16px;text-align:center;transition:all .2s;position:relative;">
             <div style="font-size:12px;font-weight:700;color:#60a5fa;letter-spacing:1px;margin-bottom:8px;">STARTER</div>
             <div style="margin:8px 0;">
-                <span style="font-size:13px;color:#666;text-decoration:line-through;">₩49,000</span>
-                <div style="font-size:26px;font-weight:800;color:#fff;margin-top:2px;">₩29,000</div>
+                <span style="font-size:13px;color:#666;text-decoration:line-through;">₩100,000</span>
+                <div style="font-size:26px;font-weight:800;color:#fff;margin-top:2px;">₩79,000</div>
                 <div style="font-size:11px;color:#888;">/월</div>
             </div>
-            <div style="font-size:11px;color:#ef4444;font-weight:600;margin-bottom:12px;">40% OFF</div>
+            <div style="font-size:11px;color:#ef4444;font-weight:600;margin-bottom:12px;">21% OFF</div>
             <ul style="list-style:none;padding:0;margin:0 0 16px;text-align:left;font-size:11px;color:#aaa;line-height:2;">
                 <li>✅ 댓글 작성</li>
                 <li>✅ 노출 수동 확인</li>
                 <li>✅ 노션 연동</li>
-                <li>❌ 자동 리포스팅</li>
-                <li>❌ 좋아요 부스트</li>
+                <li>✅ 월 3,000 토큰</li>
+                <li>✅ 최대 3계정</li>
+                <li style="color:#555;">❌ 자동 리포스팅</li>
+                <li style="color:#555;">❌ 좋아요 부스트</li>
             </ul>
-            <button class="sub-plan-btn" onclick="alert('업그레이드 문의: 관리자에게 연락해주세요.')" style="width:100%;padding:10px;border:none;border-radius:8px;background:#3b82f6;color:#fff;font-weight:700;font-size:13px;cursor:pointer;transition:all .2s;">선택하기</button>
+            <button class="sub-plan-btn" onclick="openPaymentPopup('starter','Starter',79000)" style="width:100%;padding:10px;border:none;border-radius:8px;background:#3b82f6;color:#fff;font-weight:700;font-size:13px;cursor:pointer;transition:all .2s;">선택하기</button>
         </div>
 
-        <!-- Business -->
-        <div class="sub-plan-card" style="background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.3);border-radius:12px;padding:20px 16px;text-align:center;transition:all .2s;position:relative;transform:scale(1.03);">
+        <!-- Business: 정가 290,000 → 할인 199,000 -->
+        <div class="sub-plan-card" data-plan="business" data-price="199000" style="background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.3);border-radius:12px;padding:20px 16px;text-align:center;transition:all .2s;position:relative;transform:scale(1.03);">
             <div style="position:absolute;top:-10px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#8b5cf6,#6d28d9);padding:3px 12px;border-radius:20px;font-size:10px;font-weight:700;color:#fff;">추천</div>
             <div style="font-size:12px;font-weight:700;color:#a78bfa;letter-spacing:1px;margin-bottom:8px;">BUSINESS</div>
             <div style="margin:8px 0;">
-                <span style="font-size:13px;color:#666;text-decoration:line-through;">₩99,000</span>
-                <div style="font-size:26px;font-weight:800;color:#fff;margin-top:2px;">₩69,000</div>
+                <span style="font-size:13px;color:#666;text-decoration:line-through;">₩290,000</span>
+                <div style="font-size:26px;font-weight:800;color:#fff;margin-top:2px;">₩199,000</div>
                 <div style="font-size:11px;color:#888;">/월</div>
             </div>
             <div style="font-size:11px;color:#ef4444;font-weight:600;margin-bottom:12px;">30% OFF</div>
             <ul style="list-style:none;padding:0;margin:0 0 16px;text-align:left;font-size:11px;color:#aaa;line-height:2;">
                 <li>✅ Starter 전체 포함</li>
                 <li>✅ 자동 리포스팅</li>
-                <li>✅ 랭킹 체크</li>
-                <li>✅ 중복 스캔</li>
+                <li>✅ 랭킹 체크 / 중복 스캔</li>
                 <li>✅ 좋아요 부스트</li>
+                <li>✅ 월 10,000 토큰</li>
+                <li>✅ 최대 10계정</li>
             </ul>
-            <button class="sub-plan-btn" onclick="alert('업그레이드 문의: 관리자에게 연락해주세요.')" style="width:100%;padding:10px;border:none;border-radius:8px;background:linear-gradient(135deg,#8b5cf6,#6d28d9);color:#fff;font-weight:700;font-size:13px;cursor:pointer;transition:all .2s;">선택하기</button>
+            <button class="sub-plan-btn" onclick="openPaymentPopup('business','Business',199000)" style="width:100%;padding:10px;border:none;border-radius:8px;background:linear-gradient(135deg,#8b5cf6,#6d28d9);color:#fff;font-weight:700;font-size:13px;cursor:pointer;transition:all .2s;">선택하기</button>
         </div>
 
-        <!-- Agency -->
-        <div class="sub-plan-card" style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.2);border-radius:12px;padding:20px 16px;text-align:center;transition:all .2s;position:relative;">
+        <!-- Agency: 정가 590,000 → 할인 449,000 -->
+        <div class="sub-plan-card" data-plan="agency" data-price="449000" style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.2);border-radius:12px;padding:20px 16px;text-align:center;transition:all .2s;position:relative;">
             <div style="font-size:12px;font-weight:700;color:#fbbf24;letter-spacing:1px;margin-bottom:8px;">AGENCY</div>
             <div style="margin:8px 0;">
-                <span style="font-size:13px;color:#666;text-decoration:line-through;">₩199,000</span>
-                <div style="font-size:26px;font-weight:800;color:#fff;margin-top:2px;">₩149,000</div>
+                <span style="font-size:13px;color:#666;text-decoration:line-through;">₩590,000</span>
+                <div style="font-size:26px;font-weight:800;color:#fff;margin-top:2px;">₩449,000</div>
                 <div style="font-size:11px;color:#888;">/월</div>
             </div>
-            <div style="font-size:11px;color:#ef4444;font-weight:600;margin-bottom:12px;">25% OFF</div>
+            <div style="font-size:11px;color:#ef4444;font-weight:600;margin-bottom:12px;">24% OFF</div>
             <ul style="list-style:none;padding:0;margin:0 0 16px;text-align:left;font-size:11px;color:#aaa;line-height:2;">
                 <li>✅ Business 전체 포함</li>
                 <li>✅ 자동 노출 스케줄링</li>
-                <li>✅ 작업 스케줄링</li>
-                <li>✅ 멀티 계정 (5개)</li>
-                <li>❌ API 접근</li>
+                <li>✅ 작업 예약 스케줄링</li>
+                <li>✅ 멀티 계정 동시작업</li>
+                <li>✅ 월 30,000 토큰</li>
+                <li>✅ 최대 30계정</li>
             </ul>
-            <button class="sub-plan-btn" onclick="alert('업그레이드 문의: 관리자에게 연락해주세요.')" style="width:100%;padding:10px;border:none;border-radius:8px;background:#f59e0b;color:#000;font-weight:700;font-size:13px;cursor:pointer;transition:all .2s;">선택하기</button>
+            <button class="sub-plan-btn" onclick="openPaymentPopup('agency','Agency',449000)" style="width:100%;padding:10px;border:none;border-radius:8px;background:#f59e0b;color:#000;font-weight:700;font-size:13px;cursor:pointer;transition:all .2s;">선택하기</button>
         </div>
 
-        <!-- Enterprise -->
-        <div class="sub-plan-card" style="background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.2);border-radius:12px;padding:20px 16px;text-align:center;transition:all .2s;position:relative;">
+        <!-- Enterprise: 정가 9,900,000 → 별도 문의 -->
+        <div class="sub-plan-card" data-plan="enterprise" data-price="0" style="background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.2);border-radius:12px;padding:20px 16px;text-align:center;transition:all .2s;position:relative;">
             <div style="font-size:12px;font-weight:700;color:#4ade80;letter-spacing:1px;margin-bottom:8px;">ENTERPRISE</div>
             <div style="margin:8px 0;">
-                <span style="font-size:13px;color:#666;text-decoration:line-through;">₩399,000</span>
-                <div style="font-size:26px;font-weight:800;color:#fff;margin-top:2px;">₩299,000</div>
+                <span style="font-size:13px;color:#666;text-decoration:line-through;">₩9,900,000</span>
+                <div style="font-size:22px;font-weight:800;color:#fff;margin-top:2px;">별도 문의</div>
                 <div style="font-size:11px;color:#888;">/월</div>
             </div>
-            <div style="font-size:11px;color:#ef4444;font-weight:600;margin-bottom:12px;">25% OFF</div>
+            <div style="font-size:11px;color:#4ade80;font-weight:600;margin-bottom:12px;">맞춤 견적</div>
             <ul style="list-style:none;padding:0;margin:0 0 16px;text-align:left;font-size:11px;color:#aaa;line-height:2;">
                 <li>✅ Agency 전체 포함</li>
                 <li>✅ API 접근</li>
                 <li>✅ 전체 기능 잠금해제</li>
                 <li>✅ 우선 기술 지원</li>
+                <li>✅ 무제한 토큰</li>
                 <li>✅ 무제한 계정</li>
             </ul>
-            <button class="sub-plan-btn" onclick="alert('업그레이드 문의: 관리자에게 연락해주세요.')" style="width:100%;padding:10px;border:none;border-radius:8px;background:#22c55e;color:#000;font-weight:700;font-size:13px;cursor:pointer;transition:all .2s;">선택하기</button>
+            <button class="sub-plan-btn" onclick="openPaymentPopup('enterprise','Enterprise',0)" style="width:100%;padding:10px;border:none;border-radius:8px;background:#22c55e;color:#000;font-weight:700;font-size:13px;cursor:pointer;transition:all .2s;">문의하기</button>
         </div>
 
     </div>
 
     <!-- 하단 안내 -->
     <div style="padding:0 28px 20px;text-align:center;font-size:11px;color:#666;">
-        플랜 변경 및 결제 문의는 관리자에게 연락해주세요 &nbsp;|&nbsp; 모든 플랜은 부가세 별도입니다
+        월 구독 자동 결제 &nbsp;|&nbsp; 언제든 해지 가능 &nbsp;|&nbsp; 부가세 별도
+    </div>
+
+</div>
+</div>
+
+<!-- 결제 확인 팝업 -->
+<div id="paymentOverlay" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.8);backdrop-filter:blur(6px);align-items:center;justify-content:center;" onclick="if(event.target===this)closePaymentPopup()">
+<div style="background:var(--card,#1a1a2e);border-radius:16px;max-width:480px;width:95%;padding:0;box-shadow:0 25px 60px rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.08);">
+
+    <!-- 결제 헤더 -->
+    <div style="padding:24px 28px 0;display:flex;justify-content:space-between;align-items:center;">
+        <h2 style="margin:0;font-size:18px;color:#fff;">월 구독 결제</h2>
+        <button onclick="closePaymentPopup()" style="background:none;border:none;color:#888;font-size:22px;cursor:pointer;">&times;</button>
+    </div>
+
+    <!-- 선택한 플랜 요약 -->
+    <div style="margin:20px 28px;padding:16px 20px;background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.2);border-radius:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div>
+                <div style="font-size:13px;color:#888;">선택한 플랜</div>
+                <div id="payPlanName" style="font-size:20px;font-weight:800;color:#fff;margin-top:4px;">-</div>
+            </div>
+            <div style="text-align:right;">
+                <div style="font-size:13px;color:#888;">월 결제 금액</div>
+                <div id="payAmount" style="font-size:22px;font-weight:800;color:#fbbf24;margin-top:4px;">-</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 결제 수단 선택 -->
+    <div style="padding:0 28px;">
+        <div style="font-size:14px;font-weight:600;color:#fff;margin-bottom:12px;">결제 수단</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
+            <label class="pay-method-card" onclick="selectPayMethod('card')" style="display:flex;align-items:center;gap:10px;padding:14px 16px;background:rgba(59,130,246,0.08);border:2px solid rgba(59,130,246,0.3);border-radius:10px;cursor:pointer;transition:all .2s;">
+                <input type="radio" name="payMethod" value="card" checked style="accent-color:#3b82f6;">
+                <div>
+                    <div style="font-size:13px;font-weight:600;color:#fff;">신용/체크카드</div>
+                    <div style="font-size:11px;color:#888;">VISA, Master, 국내카드</div>
+                </div>
+            </label>
+            <label class="pay-method-card" onclick="selectPayMethod('transfer')" style="display:flex;align-items:center;gap:10px;padding:14px 16px;background:rgba(255,255,255,0.03);border:2px solid rgba(255,255,255,0.08);border-radius:10px;cursor:pointer;transition:all .2s;">
+                <input type="radio" name="payMethod" value="transfer" style="accent-color:#3b82f6;">
+                <div>
+                    <div style="font-size:13px;font-weight:600;color:#fff;">계좌이체</div>
+                    <div style="font-size:11px;color:#888;">실시간 계좌이체</div>
+                </div>
+            </label>
+        </div>
+
+        <!-- 카드 결제 폼 -->
+        <div id="payCardForm">
+            <div style="margin-bottom:10px;">
+                <label style="display:block;font-size:12px;color:#888;margin-bottom:4px;">카드번호</label>
+                <input type="text" id="payCardNumber" placeholder="0000-0000-0000-0000" maxlength="19"
+                    oninput="this.value=this.value.replace(/[^0-9]/g,'').replace(/(.{4})/g,'$1-').slice(0,-1)"
+                    style="width:100%;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:#fff;font-size:14px;letter-spacing:2px;">
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                <div>
+                    <label style="display:block;font-size:12px;color:#888;margin-bottom:4px;">유효기간</label>
+                    <input type="text" id="payExpiry" placeholder="MM/YY" maxlength="5"
+                        oninput="this.value=this.value.replace(/[^0-9]/g,'').replace(/^(.{2})/,'$1/').slice(0,5)"
+                        style="width:100%;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:#fff;font-size:14px;">
+                </div>
+                <div>
+                    <label style="display:block;font-size:12px;color:#888;margin-bottom:4px;">CVC</label>
+                    <input type="password" id="payCvc" placeholder="000" maxlength="3"
+                        style="width:100%;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:#fff;font-size:14px;">
+                </div>
+            </div>
+        </div>
+
+        <!-- 계좌이체 안내 -->
+        <div id="payTransferForm" style="display:none;">
+            <div style="padding:16px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:10px;">
+                <div style="font-size:13px;font-weight:600;color:#fbbf24;margin-bottom:8px;">입금 안내</div>
+                <div style="font-size:12px;color:#aaa;line-height:1.8;">
+                    은행: <strong style="color:#fff;">카카오뱅크</strong><br>
+                    계좌: <strong style="color:#fff;">3333-00-0000000</strong><br>
+                    예금주: <strong style="color:#fff;">OpenClaw</strong><br>
+                    <span style="color:#f59e0b;">* 입금자명에 라이선스 키 앞 8자리를 기재해주세요</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 자동 결제 동의 -->
+        <label style="display:flex;align-items:center;gap:8px;margin:16px 0;cursor:pointer;">
+            <input type="checkbox" id="payAutoAgree" style="accent-color:#3b82f6;width:16px;height:16px;">
+            <span style="font-size:12px;color:#aaa;">매월 자동 결제에 동의합니다 (언제든 해지 가능)</span>
+        </label>
+    </div>
+
+    <!-- 결제 버튼 -->
+    <div style="padding:0 28px 24px;">
+        <button id="btnProcessPayment" onclick="processPayment()" style="width:100%;padding:14px;border:none;border-radius:10px;background:linear-gradient(135deg,#3b82f6,#6d28d9);color:#fff;font-weight:700;font-size:15px;cursor:pointer;transition:all .2s;letter-spacing:0.5px;">
+            결제하기
+        </button>
+        <div id="paymentMsg" style="margin-top:10px;font-size:12px;text-align:center;"></div>
+        <div style="margin-top:12px;text-align:center;font-size:10px;color:#555;">
+            결제는 SSL 암호화로 안전하게 처리됩니다
+        </div>
+    </div>
+
+</div>
+</div>
+
+<!-- 토큰 충전 팝업 -->
+<div id="chargeOverlay" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.8);backdrop-filter:blur(6px);align-items:center;justify-content:center;" onclick="if(event.target===this)closeChargePopup()">
+<div style="background:var(--card,#1a1a2e);border-radius:16px;max-width:520px;width:95%;padding:0;box-shadow:0 25px 60px rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.08);">
+
+    <div style="padding:24px 28px 0;display:flex;justify-content:space-between;align-items:center;">
+        <div>
+            <h2 style="margin:0;font-size:18px;color:#fff;">토큰 충전</h2>
+            <p style="margin:4px 0 0;font-size:12px;color:#888;">현재 잔액: <strong id="chargeCurrentBalance" style="color:#fbbf24;">-</strong> 토큰</p>
+        </div>
+        <button onclick="closeChargePopup()" style="background:none;border:none;color:#888;font-size:22px;cursor:pointer;">&times;</button>
+    </div>
+
+    <div style="padding:20px 28px;display:grid;grid-template-columns:repeat(2,1fr);gap:12px;">
+        <div class="charge-pkg" onclick="selectChargePackage(this,500,15000)" style="padding:16px;border:2px solid rgba(255,255,255,0.08);border-radius:12px;cursor:pointer;text-align:center;transition:all .2s;">
+            <div style="font-size:20px;font-weight:800;color:#fff;">500</div>
+            <div style="font-size:11px;color:#888;">토큰</div>
+            <div style="font-size:16px;font-weight:700;color:#60a5fa;margin-top:8px;">₩15,000</div>
+            <div style="font-size:10px;color:#888;">토큰당 30원</div>
+        </div>
+        <div class="charge-pkg selected-pkg" onclick="selectChargePackage(this,1200,30000)" style="padding:16px;border:2px solid #8b5cf6;border-radius:12px;cursor:pointer;text-align:center;transition:all .2s;position:relative;">
+            <div style="position:absolute;top:-8px;right:10px;background:#8b5cf6;padding:2px 8px;border-radius:10px;font-size:9px;font-weight:700;color:#fff;">인기</div>
+            <div style="font-size:20px;font-weight:800;color:#fff;">1,200</div>
+            <div style="font-size:11px;color:#888;">토큰</div>
+            <div style="font-size:16px;font-weight:700;color:#a78bfa;margin-top:8px;">₩30,000</div>
+            <div style="font-size:10px;color:#888;">토큰당 25원</div>
+        </div>
+        <div class="charge-pkg" onclick="selectChargePackage(this,3000,60000)" style="padding:16px;border:2px solid rgba(255,255,255,0.08);border-radius:12px;cursor:pointer;text-align:center;transition:all .2s;position:relative;">
+            <div style="position:absolute;top:-8px;right:10px;background:#ef4444;padding:2px 8px;border-radius:10px;font-size:9px;font-weight:700;color:#fff;">33%↓</div>
+            <div style="font-size:20px;font-weight:800;color:#fff;">3,000</div>
+            <div style="font-size:11px;color:#888;">토큰</div>
+            <div style="font-size:16px;font-weight:700;color:#fbbf24;margin-top:8px;">₩60,000</div>
+            <div style="font-size:10px;color:#888;">토큰당 20원</div>
+        </div>
+        <div class="charge-pkg" onclick="selectChargePackage(this,7000,105000)" style="padding:16px;border:2px solid rgba(255,255,255,0.08);border-radius:12px;cursor:pointer;text-align:center;transition:all .2s;position:relative;">
+            <div style="position:absolute;top:-8px;right:10px;background:#ef4444;padding:2px 8px;border-radius:10px;font-size:9px;font-weight:700;color:#fff;">50%↓</div>
+            <div style="font-size:20px;font-weight:800;color:#fff;">7,000</div>
+            <div style="font-size:11px;color:#888;">토큰</div>
+            <div style="font-size:16px;font-weight:700;color:#4ade80;margin-top:8px;">₩105,000</div>
+            <div style="font-size:10px;color:#888;">토큰당 15원</div>
+        </div>
+    </div>
+
+    <div style="padding:0 28px 24px;">
+        <button id="btnChargeTokens" onclick="processTokenCharge()" style="width:100%;padding:14px;border:none;border-radius:10px;background:linear-gradient(135deg,#f59e0b,#ef4444);color:#fff;font-weight:700;font-size:15px;cursor:pointer;transition:all .2s;">
+            충전하기
+        </button>
+        <div id="chargeMsg" style="margin-top:10px;font-size:12px;text-align:center;"></div>
     </div>
 
 </div>
@@ -3797,11 +4251,14 @@
 .sub-plan-card.current-plan { border-color:#22c55e !important; box-shadow:0 0 20px rgba(34,197,94,0.15); }
 .sub-plan-card.current-plan .sub-plan-btn { background:#333 !important; color:#888 !important; cursor:default; }
 .sub-plan-card .sub-plan-btn:hover { opacity:0.9; transform:scale(1.02); }
+.charge-pkg:hover { border-color:rgba(139,92,246,0.5) !important; background:rgba(139,92,246,0.05); }
+.charge-pkg.selected-pkg { border-color:#8b5cf6 !important; background:rgba(139,92,246,0.08); }
+.pay-method-card:has(input:checked) { border-color:rgba(59,130,246,0.6) !important; background:rgba(59,130,246,0.08) !important; }
 @media (max-width:768px) {
-    #subscriptionOverlay > div > div:last-of-type { grid-template-columns:repeat(2,1fr) !important; }
+    #subscriptionOverlay > div > div:nth-child(3) { grid-template-columns:repeat(2,1fr) !important; }
 }
 @media (max-width:480px) {
-    #subscriptionOverlay > div > div:last-of-type { grid-template-columns:1fr !important; }
+    #subscriptionOverlay > div > div:nth-child(3) { grid-template-columns:1fr !important; }
 }
 </style>
 

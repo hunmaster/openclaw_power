@@ -165,6 +165,70 @@ def api_token_balance():
     })
 
 
+@app.route("/api/license/tokens/purchase", methods=["POST"])
+def api_purchase_tokens():
+    """고객 토큰 충전 요청 (결제 완료 후 호출)"""
+    data = request.get_json() or {}
+    license_key = data.get("license_key", "").strip()
+    tokens = int(data.get("tokens", 0))
+    payment_key = data.get("payment_key", "")  # 결제 검증 키
+    amount = int(data.get("amount", 0))  # 결제 금액
+    ip = get_client_ip()
+
+    if not license_key or tokens <= 0:
+        return jsonify({"error": "필수 파라미터 누락"}), 400
+
+    lic = get_license_by_key(license_key)
+    if not lic or lic["status"] != "active":
+        log_api_call(license_key, "/tokens/purchase", ip, False, "유효하지 않은 라이선스")
+        return jsonify({"error": "유효하지 않은 라이선스"}), 403
+
+    new_balance = add_tokens(lic["id"], tokens, amount)
+    log_api_call(license_key, "/tokens/purchase", ip, True, f"+{tokens} tokens, ₩{amount}")
+
+    return jsonify({
+        "success": True,
+        "balance": new_balance,
+        "purchased": tokens,
+        "amount": amount,
+    })
+
+
+@app.route("/api/license/usage-history", methods=["POST"])
+def api_usage_history():
+    """고객 토큰 사용 내역 조회"""
+    data = request.get_json() or {}
+    license_key = data.get("license_key", "").strip()
+
+    lic = get_license_by_key(license_key)
+    if not lic:
+        return jsonify({"error": "유효하지 않은 라이선스"}), 404
+
+    from models import get_db
+    conn = get_db()
+
+    # 최근 사용 내역 50건
+    usage = conn.execute(
+        "SELECT action, tokens_used, description, used_at FROM token_usage "
+        "WHERE license_id = ? ORDER BY used_at DESC LIMIT 50",
+        (lic["id"],),
+    ).fetchall()
+
+    # 최근 충전 내역 20건
+    purchases = conn.execute(
+        "SELECT tokens, price, purchased_at FROM token_purchases "
+        "WHERE license_id = ? ORDER BY purchased_at DESC LIMIT 20",
+        (lic["id"],),
+    ).fetchall()
+
+    conn.close()
+
+    return jsonify({
+        "usage": [dict(r) for r in usage],
+        "purchases": [dict(r) for r in purchases],
+    })
+
+
 @app.route("/api/license/heartbeat", methods=["POST"])
 def api_heartbeat():
     """주기적 하트비트 (프로그램 실행 중 30분마다 호출)"""
