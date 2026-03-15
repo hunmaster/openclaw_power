@@ -252,7 +252,7 @@ class LemonSqueezyClient:
                             "custom": custom_data or {},
                         },
                         "product_options": {
-                            "redirect_url": os.getenv("APP_URL", "http://localhost:5000") + "/?payment_result=success",
+                            "redirect_url": os.getenv("APP_URL", "https://localhost:5000") + "/?payment_result=success",
                         },
                     },
                     "relationships": {
