@@ -359,4 +359,5 @@ class LemonSqueezyClient:
         return {
             "available": self.is_available(),
             "checkout_urls": self.checkout_urls,
+            "has_urls": bool(self.checkout_urls),
         }
