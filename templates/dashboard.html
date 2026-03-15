@@ -287,6 +287,8 @@
             color: var(--text);
         }
     </style>
+    <!-- 토스페이먼츠 SDK -->
+    <script src="https://js.tosspayments.com/v1/payment"></script>
 </head>
 <body>
 
@@ -3768,13 +3770,62 @@
         });
     }
 
-    // ─── 결제 팝업 ───
+    // ─── 토스페이먼츠 결제 ───
+    let tossPayments = null;
     let selectedPayPlan = null;
     let selectedPayPrice = 0;
 
+    // 토스 SDK 초기화
+    (async function initToss() {
+        try {
+            const config = await api('/api/payment/config');
+            if (config && config.clientKey) {
+                tossPayments = TossPayments(config.clientKey);
+            }
+        } catch(e) { console.log('Toss SDK init skipped'); }
+    })();
+
+    // 결제 성공 메시지 수신
+    window.addEventListener('message', async (e) => {
+        if (e.data && e.data.type === 'payment_success') {
+            const msg = document.getElementById('paymentMsg');
+            const btn = document.getElementById('btnProcessPayment');
+            msg.innerHTML = '<span style="color:#60a5fa;">결제 승인 중...</span>';
+            btn.disabled = true;
+
+            const result = await api('/api/payment/confirm', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    paymentKey: e.data.paymentKey,
+                    orderId: e.data.orderId,
+                    amount: e.data.amount,
+                }),
+            });
+            if (result && result.success) {
+                msg.innerHTML = '<span style="color:#4ade80;">결제가 완료되었습니다!</span>';
+                setTimeout(() => {
+                    closePaymentPopup();
+                    closeSubscriptionPopup();
+                    loadLicenseStatus();
+                    if (typeof loadMypage === 'function') loadMypage();
+                    btn.disabled = false; btn.textContent = '결제하기';
+                }, 2000);
+            } else {
+                msg.innerHTML = `<span style="color:#ef4444;">${result?.error || '결제 승인 실패'}</span>`;
+                btn.disabled = false; btn.textContent = '결제하기';
+            }
+        }
+        if (e.data && e.data.type === 'payment_fail') {
+            const msg = document.getElementById('paymentMsg');
+            msg.innerHTML = `<span style="color:#ef4444;">${e.data.message || '결제가 취소되었습니다.'}</span>`;
+            document.getElementById('btnProcessPayment').disabled = false;
+            document.getElementById('btnProcessPayment').textContent = '결제하기';
+        }
+    });
+
     function openPaymentPopup(planId, planName, price) {
         if (price === 0) {
-            // Enterprise는 문의
             alert('Enterprise 플랜은 별도 문의가 필요합니다.\n관리자에게 연락해주세요.');
             return;
         }
@@ -3790,61 +3841,52 @@
         document.getElementById('paymentOverlay').style.display = 'none';
     }
 
-    function selectPayMethod(method) {
-        document.getElementById('payCardForm').style.display = method === 'card' ? 'block' : 'none';
-        document.getElementById('payTransferForm').style.display = method === 'transfer' ? 'block' : 'none';
-    }
-
     async function processPayment() {
-        const agree = document.getElementById('payAutoAgree').checked;
-        if (!agree) {
-            document.getElementById('paymentMsg').innerHTML = '<span style="color:#ef4444;">자동 결제 동의가 필요합니다.</span>';
-            return;
-        }
-
-        const method = document.querySelector('input[name="payMethod"]:checked').value;
         const btn = document.getElementById('btnProcessPayment');
         const msg = document.getElementById('paymentMsg');
+        btn.disabled = true;
+        btn.textContent = '결제 준비 중...';
 
-        if (method === 'card') {
-            const cardNum = document.getElementById('payCardNumber').value.replace(/-/g, '');
-            const expiry = document.getElementById('payExpiry').value;
-            const cvc = document.getElementById('payCvc').value;
+        try {
+            // 서버에서 주문 정보 생성
+            const orderData = await api('/api/payment/request', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({product_id: 'plan_' + selectedPayPlan}),
+            });
 
-            if (cardNum.length < 16 || !expiry || cvc.length < 3) {
-                msg.innerHTML = '<span style="color:#ef4444;">카드 정보를 모두 입력해주세요.</span>';
+            if (!orderData || orderData.error) {
+                msg.innerHTML = `<span style="color:#ef4444;">${orderData?.error || '주문 생성 실패'}</span>`;
+                btn.disabled = false; btn.textContent = '결제하기';
                 return;
             }
-        }
 
-        btn.disabled = true;
-        btn.textContent = '결제 처리 중...';
-        msg.innerHTML = '<span style="color:#60a5fa;">결제를 처리하고 있습니다...</span>';
-
-        // 결제 처리 시뮬레이션 (실제로는 PG사 연동)
-        setTimeout(async () => {
-            try {
-                if (method === 'transfer') {
-                    msg.innerHTML = '<span style="color:#fbbf24;">입금 확인 후 자동으로 플랜이 활성화됩니다.</span>';
-                    btn.textContent = '입금 대기 중';
-                } else {
-                    msg.innerHTML = '<span style="color:#4ade80;">결제가 완료되었습니다! 플랜이 활성화됩니다.</span>';
-                    btn.textContent = '결제 완료';
-                    // 3초 후 팝업 닫기
-                    setTimeout(() => {
-                        closePaymentPopup();
-                        closeSubscriptionPopup();
-                        loadLicenseStatus();
-                        btn.disabled = false;
-                        btn.textContent = '결제하기';
-                    }, 3000);
-                }
-            } catch(e) {
-                msg.innerHTML = '<span style="color:#ef4444;">결제 처리 중 오류가 발생했습니다.</span>';
-                btn.disabled = false;
-                btn.textContent = '결제하기';
+            if (!tossPayments) {
+                msg.innerHTML = '<span style="color:#ef4444;">결제 모듈 로딩 중... 잠시 후 다시 시도해주세요.</span>';
+                btn.disabled = false; btn.textContent = '결제하기';
+                return;
             }
-        }, 2000);
+
+            // 토스 결제창 호출
+            tossPayments.requestPayment('카드', {
+                amount: orderData.amount,
+                orderId: orderData.orderId,
+                orderName: orderData.orderName,
+                customerKey: orderData.customerKey,
+                successUrl: window.location.origin + '/api/payment/success',
+                failUrl: window.location.origin + '/api/payment/fail',
+            }).catch(err => {
+                if (err.code === 'USER_CANCEL') {
+                    msg.innerHTML = '<span style="color:#888;">결제가 취소되었습니다.</span>';
+                } else {
+                    msg.innerHTML = `<span style="color:#ef4444;">${err.message || '결제 오류'}</span>`;
+                }
+                btn.disabled = false; btn.textContent = '결제하기';
+            });
+        } catch(e) {
+            msg.innerHTML = '<span style="color:#ef4444;">결제 처리 중 오류가 발생했습니다.</span>';
+            btn.disabled = false; btn.textContent = '결제하기';
+        }
     }
 
     // ─── 토큰 충전 팝업 ───
@@ -3875,32 +3917,90 @@
         const btn = document.getElementById('btnChargeTokens');
         const msg = document.getElementById('chargeMsg');
         btn.disabled = true;
-        btn.textContent = '충전 처리 중...';
+        btn.textContent = '결제 준비 중...';
+
+        // 토큰 수량에 맞는 상품 ID 매핑
+        const tokenProductMap = {500: 'token_500', 1200: 'token_1200', 3000: 'token_3000', 7000: 'token_7000'};
+        const productId = tokenProductMap[selectedChargeTokens];
+
+        if (!productId) {
+            msg.innerHTML = '<span style="color:#ef4444;">잘못된 상품입니다.</span>';
+            btn.disabled = false; btn.textContent = '충전하기';
+            return;
+        }
 
         try {
-            const data = await api('/api/mypage/purchase-tokens', {
+            const orderData = await api('/api/payment/request', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    tokens: selectedChargeTokens,
-                    amount: selectedChargePrice,
-                    payment_key: 'direct_' + Date.now(),
-                }),
+                body: JSON.stringify({product_id: productId}),
             });
-            if (data && data.success) {
-                msg.innerHTML = `<span style="color:#4ade80;">${selectedChargeTokens.toLocaleString()} 토큰 충전 완료! 잔액: ${data.balance.toLocaleString()}</span>`;
-                loadMypage();
-                loadLicenseStatus();
-                setTimeout(() => { closeChargePopup(); btn.disabled = false; btn.textContent = '충전하기'; msg.textContent = ''; }, 3000);
-            } else {
-                msg.innerHTML = `<span style="color:#ef4444;">${data?.error || '충전 실패'}</span>`;
-                btn.disabled = false;
-                btn.textContent = '충전하기';
+
+            if (!orderData || orderData.error) {
+                msg.innerHTML = `<span style="color:#ef4444;">${orderData?.error || '주문 생성 실패'}</span>`;
+                btn.disabled = false; btn.textContent = '충전하기';
+                return;
             }
+
+            if (!tossPayments) {
+                msg.innerHTML = '<span style="color:#ef4444;">결제 모듈 로딩 중... 잠시 후 다시 시도해주세요.</span>';
+                btn.disabled = false; btn.textContent = '충전하기';
+                return;
+            }
+
+            // 충전 결제 성공 메시지 핸들러 (1회용)
+            const chargeHandler = async (e) => {
+                if (e.data && e.data.type === 'payment_success') {
+                    window.removeEventListener('message', chargeHandler);
+                    msg.innerHTML = '<span style="color:#60a5fa;">결제 승인 중...</span>';
+
+                    const result = await api('/api/payment/confirm', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            paymentKey: e.data.paymentKey,
+                            orderId: e.data.orderId,
+                            amount: e.data.amount,
+                        }),
+                    });
+                    if (result && result.success) {
+                        msg.innerHTML = `<span style="color:#4ade80;">${selectedChargeTokens.toLocaleString()} 토큰 충전 완료!</span>`;
+                        loadMypage();
+                        loadLicenseStatus();
+                        setTimeout(() => { closeChargePopup(); btn.disabled = false; btn.textContent = '충전하기'; msg.textContent = ''; }, 2500);
+                    } else {
+                        msg.innerHTML = `<span style="color:#ef4444;">${result?.error || '충전 실패'}</span>`;
+                        btn.disabled = false; btn.textContent = '충전하기';
+                    }
+                }
+                if (e.data && e.data.type === 'payment_fail') {
+                    window.removeEventListener('message', chargeHandler);
+                    msg.innerHTML = `<span style="color:#ef4444;">${e.data.message || '결제 취소'}</span>`;
+                    btn.disabled = false; btn.textContent = '충전하기';
+                }
+            };
+            window.addEventListener('message', chargeHandler);
+
+            // 토스 결제창 호출
+            tossPayments.requestPayment('카드', {
+                amount: orderData.amount,
+                orderId: orderData.orderId,
+                orderName: orderData.orderName,
+                customerKey: orderData.customerKey,
+                successUrl: window.location.origin + '/api/payment/success',
+                failUrl: window.location.origin + '/api/payment/fail',
+            }).catch(err => {
+                window.removeEventListener('message', chargeHandler);
+                if (err.code === 'USER_CANCEL') {
+                    msg.innerHTML = '<span style="color:#888;">결제가 취소되었습니다.</span>';
+                } else {
+                    msg.innerHTML = `<span style="color:#ef4444;">${err.message || '결제 오류'}</span>`;
+                }
+                btn.disabled = false; btn.textContent = '충전하기';
+            });
         } catch(e) {
-            msg.innerHTML = '<span style="color:#ef4444;">충전 처리 중 오류가 발생했습니다.</span>';
-            btn.disabled = false;
-            btn.textContent = '충전하기';
+            msg.innerHTML = '<span style="color:#ef4444;">결제 처리 중 오류가 발생했습니다.</span>';
+            btn.disabled = false; btn.textContent = '충전하기';
         }
     }
 
@@ -4145,67 +4245,30 @@
         </div>
     </div>
 
-    <!-- 결제 수단 선택 -->
+    <!-- 결제 수단 안내 -->
     <div style="padding:0 28px;">
         <div style="font-size:14px;font-weight:600;color:#fff;margin-bottom:12px;">결제 수단</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
-            <label class="pay-method-card" onclick="selectPayMethod('card')" style="display:flex;align-items:center;gap:10px;padding:14px 16px;background:rgba(59,130,246,0.08);border:2px solid rgba(59,130,246,0.3);border-radius:10px;cursor:pointer;transition:all .2s;">
-                <input type="radio" name="payMethod" value="card" checked style="accent-color:#3b82f6;">
-                <div>
-                    <div style="font-size:13px;font-weight:600;color:#fff;">신용/체크카드</div>
-                    <div style="font-size:11px;color:#888;">VISA, Master, 국내카드</div>
-                </div>
-            </label>
-            <label class="pay-method-card" onclick="selectPayMethod('transfer')" style="display:flex;align-items:center;gap:10px;padding:14px 16px;background:rgba(255,255,255,0.03);border:2px solid rgba(255,255,255,0.08);border-radius:10px;cursor:pointer;transition:all .2s;">
-                <input type="radio" name="payMethod" value="transfer" style="accent-color:#3b82f6;">
-                <div>
-                    <div style="font-size:13px;font-weight:600;color:#fff;">계좌이체</div>
-                    <div style="font-size:11px;color:#888;">실시간 계좌이체</div>
-                </div>
-            </label>
-        </div>
-
-        <!-- 카드 결제 폼 -->
-        <div id="payCardForm">
-            <div style="margin-bottom:10px;">
-                <label style="display:block;font-size:12px;color:#888;margin-bottom:4px;">카드번호</label>
-                <input type="text" id="payCardNumber" placeholder="0000-0000-0000-0000" maxlength="19"
-                    oninput="this.value=this.value.replace(/[^0-9]/g,'').replace(/(.{4})/g,'$1-').slice(0,-1)"
-                    style="width:100%;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:#fff;font-size:14px;letter-spacing:2px;">
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;">
+            <div style="padding:12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);border-radius:10px;text-align:center;">
+                <div style="font-size:20px;margin-bottom:4px;">💳</div>
+                <div style="font-size:11px;color:#aaa;">카드결제</div>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
-                <div>
-                    <label style="display:block;font-size:12px;color:#888;margin-bottom:4px;">유효기간</label>
-                    <input type="text" id="payExpiry" placeholder="MM/YY" maxlength="5"
-                        oninput="this.value=this.value.replace(/[^0-9]/g,'').replace(/^(.{2})/,'$1/').slice(0,5)"
-                        style="width:100%;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:#fff;font-size:14px;">
-                </div>
-                <div>
-                    <label style="display:block;font-size:12px;color:#888;margin-bottom:4px;">CVC</label>
-                    <input type="password" id="payCvc" placeholder="000" maxlength="3"
-                        style="width:100%;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:#fff;font-size:14px;">
-                </div>
+            <div style="padding:12px;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);border-radius:10px;text-align:center;">
+                <div style="font-size:20px;margin-bottom:4px;">🏦</div>
+                <div style="font-size:11px;color:#aaa;">계좌이체</div>
+            </div>
+            <div style="padding:12px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.15);border-radius:10px;text-align:center;">
+                <div style="font-size:20px;margin-bottom:4px;">📱</div>
+                <div style="font-size:11px;color:#aaa;">간편결제</div>
             </div>
         </div>
 
-        <!-- 계좌이체 안내 -->
-        <div id="payTransferForm" style="display:none;">
-            <div style="padding:16px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:10px;">
-                <div style="font-size:13px;font-weight:600;color:#fbbf24;margin-bottom:8px;">입금 안내</div>
-                <div style="font-size:12px;color:#aaa;line-height:1.8;">
-                    은행: <strong style="color:#fff;">카카오뱅크</strong><br>
-                    계좌: <strong style="color:#fff;">3333-00-0000000</strong><br>
-                    예금주: <strong style="color:#fff;">OpenClaw</strong><br>
-                    <span style="color:#f59e0b;">* 입금자명에 라이선스 키 앞 8자리를 기재해주세요</span>
-                </div>
+        <div style="padding:12px 16px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);border-radius:10px;margin-bottom:16px;">
+            <div style="font-size:12px;color:#60a5fa;line-height:1.6;">
+                토스페이먼츠를 통해 안전하게 결제됩니다.<br>
+                카드, 계좌이체, 카카오페이, 네이버페이 등 다양한 결제수단을 지원합니다.
             </div>
         </div>
-
-        <!-- 자동 결제 동의 -->
-        <label style="display:flex;align-items:center;gap:8px;margin:16px 0;cursor:pointer;">
-            <input type="checkbox" id="payAutoAgree" style="accent-color:#3b82f6;width:16px;height:16px;">
-            <span style="font-size:12px;color:#aaa;">매월 자동 결제에 동의합니다 (언제든 해지 가능)</span>
-        </label>
     </div>
 
     <!-- 결제 버튼 -->
@@ -4215,7 +4278,7 @@
         </button>
         <div id="paymentMsg" style="margin-top:10px;font-size:12px;text-align:center;"></div>
         <div style="margin-top:12px;text-align:center;font-size:10px;color:#555;">
-            결제는 SSL 암호화로 안전하게 처리됩니다
+            토스페이먼츠 SSL 암호화 결제 &nbsp;|&nbsp; 언제든 해지 가능
         </div>
     </div>
 

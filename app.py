@@ -2981,6 +2981,172 @@ def _update_env_var(env_path, key, value):
     os.environ[key] = value
 
 
+# ━━━ 토스페이먼츠 결제 연동 ━━━
+
+# 테스트 키 (나중에 .env에서 실제 키로 교체)
+TOSS_CLIENT_KEY = os.getenv("TOSS_CLIENT_KEY", "test_ck_D5GePWvyJnrK0W0k6q8gLzN97Eoq")
+TOSS_SECRET_KEY = os.getenv("TOSS_SECRET_KEY", "test_sk_zXLkKEypNArWmo50nX3lmeaxYG5R")
+
+# 결제 상품 정의
+PAYMENT_PRODUCTS = {
+    # 구독 플랜
+    "plan_starter": {"name": "Starter 월 구독", "amount": 79000, "type": "subscription"},
+    "plan_business": {"name": "Business 월 구독", "amount": 199000, "type": "subscription"},
+    "plan_agency": {"name": "Agency 월 구독", "amount": 449000, "type": "subscription"},
+    # 토큰 충전
+    "token_500": {"name": "토큰 500개", "amount": 15000, "tokens": 500, "type": "token"},
+    "token_1200": {"name": "토큰 1,200개", "amount": 30000, "tokens": 1200, "type": "token"},
+    "token_3000": {"name": "토큰 3,000개", "amount": 60000, "tokens": 3000, "type": "token"},
+    "token_7000": {"name": "토큰 7,000개", "amount": 105000, "tokens": 7000, "type": "token"},
+}
+
+
+@app.route("/api/payment/config")
+def api_payment_config():
+    """프론트엔드에 토스 클라이언트 키 전달"""
+    return jsonify({"clientKey": TOSS_CLIENT_KEY})
+
+
+@app.route("/api/payment/request", methods=["POST"])
+def api_payment_request():
+    """결제 요청 정보 생성 (프론트에서 토스 SDK 호출 전 사용)"""
+    data = request.get_json() or {}
+    product_id = data.get("product_id", "")
+
+    product = PAYMENT_PRODUCTS.get(product_id)
+    if not product:
+        return jsonify({"error": "잘못된 상품입니다."}), 400
+
+    order_id = f"order_{product_id}_{uuid.uuid4().hex[:8]}_{int(time.time())}"
+
+    return jsonify({
+        "orderId": order_id,
+        "orderName": product["name"],
+        "amount": product["amount"],
+        "productId": product_id,
+        "customerKey": license_client.license_key or f"guest_{uuid.uuid4().hex[:8]}",
+    })
+
+
+@app.route("/api/payment/confirm", methods=["POST"])
+def api_payment_confirm():
+    """토스 결제 승인 (프론트에서 결제 성공 후 호출)"""
+    data = request.get_json() or {}
+    payment_key = data.get("paymentKey", "")
+    order_id = data.get("orderId", "")
+    amount = int(data.get("amount", 0))
+
+    if not payment_key or not order_id or not amount:
+        return jsonify({"error": "필수 파라미터 누락"}), 400
+
+    # 토스페이먼츠 결제 승인 API 호출
+    import requests as _requests
+    import base64
+    auth = base64.b64encode(f"{TOSS_SECRET_KEY}:".encode()).decode()
+
+    try:
+        resp = _requests.post(
+            "https://api.tosspayments.com/v1/payments/confirm",
+            json={
+                "paymentKey": payment_key,
+                "orderId": order_id,
+                "amount": amount,
+            },
+            headers={
+                "Authorization": f"Basic {auth}",
+                "Content-Type": "application/json",
+            },
+            timeout=15,
+        )
+        result = resp.json()
+
+        if resp.status_code == 200:
+            # 결제 성공 → 상품 지급
+            product_id = None
+            for pid, prod in PAYMENT_PRODUCTS.items():
+                if prod["amount"] == amount and pid in order_id:
+                    product_id = pid
+                    break
+
+            if product_id:
+                product = PAYMENT_PRODUCTS[product_id]
+                if product["type"] == "token" and license_client.license_key:
+                    # 토큰 충전
+                    tokens = product.get("tokens", 0)
+                    try:
+                        tok_resp = _requests.post(
+                            f"{license_client.server_url}/api/license/tokens/purchase",
+                            json={
+                                "license_key": license_client.license_key,
+                                "tokens": tokens,
+                                "amount": amount,
+                                "payment_key": payment_key,
+                            },
+                            timeout=10,
+                        )
+                        tok_data = tok_resp.json()
+                        if tok_data.get("success"):
+                            license_client.token_balance = tok_data.get("balance", 0)
+                    except Exception:
+                        pass
+
+                add_log(f"[결제] 결제 완료: {product['name']} (₩{amount:,})", "success")
+
+            return jsonify({
+                "success": True,
+                "paymentKey": payment_key,
+                "orderId": order_id,
+                "amount": amount,
+                "status": result.get("status", ""),
+            })
+        else:
+            add_log(f"[결제] 결제 실패: {result.get('message', '알 수 없는 오류')}", "error")
+            return jsonify({
+                "error": result.get("message", "결제 승인 실패"),
+                "code": result.get("code", ""),
+            }), 400
+
+    except Exception as e:
+        add_log(f"[결제] 결제 처리 오류: {str(e)}", "error")
+        return jsonify({"error": f"결제 처리 오류: {str(e)}"}), 500
+
+
+@app.route("/api/payment/success")
+def api_payment_success():
+    """토스 결제 성공 리다이렉트 페이지"""
+    payment_key = request.args.get("paymentKey", "")
+    order_id = request.args.get("orderId", "")
+    amount = request.args.get("amount", "0")
+    return f"""
+    <html><body><script>
+    window.opener && window.opener.postMessage({{
+        type: 'payment_success',
+        paymentKey: '{payment_key}',
+        orderId: '{order_id}',
+        amount: {amount}
+    }}, '*');
+    window.close();
+    </script><p>결제 완료! 이 창은 자동으로 닫힙니다.</p></body></html>
+    """
+
+
+@app.route("/api/payment/fail")
+def api_payment_fail():
+    """토스 결제 실패 리다이렉트 페이지"""
+    code = request.args.get("code", "")
+    message = request.args.get("message", "결제가 취소되었습니다.")
+    return f"""
+    <html><body><script>
+    window.opener && window.opener.postMessage({{
+        type: 'payment_fail',
+        code: '{code}',
+        message: '{message}'
+    }}, '*');
+    window.close();
+    </script><p>결제 실패: {message}</p></body></html>
+    """
+
+
 # 시작 시 라이선스 자동 검증
 if not is_owner_mode():
     _lic_result = license_client.auto_verify()
