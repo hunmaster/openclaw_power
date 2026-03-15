@@ -18,6 +18,7 @@ from models import (
     get_license_by_key,
     list_licenses,
     revoke_license,
+    upgrade_license_plan,
     bind_device,
     unbind_device,
     get_token_balance,
@@ -229,6 +230,34 @@ def api_purchase_tokens():
         "balance": new_balance,
         "purchased": tokens,
         "amount": amount,
+        "payment_id": payment_id,
+    })
+
+
+@app.route("/api/license/plan/upgrade", methods=["POST"])
+def api_upgrade_plan():
+    """구독 결제 완료 후 플랜 업그레이드"""
+    data = request.get_json() or {}
+    license_key = data.get("license_key", "").strip()
+    plan_id = data.get("plan_id", "").strip()
+    payment_id = data.get("payment_id", "")
+    ip = get_client_ip()
+
+    if not license_key or not plan_id or not payment_id:
+        return jsonify({"error": "필수 파라미터 누락 (license_key, plan_id, payment_id)"}), 400
+
+    updated, error = upgrade_license_plan(license_key, plan_id)
+    if error:
+        log_api_call(license_key, "/plan/upgrade", ip, False, error)
+        return jsonify({"error": error}), 400
+
+    log_api_call(license_key, "/plan/upgrade", ip, True,
+                 f"플랜 업그레이드: {plan_id}, payment_id={payment_id}")
+
+    return jsonify({
+        "success": True,
+        "plan": updated.get("plan_display", plan_id),
+        "plan_id": plan_id,
         "payment_id": payment_id,
     })
 

@@ -2647,7 +2647,13 @@ def setup_page():
 
 @app.route("/api/license/status")
 def api_license_status():
-    """현재 라이선스 상태 반환."""
+    """현재 라이선스 상태 반환 (refresh=1이면 서버에서 최신 정보 조회)."""
+    force_refresh = request.args.get("refresh") == "1"
+    if force_refresh and license_client.license_key and not license_client.owner_mode:
+        try:
+            license_client.verify()
+        except Exception:
+            pass
     return jsonify({
         "active": license_client.is_active(),
         "owner_mode": license_client.owner_mode,
@@ -3083,6 +3089,7 @@ def api_payment_confirm():
             if product_id:
                 product = PAYMENT_PRODUCTS[product_id]
                 if product["type"] == "token" and license_client.license_key:
+                    # 토큰 충전
                     tokens = product.get("tokens", 0)
                     try:
                         tok_resp = _requests.post(
@@ -3097,8 +3104,37 @@ def api_payment_confirm():
                         tok_data = tok_resp.json()
                         if tok_data.get("success"):
                             license_client.token_balance = tok_data.get("balance", 0)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f"[결제] 토큰 충전 오류: {e}")
+
+                elif product["type"] == "subscription" and license_client.license_key:
+                    # 구독 플랜 업그레이드
+                    plan_map = {
+                        "plan_starter": "starter",
+                        "plan_business": "business",
+                        "plan_agency": "agency",
+                    }
+                    plan_id = plan_map.get(product_id)
+                    if plan_id:
+                        try:
+                            plan_resp = _requests.post(
+                                f"{license_client.server_url}/api/license/plan/upgrade",
+                                json={
+                                    "license_key": license_client.license_key,
+                                    "plan_id": plan_id,
+                                    "payment_id": payment_id,
+                                },
+                                timeout=10,
+                            )
+                            plan_data = plan_resp.json()
+                            if plan_data.get("success"):
+                                # verify 재호출하여 로컬 캐시 갱신
+                                license_client.verify()
+                                print(f"[결제] 플랜 업그레이드 완료: {plan_data.get('plan')}")
+                            else:
+                                print(f"[결제] 플랜 업그레이드 실패: {plan_data}")
+                        except Exception as e:
+                            print(f"[결제] 플랜 업그레이드 오류: {e}")
 
                 add_log(f"[결제] 결제 완료: {product['name']} (₩{amount:,})", "success")
 

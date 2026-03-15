@@ -260,6 +260,60 @@ def revoke_license(license_id):
     conn.close()
 
 
+def upgrade_license_plan(license_key, new_plan_id, months=1):
+    """라이선스 플랜 업그레이드 (결제 후 호출)"""
+    conn = get_db()
+    lic = conn.execute(
+        "SELECT * FROM licenses WHERE license_key = ?", (license_key,)
+    ).fetchone()
+    if not lic:
+        conn.close()
+        return None, "라이선스를 찾을 수 없습니다."
+
+    plan = conn.execute("SELECT * FROM plans WHERE id = ?", (new_plan_id,)).fetchone()
+    if not plan:
+        conn.close()
+        return None, f"플랜을 찾을 수 없습니다: {new_plan_id}"
+
+    now = datetime.utcnow()
+    is_permanent = plan["is_permanent"]
+    if is_permanent:
+        expires_at = None
+    else:
+        expires_at = (now + timedelta(days=30 * months)).isoformat()
+
+    # 플랜 변경 + 만료일 갱신 + 활성화
+    conn.execute(
+        "UPDATE licenses SET plan_id = ?, expires_at = ?, is_permanent = ?, status = 'active' WHERE id = ?",
+        (new_plan_id, expires_at, is_permanent, lic["id"]),
+    )
+
+    # 토큰 잔액 리필 (새 플랜 기준)
+    new_tokens = plan["tokens_per_month"] if not is_permanent else 999999999
+    existing_balance = conn.execute(
+        "SELECT * FROM token_balance WHERE license_id = ?", (lic["id"],)
+    ).fetchone()
+    if existing_balance:
+        conn.execute(
+            "UPDATE token_balance SET balance = ?, last_refill = ? WHERE license_id = ?",
+            (new_tokens, now.isoformat(), lic["id"]),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO token_balance (license_id, balance, last_refill) VALUES (?, ?, ?)",
+            (lic["id"], new_tokens, now.isoformat()),
+        )
+
+    conn.commit()
+    updated = conn.execute(
+        "SELECT l.*, p.name as plan_name, p.display_name as plan_display "
+        "FROM licenses l JOIN plans p ON l.plan_id = p.id WHERE l.id = ?",
+        (lic["id"],),
+    ).fetchone()
+    conn.close()
+    return dict(updated), None
+
+
 # ─── 디바이스 바인딩 ───
 
 def bind_device(license_id, hardware_id, ip_address=None, hostname=None):
