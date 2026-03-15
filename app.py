@@ -19,7 +19,7 @@ import threading
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
 
-from flask import Flask, render_template, jsonify, request, redirect, url_for
+from flask import Flask, render_template, jsonify, request, redirect, url_for, send_file
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from dotenv import load_dotenv
 
@@ -1322,7 +1322,7 @@ def api_get_settings():
         "SAME_VIDEO_INTERVAL_MIN": s.get("SAME_VIDEO_INTERVAL_MIN", "30"),
         "HEADLESS": s.get("HEADLESS", "false"),
         "ADB_IP_CHANGE_ENABLED": s.get("ADB_IP_CHANGE_ENABLED", "false"),
-        "ADB_PATH": s.get("ADB_PATH", "adb"),
+        "ADB_PATH": s.get("ADB_PATH", r"D:\platform-tools\adb.exe"),
         "ADB_AIRPLANE_WAIT": s.get("ADB_AIRPLANE_WAIT", "4"),
         "ADB_AUTO_ETHERNET": s.get("ADB_AUTO_ETHERNET", "true"),
         "ADB_ETHERNET_NAME": s.get("ADB_ETHERNET_NAME", "이더넷"),
@@ -1471,6 +1471,14 @@ def api_check_connections():
             results["proxy"] = {"ok": False, "message": f"프록시 오류: {str(e)}"}
 
     return jsonify(results)
+
+
+@app.route("/api/adb/install-bat")
+@login_required
+def api_adb_install_bat():
+    """ADB 자동 설치 bat 파일을 다운로드합니다."""
+    bat_path = os.path.join(os.path.dirname(__file__), "install_adb.bat")
+    return send_file(bat_path, as_attachment=True, download_name="install_adb.bat")
 
 
 @app.route("/api/adb/test", methods=["POST"])

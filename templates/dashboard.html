@@ -1451,8 +1451,9 @@
                         <div style="font-weight:700;color:var(--blue);margin-bottom:6px;font-size:12px">설정 가이드</div>
                         <div><b style="color:var(--text)">1.</b> 안드로이드 폰을 USB로 PC에 연결</div>
                         <div><b style="color:var(--text)">2.</b> 폰 설정 > 개발자 옵션 > <b style="color:var(--text)">USB 디버깅 ON</b></div>
-                        <div><b style="color:var(--text)">3.</b> <a href="https://developer.android.com/tools/releases/platform-tools" target="_blank" style="color:var(--blue);text-decoration:underline">Android Platform Tools</a> 다운로드 후 압축 해제</div>
-                        <div><b style="color:var(--text)">4.</b> ADB 경로에 adb.exe 위치 입력 (예: <code style="background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">D:\platform-tools\adb.exe</code>)</div>
+                        <div><b style="color:var(--text)">3.</b> 아래 <b style="color:var(--blue)">ADB 자동 설치</b> 버튼 클릭 → bat 파일 실행 (자동 다운로드+설치)</div>
+                        <div style="margin:6px 0 6px 16px"><button class="btn btn-sm" style="background:var(--blue);color:#fff;font-size:11px;padding:4px 12px" onclick="downloadAdbInstaller()">ADB 자동 설치 (install_adb.bat 다운로드)</button></div>
+                        <div><b style="color:var(--text)">4.</b> ADB 경로에 adb.exe 위치 입력 (기본값: <code style="background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">D:\platform-tools\adb.exe</code>)</div>
                         <div><b style="color:var(--text)">5.</b> 활성화 후 "ADB 연결 테스트" 클릭하여 확인</div>
                         <div style="margin-top:6px;color:#f59e0b;font-size:10px">* IP 변경 = 댓글 작성 시마다 비행기모드 ON/OFF로 자동 IP 변경 (차단 방지)</div>
                     </div>
@@ -1465,7 +1466,7 @@
                     </div>
                     <div class="form-group">
                         <label>ADB 경로 <span style="color:var(--text-dim);font-size:10px">adb.exe 전체 경로</span></label>
-                        <input type="text" id="setAdbPath" value="adb" placeholder="예: D:\platform-tools\adb.exe">
+                        <input type="text" id="setAdbPath" value="D:\platform-tools\adb.exe" placeholder="예: D:\platform-tools\adb.exe">
                     </div>
                     <div class="form-group">
                         <label>비행기모드 대기 (초) <span style="color:var(--text-dim);font-size:10px">IP 변경 후 안정화 대기</span></label>
@@ -2777,10 +2778,15 @@
         document.getElementById('setSmmLikeMax').value = data.SMM_LIKE_AUTO_MAX || '500';
         document.getElementById('setHeadless').value = data.HEADLESS;
         document.getElementById('setAdbEnabled').value = data.ADB_IP_CHANGE_ENABLED || 'false';
-        document.getElementById('setAdbPath').value = data.ADB_PATH || 'adb';
+        document.getElementById('setAdbPath').value = data.ADB_PATH || 'D:\\platform-tools\\adb.exe';
         document.getElementById('setAdbWait').value = data.ADB_AIRPLANE_WAIT || '4';
         document.getElementById('setAdbAutoEthernet').value = data.ADB_AUTO_ETHERNET || 'true';
         document.getElementById('setAdbEthernetName').value = data.ADB_ETHERNET_NAME || '이더넷';
+    }
+
+    // ─── ADB 자동 설치 bat 다운로드 ───
+    function downloadAdbInstaller() {
+        window.location.href = '/api/adb/install-bat';
     }
 
     // ─── ADB 연결 테스트 ───
