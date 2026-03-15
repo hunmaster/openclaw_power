@@ -3877,7 +3877,7 @@
             // PortOne V2 결제 요청
             msg.innerHTML = '<span style="color:#60a5fa;">결제창을 여는 중...</span>';
 
-            const response = await PortOne.requestPayment({
+            const payParams = {
                 storeId: portoneStoreId,
                 channelKey: portoneChannelKey,
                 paymentId: orderData.paymentId,
@@ -3885,7 +3885,12 @@
                 totalAmount: orderData.amount,
                 currency: 'CURRENCY_KRW',
                 payMethod: selectedPayMethod,
-            });
+            };
+            // 토스페이먼츠 간편결제는 easyPay provider 필수
+            if (selectedPayMethod === 'EASY_PAY') {
+                payParams.easyPay = { easyPayProvider: 'TOSSPAY' };
+            }
+            const response = await PortOne.requestPayment(payParams);
 
             // 사용자 취소 또는 에러
             if (response.code) {
