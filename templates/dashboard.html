@@ -329,6 +329,71 @@
         <button class="tab" onclick="switchTab('settings')">설정</button>
         <button class="tab" onclick="switchTab('logs')">실행 로그</button>
         {% if is_owner %}<button class="tab" onclick="switchTab('users')">유저 관리</button>{% endif %}
+        <button class="tab" onclick="showGuidePopup()" style="margin-left:auto;font-size:11px;color:var(--blue);border-color:var(--blue)33" title="사용 가이드">&#9432; 가이드</button>
+    </div>
+
+    <!-- ━━━ 초기 설정 위자드 (setup_completed=false 시 표시) ━━━ -->
+    {% if not setup_completed %}
+    <div id="setupWizard" class="card" style="margin-bottom:20px;border:2px solid var(--accent);position:relative;overflow:hidden">
+        <div style="position:absolute;top:0;left:0;width:100%;height:3px;background:linear-gradient(90deg,var(--accent),var(--blue),var(--accent-light))"></div>
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+            <span style="font-size:24px">&#128640;</span>
+            <div>
+                <h3 style="font-size:16px;margin-bottom:2px">초기 설정을 완료해주세요</h3>
+                <p style="font-size:12px;color:var(--text-dim)">유튜브 댓글 바이럴 자동화를 시작하려면 아래 3단계를 순서대로 완료하세요.</p>
+            </div>
+            <button onclick="dismissSetupWizard()" style="margin-left:auto;background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:18px" title="닫기">&times;</button>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px">
+            <!-- Step 1: Notion API -->
+            <div id="setupStep1" style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:16px;position:relative">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+                    <span style="background:var(--accent);color:#fff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">1</span>
+                    <span style="font-size:13px;font-weight:600">Notion API 연결</span>
+                </div>
+                <p style="font-size:11px;color:var(--text-dim);line-height:1.6;margin-bottom:12px">작업 목록을 관리할 Notion 데이터베이스를 연결합니다.</p>
+                <div class="form-group" style="margin-bottom:8px">
+                    <label style="font-size:11px">Notion API 토큰</label>
+                    <input type="password" id="setupNotionToken" placeholder="ntn_xxxx..." style="font-size:12px">
+                </div>
+                <div class="form-group" style="margin-bottom:12px">
+                    <label style="font-size:11px">데이터베이스 ID</label>
+                    <input type="text" id="setupNotionDbId" placeholder="30d35cfd83d3..." style="font-size:12px">
+                </div>
+                <button class="btn btn-sm btn-primary" onclick="saveSetupNotion()" style="width:100%">저장 및 연결 테스트</button>
+                <div id="setupNotionResult" style="margin-top:8px;font-size:11px"></div>
+            </div>
+
+            <!-- Step 2: 계정 등록 -->
+            <div id="setupStep2" style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:16px">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+                    <span style="background:var(--accent);color:#fff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">2</span>
+                    <span style="font-size:13px;font-weight:600">YouTube 계정 등록</span>
+                </div>
+                <p style="font-size:11px;color:var(--text-dim);line-height:1.6;margin-bottom:12px">댓글을 작성할 Google/YouTube 계정을 등록하세요.</p>
+                <button class="btn btn-sm btn-secondary" onclick="switchTab('accounts')" style="width:100%">계정 관리로 이동</button>
+            </div>
+
+            <!-- Step 3: 첫 실행 -->
+            <div id="setupStep3" style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:16px">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+                    <span style="background:var(--accent);color:#fff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">3</span>
+                    <span style="font-size:13px;font-weight:600">테스트 실행</span>
+                </div>
+                <p style="font-size:11px;color:var(--text-dim);line-height:1.6;margin-bottom:12px">1~2단계 완료 후, 상단 "테스트 1건" 선택 → "실행" 버튼으로 동작을 확인하세요.</p>
+                <button class="btn btn-sm btn-secondary" onclick="dismissSetupWizard()" style="width:100%">설정 완료 &#10004;</button>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- ━━━ 유튜브 댓글 바이럴 가이드 배너 ━━━ -->
+    <div style="background:linear-gradient(135deg,rgba(108,92,231,0.08),rgba(116,185,255,0.08));border:1px solid rgba(108,92,231,0.15);border-radius:12px;padding:10px 18px;margin-bottom:16px;display:flex;align-items:center;gap:10px">
+        <span style="font-size:16px">&#128172;</span>
+        <span style="font-size:12px;color:var(--text-dim);line-height:1.5">
+            <b style="color:var(--accent-light)">댓글 부스터</b>는 유튜브 영상에 자동으로 댓글을 작성하고, 좋아요를 부스팅하여 <b style="color:var(--text)">내 댓글을 상위에 노출</b>시키는 마케팅 자동화 도구입니다.
+        </span>
     </div>
 
     <!-- ━━━ 대시보드 탭 ━━━ -->
@@ -1050,6 +1115,29 @@
             </table>
             </div>
         </div>
+
+        <!-- 활동 로그 -->
+        <div class="card" style="padding:20px;margin-top:20px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                <h3 style="margin:0;font-size:16px">유저 활동 로그</h3>
+                <button class="btn btn-secondary btn-sm" onclick="loadActivityLog()">새로고침</button>
+            </div>
+            <div style="overflow-x:auto;max-height:400px;overflow-y:auto">
+                <table style="width:100%;border-collapse:collapse;font-size:12px">
+                    <thead>
+                        <tr style="border-bottom:1px solid var(--border);color:var(--text-dim);font-size:11px;position:sticky;top:0;background:var(--card)">
+                            <th style="padding:6px 8px;text-align:left">시간</th>
+                            <th style="padding:6px 8px;text-align:left">이메일</th>
+                            <th style="padding:6px 8px;text-align:left">활동</th>
+                            <th style="padding:6px 8px;text-align:left">IP</th>
+                        </tr>
+                    </thead>
+                    <tbody id="activityLogBody">
+                        <tr><td colspan="4" style="padding:12px;text-align:center;color:var(--text-dim)">로딩 중...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
     {% endif %}
 
@@ -1398,8 +1486,15 @@
                             badge = document.createElement('div');
                             badge.id = 'adminModeBadge';
                             badge.style.cssText = 'position:fixed;top:8px;right:8px;background:#22c55e30;color:#4ade80;padding:4px 10px;border-radius:6px;font-size:11px;z-index:9999;border:1px solid #22c55e40;cursor:pointer;';
-                            badge.textContent = 'ADMIN';
-                            badge.title = 'Ctrl+F9로 해제';
+                            badge.textContent = 'ADMIN ✕';
+                            badge.title = '클릭 또는 Ctrl+F9로 관리자 모드 해제';
+                            badge.onclick = async () => {
+                                const key = prompt('관리자 키를 입력하세요 (해제):');
+                                if (!key) return;
+                                const r = await api('/api/admin/toggle', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({admin_key:key}) });
+                                if (r && r.success) location.reload();
+                                else alert(r?.error || '인증 실패');
+                            };
                             document.body.appendChild(badge);
                         }
                     } else {
@@ -1446,6 +1541,146 @@
         // 복사/붙여넣기 이벤트 차단
         document.addEventListener('copy', e => e.preventDefault());
         document.addEventListener('cut', e => e.preventDefault());
+    }
+
+    // ─── 초기 설정 위자드 ───
+    async function saveSetupNotion() {
+        const token = document.getElementById('setupNotionToken').value.trim();
+        const dbId = document.getElementById('setupNotionDbId').value.trim();
+        const resultEl = document.getElementById('setupNotionResult');
+
+        if (!token || !dbId) {
+            resultEl.innerHTML = '<span style="color:var(--red)">API 토큰과 데이터베이스 ID를 모두 입력하세요.</span>';
+            return;
+        }
+
+        resultEl.innerHTML = '<span style="color:var(--text-dim)">저장 및 연결 테스트 중...</span>';
+
+        // 설정 저장
+        const saveRes = await api('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ NOTION_API_TOKEN: token, NOTION_DATABASE_ID: dbId }),
+        });
+
+        if (!saveRes || saveRes.error) {
+            resultEl.innerHTML = `<span style="color:var(--red)">저장 실패: ${saveRes?.error || '오류'}</span>`;
+            return;
+        }
+
+        // 연결 테스트
+        const testRes = await api('/api/check-connections');
+        if (testRes && testRes.notion_api && testRes.notion_api.ok) {
+            resultEl.innerHTML = '<span style="color:var(--green)">&#10004; Notion 연결 성공!</span>';
+            const step1 = document.getElementById('setupStep1');
+            if (step1) step1.style.borderColor = 'var(--green)';
+        } else {
+            resultEl.innerHTML = `<span style="color:var(--yellow)">저장 완료. 연결 확인: ${testRes?.notion_api?.message || '확인 불가'}</span>`;
+        }
+    }
+
+    async function dismissSetupWizard() {
+        const wizard = document.getElementById('setupWizard');
+        if (wizard) {
+            wizard.style.transition = 'opacity 0.3s, max-height 0.3s';
+            wizard.style.opacity = '0';
+            wizard.style.maxHeight = '0';
+            wizard.style.overflow = 'hidden';
+            wizard.style.marginBottom = '0';
+            wizard.style.padding = '0';
+            setTimeout(() => wizard.remove(), 300);
+        }
+        await api('/api/setup/complete', { method: 'POST' });
+    }
+
+    // ─── 사용 가이드 팝업 ───
+    function showGuidePopup() {
+        if (document.getElementById('guideOverlay')) return;
+        const overlay = document.createElement('div');
+        overlay.id = 'guideOverlay';
+        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:10002;display:flex;justify-content:center;align-items:center';
+        overlay.innerHTML = `
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:32px;width:90%;max-width:540px;max-height:80vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,0.5)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+                <h2 style="font-size:18px">&#128214; 사용 가이드</h2>
+                <button onclick="document.getElementById('guideOverlay').remove()" style="background:none;border:none;color:var(--text-dim);font-size:22px;cursor:pointer">&times;</button>
+            </div>
+            <div id="guidePages" style="font-size:13px;line-height:1.8;color:var(--text-dim)"></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:20px">
+                <button id="guidePrev" class="btn btn-sm btn-secondary" onclick="guideNav(-1)" disabled>&#9664; 이전</button>
+                <span id="guidePageNum" style="font-size:12px;color:var(--text-dim)">1/5</span>
+                <button id="guideNext" class="btn btn-sm btn-primary" onclick="guideNav(1)">다음 &#9654;</button>
+            </div>
+        </div>`;
+        document.body.appendChild(overlay);
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+        _guidePageIdx = 0;
+        renderGuidePage();
+    }
+
+    const _guideContents = [
+        {
+            title: '1단계: Notion 데이터베이스 연결',
+            body: `<p><b style="color:var(--text)">Notion API 토큰</b>과 <b style="color:var(--text)">데이터베이스 ID</b>를 설정 탭에서 입력하세요.</p>
+            <p style="margin-top:8px">&#128073; <a href="https://www.notion.so/my-integrations" target="_blank" style="color:var(--blue)">Notion 통합 페이지</a>에서 "새 통합"을 만들고 토큰을 복사합니다.</p>
+            <p style="margin-top:8px">&#128073; 데이터베이스 페이지 URL에서 ID를 복사합니다:<br><code style="font-size:11px;background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px">notion.so/<b style="color:var(--accent-light)">여기가DB_ID</b>?v=...</code></p>
+            <p style="margin-top:8px">&#128073; 데이터베이스에 통합 연결 (공유 > 연결 추가)을 잊지 마세요!</p>`
+        },
+        {
+            title: '2단계: YouTube 계정 등록',
+            body: `<p>"<b style="color:var(--text)">계정 관리</b>" 탭에서 Google/YouTube 계정을 등록합니다.</p>
+            <p style="margin-top:8px">&#128073; 이메일과 비밀번호를 입력하고 "추가" 버튼을 클릭하세요.</p>
+            <p style="margin-top:8px">&#128073; 추가 후 "<b style="color:var(--text)">수동 로그인</b>" 버튼으로 브라우저에서 직접 로그인하면 쿠키가 저장됩니다.</p>
+            <p style="margin-top:8px;color:var(--yellow)">&#9888; 2단계 인증이 켜져 있으면 수동 로그인을 권장합니다.</p>`
+        },
+        {
+            title: '3단계: Notion 작업 목록 준비',
+            body: `<p>Notion 데이터베이스에 댓글 작업을 등록하세요. 필수 컬럼:</p>
+            <ul style="margin:8px 0 0 16px;list-style:disc">
+                <li><b style="color:var(--text)">영상 링크</b> — YouTube URL</li>
+                <li><b style="color:var(--text)">댓글 원고</b> — 작성할 댓글 내용</li>
+                <li><b style="color:var(--text)">상태</b> — "댓글작업전"으로 설정</li>
+            </ul>
+            <p style="margin-top:8px">&#128073; "작업 목록" 탭 > "노션에서 불러오기" 버튼으로 목록을 가져올 수 있습니다.</p>`
+        },
+        {
+            title: '4단계: 테스트 실행',
+            body: `<p>상단 드롭다운에서 "<b style="color:var(--text)">테스트 1건</b>"을 선택하고 "실행" 버튼을 클릭합니다.</p>
+            <p style="margin-top:8px">&#128073; 실행 로그 탭에서 진행 상황을 실시간으로 확인할 수 있습니다.</p>
+            <p style="margin-top:8px">&#128073; 브라우저 모드를 "화면 보이기"로 설정하면 자동화 과정을 눈으로 확인할 수 있습니다.</p>
+            <p style="margin-top:8px;color:var(--green)">&#10004; 정상적으로 댓글이 작성되면 Notion 상태가 "댓글완료"로 바뀝니다.</p>`
+        },
+        {
+            title: '5단계: 좋아요 부스팅 (선택)',
+            body: `<p>댓글 작성 후 "<b style="color:var(--text)">좋아요 부스팅</b>" 기능으로 내 댓글을 상위에 노출시킬 수 있습니다.</p>
+            <p style="margin-top:8px">&#128073; 설정 탭에서 좋아요 기본 수량과 MAX 수량을 조절하세요.</p>
+            <p style="margin-top:8px">&#128073; 상위 댓글보다 좋아요 수가 많으면 자동으로 1등 댓글 노출!</p>
+            <p style="margin-top:12px;padding:10px;background:rgba(108,92,231,0.1);border-radius:8px;font-size:12px">
+                <b style="color:var(--accent-light)">&#128161; 핵심 원리:</b> Notion에 작업 등록 → 자동 댓글 작성 → 좋아요 부스팅 → 상위 댓글 노출 → 홍보 효과!</p>`
+        }
+    ];
+    let _guidePageIdx = 0;
+
+    function renderGuidePage() {
+        const page = _guideContents[_guidePageIdx];
+        document.getElementById('guidePages').innerHTML = `
+            <h3 style="font-size:15px;color:var(--text);margin-bottom:12px">${page.title}</h3>
+            ${page.body}`;
+        document.getElementById('guidePageNum').textContent = `${_guidePageIdx + 1}/${_guideContents.length}`;
+        document.getElementById('guidePrev').disabled = _guidePageIdx === 0;
+        const nextBtn = document.getElementById('guideNext');
+        if (_guidePageIdx === _guideContents.length - 1) {
+            nextBtn.textContent = '완료 ✓';
+            nextBtn.onclick = () => document.getElementById('guideOverlay').remove();
+        } else {
+            nextBtn.innerHTML = '다음 &#9654;';
+            nextBtn.onclick = () => guideNav(1);
+        }
+    }
+
+    function guideNav(dir) {
+        _guidePageIdx = Math.max(0, Math.min(_guideContents.length - 1, _guidePageIdx + dir));
+        renderGuidePage();
     }
 
     // ─── 초기 셋업 완료 플래그 ───
@@ -4442,6 +4677,31 @@
         }
     }
 
+    async function loadActivityLog() {
+        const tbody = document.getElementById('activityLogBody');
+        if (!tbody) return;
+        tbody.innerHTML = '<tr><td colspan="4" style="padding:12px;text-align:center;color:var(--text-dim)">로딩 중...</td></tr>';
+        try {
+            const data = await api('/api/admin/activity-log?limit=200');
+            if (!data || data.error) { tbody.innerHTML = '<tr><td colspan="4" style="padding:12px;text-align:center;color:var(--red)">로드 실패</td></tr>'; return; }
+            const logs = data.logs || [];
+            if (!logs.length) { tbody.innerHTML = '<tr><td colspan="4" style="padding:12px;text-align:center;color:var(--text-dim)">활동 로그가 없습니다.</td></tr>'; return; }
+
+            const actionLabels = { register: '회원가입', login: '로그인', logout: '로그아웃', deactivate: '탈퇴/비활성화' };
+            const actionColors = { register: '#22c55e', login: '#60a5fa', logout: '#888', deactivate: '#ef4444' };
+            tbody.innerHTML = logs.map(l => `
+                <tr style="border-bottom:1px solid var(--border)22">
+                    <td style="padding:5px 8px;white-space:nowrap">${l.created_at ? new Date(l.created_at).toLocaleString('ko-KR', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '-'}</td>
+                    <td style="padding:5px 8px">${l.email || '-'}</td>
+                    <td style="padding:5px 8px"><span style="color:${actionColors[l.action]||'#888'};font-weight:600">${actionLabels[l.action]||l.action}</span></td>
+                    <td style="padding:5px 8px;color:var(--text-dim);font-family:monospace;font-size:11px">${l.ip_address || '-'}</td>
+                </tr>
+            `).join('');
+        } catch(e) {
+            tbody.innerHTML = '<tr><td colspan="4" style="padding:12px;text-align:center;color:var(--red)">로드 실패</td></tr>';
+        }
+    }
+
     async function changeUserPlan(userId, newPlan) {
         try {
             const res = await api('/api/admin/update-user', {
@@ -4569,7 +4829,7 @@
     switchTab = function(tab) {
         origSwitchTab(tab);
         if (tab === 'mypage') loadMypage();
-        if (tab === 'users') loadUsers();
+        if (tab === 'users') { loadUsers(); loadActivityLog(); }
     };
 </script>
 

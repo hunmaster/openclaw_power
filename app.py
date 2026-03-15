@@ -52,7 +52,7 @@ app.config["REMEMBER_COOKIE_DURATION"] = timedelta(days=30)
 
 os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"), exist_ok=True)
 
-from src.models import db, User
+from src.models import db, User, UserSettings, YouTubeAccount, UserActivityLog
 db.init_app(app)
 
 login_manager = LoginManager()
@@ -86,13 +86,19 @@ with app.app_context():
             ("plan", "VARCHAR(50) DEFAULT 'Free'"),
             ("agreed_terms", "BOOLEAN DEFAULT 0"),
             ("agreed_at", "DATETIME"),
+            ("setup_completed", "BOOLEAN DEFAULT 0"),
         ]
         for col_name, col_def in _new_cols:
             if col_name not in _existing_cols:
                 _cursor.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_def}")
+        # youtube_accounts에 account_password 컬럼 추가
+        _cursor.execute("PRAGMA table_info(youtube_accounts)")
+        _yt_cols = {row[1] for row in _cursor.fetchall()}
+        if _yt_cols and "account_password" not in _yt_cols:
+            _cursor.execute("ALTER TABLE youtube_accounts ADD COLUMN account_password VARCHAR(500)")
         _conn.commit()
         _conn.close()
-    # 새 테이블도 생성 (youtube_accounts, comment_tracking)
+    # 새 테이블도 생성 (youtube_accounts, comment_tracking, user_settings)
     db.create_all()
 
 # 글로벌 상태
@@ -338,6 +344,14 @@ def api_register():
     user.agreed_terms = True
     user.agreed_at = datetime.utcnow()
     db.session.add(user)
+    db.session.flush()  # ID 생성
+
+    # 활동 로그
+    log = UserActivityLog(
+        user_id=user.id, email=email, action="register",
+        ip_address=request.remote_addr,
+    )
+    db.session.add(log)
     db.session.commit()
 
     login_user(user, remember=True)
@@ -356,6 +370,11 @@ def api_login():
         return jsonify({"error": "이메일 또는 비밀번호가 올바르지 않습니다."}), 401
 
     user.last_login = datetime.utcnow()
+    log = UserActivityLog(
+        user_id=user.id, email=email, action="login",
+        ip_address=request.remote_addr,
+    )
+    db.session.add(log)
     db.session.commit()
 
     login_user(user, remember=True)
@@ -366,6 +385,12 @@ def api_login():
 @login_required
 def api_logout():
     """로그아웃."""
+    log = UserActivityLog(
+        user_id=current_user.id, email=current_user.email, action="logout",
+        ip_address=request.remote_addr,
+    )
+    db.session.add(log)
+    db.session.commit()
     logout_user()
     return jsonify({"success": True})
 
@@ -397,10 +422,23 @@ def api_bind_license():
 @login_required
 def dashboard():
     """메인 대시보드."""
-    return render_template("dashboard.html", is_owner=_admin_view_active)
+    return render_template(
+        "dashboard.html",
+        is_owner=_admin_view_active,
+        setup_completed=current_user.setup_completed,
+    )
 
 
 # ──────────────────────────── API 라우트 ────────────────────────────
+
+@app.route("/api/setup/complete", methods=["POST"])
+@login_required
+def api_setup_complete():
+    """초기 설정 완료 마킹."""
+    current_user.setup_completed = True
+    db.session.commit()
+    return jsonify({"success": True})
+
 
 @app.route("/api/loading-status")
 def api_loading_status():
@@ -1001,6 +1039,28 @@ def api_smm_balance():
         return jsonify({"error": str(e)}), 500
 
 
+def _get_or_create_user_settings(user_id):
+    """유저 설정 객체를 반환합니다. 없으면 생성합니다."""
+    us = UserSettings.query.filter_by(user_id=user_id).first()
+    if not us:
+        us = UserSettings(user_id=user_id, settings_json="{}")
+        db.session.add(us)
+        db.session.commit()
+    return us
+
+
+def _get_user_setting(user_id, key, default=None):
+    """유저 개별 설정값을 반환합니다. 유저 설정 → .env 기본값 순서로 폴백."""
+    us = UserSettings.query.filter_by(user_id=user_id).first()
+    if us:
+        settings = us.get_settings()
+        val = settings.get(key)
+        if val:
+            return val
+    # 폴백: .env 또는 기본값
+    return os.getenv(key, default or UserSettings.DEFAULTS.get(key, ""))
+
+
 def _mask_key(value, visible=4):
     """API 키를 마스킹합니다. 앞 4자만 보여줌."""
     if not value or len(value) <= visible:
@@ -1104,88 +1164,84 @@ def _calculate_dynamic_likes(top_likes, default_qty):
 
 
 @app.route("/api/settings", methods=["GET"])
+@login_required
 def api_get_settings():
-    """현재 설정값을 반환합니다."""
+    """현재 설정값을 반환합니다 (유저별 설정 우선, .env 폴백)."""
+    us = _get_or_create_user_settings(current_user.id)
+    s = us.get_settings()
     return jsonify({
-        "NOTION_API_TOKEN": _mask_key(os.getenv("NOTION_API_TOKEN", "")),
-        "NOTION_DATABASE_ID": os.getenv("NOTION_DATABASE_ID", ""),
+        "NOTION_API_TOKEN": _mask_key(s.get("NOTION_API_TOKEN", "")),
+        "NOTION_DATABASE_ID": s.get("NOTION_DATABASE_ID", ""),
         "SMM_API_KEY": _mask_key(os.getenv("SMM_API_KEY", "")),
         "SMM_ENABLED": os.getenv("SMM_ENABLED", "false"),
         "SMM_LIKE_SERVICE_ID": os.getenv("SMM_LIKE_SERVICE_ID", "4001"),
-        "SMM_LIKE_QUANTITY": os.getenv("SMM_LIKE_QUANTITY", "20"),
-        "SMM_LIKE_AUTO_MAX": os.getenv("SMM_LIKE_AUTO_MAX", "500"),
-        "MAX_COMMENTS_PER_DAY": os.getenv("MAX_COMMENTS_PER_DAY", "20"),
-        "COMMENT_INTERVAL_SEC": os.getenv("COMMENT_INTERVAL_SEC", "180"),
-        "SAME_VIDEO_INTERVAL_MIN": os.getenv("SAME_VIDEO_INTERVAL_MIN", "30"),
-        "HEADLESS": os.getenv("HEADLESS", "false"),
-        "ADB_IP_CHANGE_ENABLED": os.getenv("ADB_IP_CHANGE_ENABLED", "false"),
-        "ADB_PATH": os.getenv("ADB_PATH", "adb"),
-        "ADB_AIRPLANE_WAIT": os.getenv("ADB_AIRPLANE_WAIT", "4"),
-        "ADB_AUTO_ETHERNET": os.getenv("ADB_AUTO_ETHERNET", "true"),
-        "ADB_ETHERNET_NAME": os.getenv("ADB_ETHERNET_NAME", "이더넷"),
+        "SMM_LIKE_QUANTITY": s.get("SMM_LIKE_QUANTITY", "20"),
+        "SMM_LIKE_AUTO_MAX": s.get("SMM_LIKE_AUTO_MAX", "500"),
+        "MAX_COMMENTS_PER_DAY": s.get("MAX_COMMENTS_PER_DAY", "20"),
+        "COMMENT_INTERVAL_SEC": s.get("COMMENT_INTERVAL_SEC", "180"),
+        "SAME_VIDEO_INTERVAL_MIN": s.get("SAME_VIDEO_INTERVAL_MIN", "30"),
+        "HEADLESS": s.get("HEADLESS", "false"),
+        "ADB_IP_CHANGE_ENABLED": s.get("ADB_IP_CHANGE_ENABLED", "false"),
+        "ADB_PATH": s.get("ADB_PATH", "adb"),
+        "ADB_AIRPLANE_WAIT": s.get("ADB_AIRPLANE_WAIT", "4"),
+        "ADB_AUTO_ETHERNET": s.get("ADB_AUTO_ETHERNET", "true"),
+        "ADB_ETHERNET_NAME": s.get("ADB_ETHERNET_NAME", "이더넷"),
     })
 
 
 @app.route("/api/settings", methods=["POST"])
+@login_required
 def api_save_settings():
-    """설정을 .env 파일에 저장합니다."""
+    """설정을 유저별 DB에 저장합니다. Owner용 SMM 설정만 .env에도 저장."""
     try:
         data = request.get_json()
         if not data:
             return jsonify({"error": "데이터가 없습니다."}), 400
 
-        # 저장 가능한 키 목록
-        allowed_keys = {
+        # 유저별 저장 가능한 키 (DB에 저장)
+        user_keys = {
             "NOTION_API_TOKEN", "NOTION_DATABASE_ID",
-            "SMM_API_KEY", "SMM_ENABLED", "SMM_LIKE_SERVICE_ID", "SMM_LIKE_QUANTITY",
+            "SMM_LIKE_QUANTITY", "SMM_LIKE_AUTO_MAX",
             "MAX_COMMENTS_PER_DAY", "COMMENT_INTERVAL_SEC", "SAME_VIDEO_INTERVAL_MIN",
             "HEADLESS",
             "ADB_IP_CHANGE_ENABLED", "ADB_PATH", "ADB_AIRPLANE_WAIT",
             "ADB_AUTO_ETHERNET", "ADB_ETHERNET_NAME",
         }
+        # Owner 전용 글로벌 설정 (.env에도 저장)
+        owner_keys = {"SMM_API_KEY", "SMM_ENABLED", "SMM_LIKE_SERVICE_ID"}
 
-        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-
-        # 기존 .env 파일 읽기
-        env_lines = []
-        if os.path.exists(env_path):
-            with open(env_path, "r", encoding="utf-8") as f:
-                env_lines = f.readlines()
-
-        # 업데이트할 키-값 수집 (마스킹된 값은 건너뜀)
-        updates = {}
+        # 유저 설정 업데이트
+        us = _get_or_create_user_settings(current_user.id)
+        user_updates = {}
         for key, value in data.items():
-            if key not in allowed_keys:
+            if key not in user_keys:
                 continue
-            # 마스킹된 값(***포함)은 기존 값 유지
             if "*" in str(value):
                 continue
-            updates[key] = str(value)
+            user_updates[key] = str(value)
 
-        # .env 파일 업데이트
-        updated_keys = set()
-        new_lines = []
-        for line in env_lines:
-            stripped = line.strip()
-            if stripped and not stripped.startswith("#") and "=" in stripped:
-                key = stripped.split("=", 1)[0].strip()
-                if key in updates:
-                    new_lines.append(f"{key}={updates[key]}\n")
-                    updated_keys.add(key)
-                    # os.environ도 갱신
-                    os.environ[key] = updates[key]
+        if user_updates:
+            us.update_settings(user_updates)
+            db.session.commit()
+            # os.environ도 갱신 (자동화 엔진 호환)
+            for k, v in user_updates.items():
+                os.environ[k] = v
+
+        # Owner 전용 글로벌 설정은 .env에도 저장
+        if _admin_view_active:
+            env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+            for key, value in data.items():
+                if key not in owner_keys:
                     continue
-            new_lines.append(line)
+                if "*" in str(value):
+                    continue
+                _update_env_var(env_path, key, str(value))
 
-        # 새로운 키 추가 (기존에 없던 키)
-        for key, value in updates.items():
-            if key not in updated_keys:
-                new_lines.append(f"{key}={value}\n")
-                os.environ[key] = value
-
-        # .env 파일 저장
-        with open(env_path, "w", encoding="utf-8") as f:
-            f.writelines(new_lines)
+        # Notion 관련 설정이 바뀌었으면 setup_completed 체크
+        if "NOTION_API_TOKEN" in user_updates and user_updates["NOTION_API_TOKEN"]:
+            if not current_user.setup_completed:
+                current_user.setup_completed = True
+                db.session.commit()
 
         return jsonify({"message": "설정이 저장되었습니다."})
     except Exception as e:
@@ -1342,8 +1398,16 @@ def api_adb_test():
 
 
 @app.route("/api/accounts", methods=["GET"])
+@login_required
 def api_get_accounts():
-    """계정 목록을 반환합니다."""
+    """계정 목록을 반환합니다 (유저별 DB 우선, 레거시 파일 폴백)."""
+    # DB에서 유저의 계정 목록 조회
+    db_accounts = YouTubeAccount.query.filter_by(user_id=current_user.id).all()
+    if db_accounts:
+        safe_accounts = [acc.to_dict() for acc in db_accounts]
+        return jsonify({"accounts": safe_accounts})
+
+    # 레거시: 파일 기반 계정 (마이그레이션 전)
     accounts = load_accounts()
     safe_accounts = []
     for acc in accounts:
@@ -1356,55 +1420,66 @@ def api_get_accounts():
 
 
 @app.route("/api/accounts", methods=["POST"])
+@login_required
 def api_add_account():
-    """계정을 추가합니다."""
+    """계정을 추가합니다 (유저별 DB)."""
     try:
         data = request.get_json()
         if not data or not data.get("email") or not data.get("password"):
             return jsonify({"error": "이메일과 비밀번호는 필수입니다."}), 400
 
-        accounts = load_accounts()
-        new_account = {
-            "email": data["email"],
-            "password": data["password"],
-            "account_type": data.get("account_type", "sub"),
-            "label": data.get("label", data["email"].split("@")[0]),
-        }
+        email = data["email"]
+        # DB에서 중복 확인
+        existing = YouTubeAccount.query.filter_by(
+            user_id=current_user.id, account_email=email
+        ).first()
+        if existing:
+            return jsonify({"error": "이미 등록된 이메일입니다."}), 409
 
-        # 중복 확인
-        for acc in accounts:
-            if acc.get("email") == new_account["email"]:
-                return jsonify({"error": "이미 등록된 이메일입니다."}), 409
+        new_acc = YouTubeAccount(
+            user_id=current_user.id,
+            account_email=email,
+            account_password=data["password"],
+            account_type=data.get("account_type", "sub"),
+            label=data.get("label", email.split("@")[0]),
+        )
+        db.session.add(new_acc)
+        db.session.commit()
 
-        accounts.append(new_account)
-        _save_accounts(accounts)
-        return jsonify({"message": "계정이 추가되었습니다.", "account": {
-            "email": new_account["email"],
-            "label": new_account["label"],
-            "account_type": new_account["account_type"],
-        }})
+        # 레거시 파일에도 동기화 (자동화 엔진 호환)
+        _sync_accounts_to_file(current_user.id)
+
+        return jsonify({"message": "계정이 추가되었습니다.", "account": new_acc.to_dict()})
     except Exception as e:
+        db.session.rollback()
         return jsonify({"error": f"계정 추가 중 오류: {str(e)}"}), 500
 
 
 @app.route("/api/accounts/<email>", methods=["DELETE"])
+@login_required
 def api_delete_account(email):
-    """계정을 삭제합니다."""
+    """계정을 삭제합니다 (유저별 DB)."""
     try:
-        accounts = load_accounts()
-        original_len = len(accounts)
-        accounts = [a for a in accounts if a.get("email") != email]
-
-        if len(accounts) == original_len:
+        acc = YouTubeAccount.query.filter_by(
+            user_id=current_user.id, account_email=email
+        ).first()
+        if not acc:
             return jsonify({"error": "해당 계정을 찾을 수 없습니다."}), 404
 
-        _save_accounts(accounts)
+        db.session.delete(acc)
+        db.session.commit()
+
+        # 레거시 파일에도 동기화
+        _sync_accounts_to_file(current_user.id)
+
         return jsonify({"message": f"계정 {email}이 삭제되었습니다."})
     except Exception as e:
+        db.session.rollback()
         return jsonify({"error": f"계정 삭제 중 오류: {str(e)}"}), 500
 
 
 @app.route("/api/accounts/test-login", methods=["POST"])
+@login_required
 def api_test_login():
     """계정의 YouTube 로그인을 테스트합니다."""
     import time as _time
@@ -1415,19 +1490,13 @@ def api_test_login():
         return jsonify({"error": "이메일이 필요합니다."}), 400
 
     email = data["email"]
-    accounts = load_accounts()
-    account = None
-    for acc in accounts:
-        if acc.get("email") == email:
-            account = acc
-            break
+    account = _find_account(current_user.id, email)
 
     if not account:
         return jsonify({"error": "해당 계정을 찾을 수 없습니다."}), 404
 
     start_time = _time.time()
     bot = YouTubeBot()
-    # 테스트는 headless로 강제
     bot.headless = True
 
     try:
@@ -1457,6 +1526,7 @@ manual_login_bot = None
 
 
 @app.route("/api/accounts/manual-login", methods=["POST"])
+@login_required
 def api_manual_login():
     """수동 로그인 - 브라우저를 열어 사용자가 직접 로그인합니다."""
     global manual_login_bot
@@ -1480,12 +1550,7 @@ def api_manual_login():
         manual_login_state["status"] = "idle"
 
     email = data["email"]
-    accounts = load_accounts()
-    account = None
-    for acc in accounts:
-        if acc.get("email") == email:
-            account = acc
-            break
+    account = _find_account(current_user.id, email)
 
     if not account:
         return jsonify({"error": "해당 계정을 찾을 수 없습니다."}), 404
@@ -1579,18 +1644,12 @@ def api_manual_login_confirm():
 
 
 @app.route("/api/accounts/login-status/<email>")
+@login_required
 def api_login_status(email):
     """계정의 저장된 쿠키 상태를 확인합니다."""
-    from src.youtube_bot import YouTubeBot
     import re as _re
 
-    accounts = load_accounts()
-    account = None
-    for acc in accounts:
-        if acc.get("email") == email:
-            account = acc
-            break
-
+    account = _find_account(current_user.id, email)
     if not account:
         return jsonify({"has_cookies": False, "message": "계정 없음"})
 
@@ -1614,6 +1673,25 @@ def _save_accounts(accounts):
     os.makedirs(os.path.dirname(accounts_file), exist_ok=True)
     with open(accounts_file, "w", encoding="utf-8") as f:
         json.dump(accounts, f, indent=2, ensure_ascii=False)
+
+
+def _find_account(user_id, email):
+    """유저의 계정을 DB에서 찾고, 없으면 레거시 파일에서 찾습니다."""
+    db_acc = YouTubeAccount.query.filter_by(user_id=user_id, account_email=email).first()
+    if db_acc:
+        return db_acc.to_account_dict()
+    # 레거시 폴백
+    for acc in load_accounts():
+        if acc.get("email") == email:
+            return acc
+    return None
+
+
+def _sync_accounts_to_file(user_id):
+    """유저 DB 계정을 레거시 파일로 동기화 (자동화 엔진 호환)."""
+    db_accounts = YouTubeAccount.query.filter_by(user_id=user_id).all()
+    accounts = [acc.to_account_dict() for acc in db_accounts]
+    _save_accounts(accounts)
 
 
 # ──────────────────────────── 스마트 스케줄러 ────────────────────────────
@@ -2976,6 +3054,22 @@ def api_admin_users():
         } for u in users],
         "total": len(users),
         "plans": User.VALID_PLANS,
+    })
+
+
+@app.route("/api/admin/activity-log")
+def api_admin_activity_log():
+    """관리자용: 유저 활동 로그 조회."""
+    if not _admin_view_active:
+        return jsonify({"error": "관리자 권한이 필요합니다."}), 403
+
+    limit = request.args.get("limit", 100, type=int)
+    logs = UserActivityLog.query.order_by(
+        UserActivityLog.created_at.desc()
+    ).limit(limit).all()
+    return jsonify({
+        "logs": [log.to_dict() for log in logs],
+        "total": len(logs),
     })
 
 
