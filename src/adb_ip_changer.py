@@ -157,13 +157,9 @@ class ADBIPChanger:
         console.print("[yellow]비행기모드 OFF...[/yellow]")
         self._run_adb("shell", "cmd connectivity airplane-mode disable")
 
-        # 네트워크 재연결 대기
+        # 네트워크 재연결 대기 (확인 기반)
         console.print("[yellow]네트워크 재연결 대기 중...[/yellow]")
-        time.sleep(self.airplane_wait)
-
-        # 새 IP 확인
-        new_ip = self.get_current_ip()
-        console.print(f"[blue]새 IP: {new_ip or '확인 불가'}[/blue]")
+        new_ip = self._wait_for_network(max_wait=15)
 
         if old_ip and new_ip and old_ip != new_ip:
             console.print(f"[green]IP 변경 성공: {old_ip} → {new_ip}[/green]")
@@ -174,6 +170,36 @@ class ADBIPChanger:
         else:
             console.print("[yellow]IP 확인 불가 - 비행기모드 토글은 완료됨[/yellow]")
             return True, "비행기모드 토글 완료 (IP 확인 불가)"
+
+    def _wait_for_network(self, max_wait=15):
+        """네트워크가 복구될 때까지 대기합니다. IP를 반환합니다."""
+        start = time.time()
+        attempt = 0
+        while time.time() - start < max_wait:
+            attempt += 1
+            ip = self.get_current_ip()
+            if ip:
+                elapsed = time.time() - start
+                console.print(f"[green]네트워크 복구 확인 ({elapsed:.1f}초, {attempt}회 시도) IP: {ip}[/green]")
+                return ip
+            wait_sec = min(2, 0.5 * (2 ** attempt))  # 0.5, 1, 2, 2, 2...
+            console.print(f"[yellow]  네트워크 대기 중... ({attempt}회, {wait_sec:.1f}초 후 재시도)[/yellow]")
+            time.sleep(wait_sec)
+        console.print(f"[red]네트워크 복구 타임아웃 ({max_wait}초)[/red]")
+        return None
+
+    def force_airplane_off(self):
+        """비행기모드를 강제로 OFF합니다 (중지 시 안전 보장)."""
+        console.print("[yellow]비행기모드 강제 OFF...[/yellow]")
+        self._run_adb("shell", "cmd connectivity airplane-mode disable")
+        # 네트워크 복구 대기
+        ip = self._wait_for_network(max_wait=10)
+        if ip:
+            console.print(f"[green]비행기모드 OFF 완료, IP: {ip}[/green]")
+            return True, f"비행기모드 OFF, IP: {ip}"
+        else:
+            console.print("[yellow]비행기모드 OFF 완료 (IP 확인 불가)[/yellow]")
+            return True, "비행기모드 OFF (IP 확인 불가)"
 
     def get_status(self):
         """ADB IP 변경 모듈 상태를 반환합니다."""

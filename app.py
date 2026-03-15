@@ -442,6 +442,7 @@ def api_status():
             eta["eta_time"] = finish_time.strftime("%H:%M")
 
     state["eta"] = eta
+    state["stopping"] = automation_state.get("stopping", False)
     return jsonify(state)
 
 
@@ -836,10 +837,27 @@ def api_run():
 
 @app.route("/api/stop", methods=["POST"])
 def api_stop():
-    """자동화를 중지합니다."""
+    """자동화를 안전하게 중지합니다.
+    현재 작업이 끝난 후 종료되며, 비행기모드 ON 상태면 OFF 후 종료합니다.
+    """
     automation_state["running"] = False
-    add_log("사용자가 자동화를 중지했습니다.", "warning")
-    return jsonify({"message": "중지 요청이 전송되었습니다."})
+    automation_state["stopping"] = True
+    add_log("중지 요청됨 - 현재 작업 완료 후 안전하게 종료합니다...", "warning")
+
+    # 비행기모드가 ON 상태일 수 있으므로 안전하게 OFF
+    try:
+        adb_changer = ADBIPChanger()
+        if adb_changer.enabled:
+            add_log("비행기모드 안전 해제 중...", "info")
+            adb_changer.force_airplane_off()
+            add_log("비행기모드 OFF 확인 완료", "success")
+    except Exception as e:
+        add_log(f"비행기모드 해제 중 오류 (수동 확인 필요): {e}", "warning")
+
+    return jsonify({
+        "message": "중지 요청이 전송되었습니다. 현재 작업 완료 후 안전하게 종료됩니다.",
+        "safe_stop": True,
+    })
 
 
 @app.route("/api/reply/run", methods=["POST"])
@@ -1643,6 +1661,23 @@ def _schedule_tasks(tasks):
 
 # ──────────────────────────── 자동화 실행 ────────────────────────────
 
+def _ensure_network(adb_changer, timeout=15):
+    """네트워크 연결을 확인하고, 끊어져 있으면 비행기모드 OFF 후 복구 대기합니다."""
+    if not adb_changer or not adb_changer.enabled:
+        return True
+    ip = adb_changer.get_current_ip()
+    if ip:
+        return True
+    add_log("네트워크 끊김 감지 - 비행기모드 OFF 및 복구 대기 중...", "warning")
+    adb_changer.force_airplane_off()
+    ip = adb_changer._wait_for_network(max_wait=timeout)
+    if ip:
+        add_log(f"네트워크 복구 완료: {ip}", "success")
+        return True
+    add_log("네트워크 복구 실패 - 계속 진행합니다", "warning")
+    return False
+
+
 def _run_automation(limit=0, selected_ids=None):
     """백그라운드에서 자동화를 실행합니다. limit>0이면 해당 건수만 테스트 실행."""
     import time
@@ -1841,6 +1876,7 @@ def _run_automation(limit=0, selected_ids=None):
 
                     # ── 2단계: 즉시 노션에 댓글완료 + URL 반영 ──
                     automation_state["current_task"] = f"[2/3 노션반영] {task_url_short}"
+                    _ensure_network(adb_changer)  # 네트워크 확인 후 API 호출
                     add_log("[2/3 노션 반영 중] 상태→댓글완료, 댓글 URL 저장...", "info")
                     notion_ok, notion_err = notion.update_task_result(task["page_id"], comment_url, status="댓글완료")
                     if notion_ok:
@@ -1984,6 +2020,15 @@ def _run_automation(limit=0, selected_ids=None):
     except Exception as e:
         add_log(f"치명적 오류: {str(e)}", "error")
     finally:
+        # 비행기모드 안전 해제 (ON 상태로 남아있을 수 있음)
+        try:
+            _adb = ADBIPChanger()
+            if _adb.enabled:
+                add_log("비행기모드 안전 해제 확인 중...", "info")
+                _adb.force_airplane_off()
+        except Exception as e:
+            add_log(f"비행기모드 해제 실패: {e}", "warning")
+
         # ADB IP 변경 사용 시 유선 인터넷 복원
         if _ethernet_disabled:
             add_log("유선 인터넷 복원 중...", "info")
@@ -1997,6 +2042,7 @@ def _run_automation(limit=0, selected_ids=None):
         if not automation_state.get("full_auto"):
             automation_state["running"] = False
             automation_state["current_task"] = None
+            automation_state["stopping"] = False
 
 
 def _run_full_auto():
