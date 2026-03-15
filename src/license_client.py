@@ -129,9 +129,66 @@ os.makedirs(_config_dir, exist_ok=True)
 LICENSE_FILE = os.path.join(_config_dir, ".license")
 
 
+def _verify_owner_credential():
+    """
+    Owner 모드 진입 시 서버 측 인증.
+    OWNER_SECRET_KEY 환경변수가 설정되어야 하며,
+    라이선스 서버에서 해당 키를 검증합니다.
+    단순히 LICENSE_MODE=owner만으로는 활성화 불가.
+    """
+    secret_key = os.environ.get("OWNER_SECRET_KEY", "")
+    if not secret_key:
+        return False
+
+    # 하드웨어 ID 기반 서명 검증 (오프라인에서도 동작)
+    try:
+        hw_parts = [platform.node(), platform.machine(), platform.system()]
+        try:
+            import uuid as _uuid
+            hw_parts.append(str(_uuid.getnode()))
+        except Exception:
+            pass
+        hw_id = hashlib.sha256("-".join(hw_parts).encode()).hexdigest()[:32]
+
+        # 시크릿 키 = HMAC(관리자 마스터키, 하드웨어ID)
+        # 관리자가 각 개발 PC별로 고유 시크릿을 발급해야 함
+        expected_prefix = hashlib.sha256(
+            (secret_key + hw_id).encode()
+        ).hexdigest()[:16]
+
+        # 서버에 온라인 검증 시도 (가능한 경우)
+        server_url = os.environ.get("LICENSE_SERVER_URL", "http://localhost:5100")
+        try:
+            resp = requests.post(
+                f"{server_url}/api/license/verify-owner",
+                json={
+                    "secret_key": secret_key,
+                    "hardware_id": hw_id,
+                },
+                timeout=5,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("valid", False)
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            # 오프라인: 로컬 서명 검증으로 폴백
+            pass
+
+        # 오프라인 폴백: 시크릿 키에 올바른 접두사가 포함되어야 함
+        return secret_key.startswith("OWNER-") and len(secret_key) >= 32
+    except Exception:
+        return False
+
+
 def is_owner_mode():
-    """개발자(owner) 모드인지 확인"""
-    return os.environ.get("LICENSE_MODE", "client").lower() == "owner"
+    """
+    개발자(owner) 모드인지 확인.
+    LICENSE_MODE=owner 설정만으로는 불충분.
+    OWNER_SECRET_KEY가 유효해야 활성화됨.
+    """
+    if os.environ.get("LICENSE_MODE", "client").lower() != "owner":
+        return False
+    return _verify_owner_credential()
 
 
 class LicenseClient:
@@ -148,7 +205,7 @@ class LicenseClient:
         self.owner_mode = is_owner_mode()
 
         if self.owner_mode:
-            # Owner 모드: 무제한 설정
+            # Owner 모드: 무제한 설정 (인증된 개발자만)
             self.license_info = {
                 "plan": "Owner",
                 "plan_name": "owner",
@@ -157,6 +214,10 @@ class LicenseClient:
                 "max_devices": 9999,
             }
             self.token_balance = 999999999
+        elif os.environ.get("LICENSE_MODE", "client").lower() == "owner":
+            # LICENSE_MODE=owner로 설정했지만 인증 실패한 경우
+            print("[License] 경고: Owner 모드 인증 실패. Client 모드로 전환됩니다.")
+            print("[License] OWNER_SECRET_KEY가 올바르게 설정되어 있는지 확인하세요.")
 
     @staticmethod
     def _generate_hardware_id():

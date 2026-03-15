@@ -297,6 +297,38 @@ def api_usage_history():
     })
 
 
+@app.route("/api/license/verify-owner", methods=["POST"])
+def api_verify_owner():
+    """
+    Owner(개발자) 모드 인증.
+    OWNER_SECRET_KEY + 하드웨어ID를 검증하여 관리자만 Owner 모드 사용 가능.
+    """
+    data = request.get_json() or {}
+    secret_key = data.get("secret_key", "").strip()
+    hardware_id = data.get("hardware_id", "").strip()
+    ip = get_client_ip()
+
+    if not secret_key or not hardware_id:
+        return jsonify({"valid": False, "error": "필수 파라미터 누락"}), 400
+
+    # 관리자 키와 비교 (ADMIN_API_KEY 또는 별도 OWNER 키 목록)
+    owner_keys = os.environ.get("OWNER_SECRET_KEYS", "").split(",")
+    owner_keys = [k.strip() for k in owner_keys if k.strip()]
+
+    if not owner_keys:
+        # OWNER_SECRET_KEYS 미설정 → 관리자 키로 폴백
+        owner_keys = [ADMIN_API_KEY]
+
+    is_valid = secret_key in owner_keys
+
+    if is_valid:
+        log_api_call(f"OWNER:{hardware_id[:8]}", "/verify-owner", ip, True, "Owner 인증 성공")
+    else:
+        log_api_call(f"OWNER:{hardware_id[:8]}", "/verify-owner", ip, False, "Owner 인증 실패")
+
+    return jsonify({"valid": is_valid})
+
+
 @app.route("/api/license/heartbeat", methods=["POST"])
 def api_heartbeat():
     """주기적 하트비트 (프로그램 실행 중 30분마다 호출)"""

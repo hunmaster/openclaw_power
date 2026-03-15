@@ -1,0 +1,309 @@
+"""
+자동 업데이트 모듈 - 앱 시작 시 버전 체크 및 원클릭 업데이트 지원
+
+업데이트 흐름:
+1. 앱 시작 → 서버에 최신 버전 확인 (비동기)
+2. 새 버전 있으면 대시보드에 알림 표시
+3. 사용자 승인 → ZIP 다운로드 → 코드만 덮어쓰기
+4. 앱 자동 재시작
+
+보존 대상 (절대 덮어쓰지 않음):
+  .env, .license, config/, data/
+"""
+
+import os
+import json
+import shutil
+import zipfile
+import tempfile
+import threading
+import time
+import subprocess
+import sys
+import requests
+
+# 현재 앱 루트 디렉토리
+APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+VERSION_FILE = os.path.join(APP_ROOT, "version.json")
+
+# 업데이트 서버 URL (랜딩 서버)
+DEFAULT_UPDATE_SERVER = "https://commentboost-app.fly.dev"
+
+# 절대 덮어쓰면 안 되는 파일/디렉토리 목록
+PRESERVE_PATHS = {
+    ".env",
+    ".license",
+    "config",
+    "data",
+    # 사용자가 커스텀한 가능성이 있는 파일
+    ".env.local",
+}
+
+
+def get_current_version():
+    """현재 설치된 앱 버전 정보 반환"""
+    try:
+        with open(VERSION_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"version": "0.0.0", "build": 0}
+
+
+def get_update_server_url():
+    """업데이트 서버 URL (환경변수 또는 기본값)"""
+    return os.environ.get("UPDATE_SERVER_URL", DEFAULT_UPDATE_SERVER)
+
+
+def check_for_updates():
+    """
+    서버에서 최신 버전 확인.
+    Returns: dict with keys: needs_update, force_update, latest_version, changelog, download_url 등
+    """
+    current = get_current_version()
+    server_url = get_update_server_url()
+
+    try:
+        resp = requests.post(
+            f"{server_url}/api/version/check",
+            json={
+                "version": current.get("version", "0.0.0"),
+                "build": current.get("build", 0),
+            },
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            data["current_version"] = current.get("version", "0.0.0")
+            data["current_build"] = current.get("build", 0)
+            return data
+        return {
+            "needs_update": False,
+            "error": f"서버 응답 오류 (HTTP {resp.status_code})",
+        }
+    except requests.exceptions.ConnectionError:
+        return {"needs_update": False, "error": "업데이트 서버에 연결할 수 없습니다."}
+    except Exception as e:
+        return {"needs_update": False, "error": f"버전 확인 오류: {str(e)}"}
+
+
+# ─── 비동기 버전 체크 (앱 시작 시 사용) ───
+
+_update_info = None
+_update_check_done = False
+
+
+def check_updates_async():
+    """백그라운드에서 업데이트 확인 (앱 시작 시 호출)"""
+    global _update_info, _update_check_done
+
+    def _check():
+        global _update_info, _update_check_done
+        # 시작 후 3초 대기 (앱 초기화 완료 후 체크)
+        time.sleep(3)
+        _update_info = check_for_updates()
+        _update_check_done = True
+        if _update_info.get("needs_update"):
+            print(f"[Update] 새 버전 발견: v{_update_info.get('latest_version')} "
+                  f"(현재: v{_update_info.get('current_version')})")
+        elif _update_info.get("error"):
+            print(f"[Update] 버전 확인 실패: {_update_info.get('error')}")
+        else:
+            print("[Update] 최신 버전 사용 중")
+
+    t = threading.Thread(target=_check, daemon=True)
+    t.start()
+
+
+def get_update_status():
+    """현재 업데이트 상태 반환 (대시보드 API용)"""
+    current = get_current_version()
+    result = {
+        "current_version": current.get("version", "0.0.0"),
+        "current_build": current.get("build", 0),
+        "check_done": _update_check_done,
+    }
+
+    if _update_check_done and _update_info:
+        result.update(_update_info)
+    else:
+        result["needs_update"] = False
+
+    return result
+
+
+# ─── 업데이트 실행 ───
+
+_update_progress = {
+    "status": "idle",       # idle, downloading, extracting, applying, restarting, error, done
+    "progress": 0,          # 0~100
+    "message": "",
+    "error": None,
+}
+
+
+def get_update_progress():
+    """업데이트 진행 상태 반환"""
+    return dict(_update_progress)
+
+
+def _set_progress(status, progress, message, error=None):
+    _update_progress["status"] = status
+    _update_progress["progress"] = progress
+    _update_progress["message"] = message
+    _update_progress["error"] = error
+
+
+def perform_update():
+    """
+    업데이트 실행 (백그라운드 스레드에서 호출).
+    1. ZIP 다운로드
+    2. 임시 폴더에 압축 해제
+    3. 보존 파일 제외하고 덮어쓰기
+    4. version.json 업데이트
+    5. 앱 재시작
+    """
+    def _do_update():
+        try:
+            _set_progress("downloading", 10, "업데이트 파일 다운로드 중...")
+
+            server_url = get_update_server_url()
+            download_filename = _update_info.get("download_url", "commentboost-latest.zip") if _update_info else "commentboost-latest.zip"
+            download_url = f"{server_url}/download/{download_filename}"
+
+            # ZIP 다운로드
+            tmp_dir = tempfile.mkdtemp(prefix="commentboost_update_")
+            zip_path = os.path.join(tmp_dir, "update.zip")
+
+            resp = requests.get(download_url, stream=True, timeout=60)
+            if resp.status_code != 200:
+                _set_progress("error", 0, "", f"다운로드 실패 (HTTP {resp.status_code})")
+                return
+
+            total_size = int(resp.headers.get("content-length", 0))
+            downloaded = 0
+
+            with open(zip_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total_size > 0:
+                        pct = int(10 + (downloaded / total_size) * 40)  # 10~50%
+                        _set_progress("downloading", min(pct, 50), f"다운로드 중... {downloaded // 1024}KB")
+
+            _set_progress("extracting", 55, "압축 해제 중...")
+
+            # ZIP 압축 해제
+            extract_dir = os.path.join(tmp_dir, "extracted")
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                zf.extractall(extract_dir)
+
+            # ZIP 내 루트 디렉토리 확인 (ZIP 안에 폴더가 하나 있을 수 있음)
+            entries = os.listdir(extract_dir)
+            if len(entries) == 1 and os.path.isdir(os.path.join(extract_dir, entries[0])):
+                source_dir = os.path.join(extract_dir, entries[0])
+            else:
+                source_dir = extract_dir
+
+            _set_progress("applying", 60, "파일 업데이트 중...")
+
+            # 파일 덮어쓰기 (보존 목록 제외)
+            _apply_update(source_dir, APP_ROOT)
+
+            _set_progress("applying", 90, "정리 중...")
+
+            # 임시 파일 정리
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+            _set_progress("restarting", 95, "앱을 재시작합니다...")
+
+            # 잠시 대기 후 재시작 (프론트엔드가 상태를 읽을 시간)
+            time.sleep(2)
+
+            _set_progress("done", 100, "업데이트 완료! 앱을 재시작합니다.")
+
+            # 앱 재시작
+            _restart_app()
+
+        except Exception as e:
+            _set_progress("error", 0, "", f"업데이트 오류: {str(e)}")
+
+    t = threading.Thread(target=_do_update, daemon=True)
+    t.start()
+    return {"status": "started", "message": "업데이트를 시작합니다."}
+
+
+def _apply_update(source_dir, target_dir):
+    """
+    소스에서 타겟으로 파일 복사 (보존 목록 제외).
+    디렉토리 구조를 유지하며 코드 파일만 업데이트.
+    """
+    total_files = sum(len(files) for _, _, files in os.walk(source_dir))
+    processed = 0
+
+    for root, dirs, files in os.walk(source_dir):
+        # 소스 기준 상대 경로
+        rel_root = os.path.relpath(root, source_dir)
+        if rel_root == ".":
+            rel_root = ""
+
+        # 보존 디렉토리 건너뛰기
+        top_level = rel_root.split(os.sep)[0] if rel_root else ""
+        if top_level in PRESERVE_PATHS:
+            continue
+
+        # 타겟 디렉토리 생성
+        target_root = os.path.join(target_dir, rel_root) if rel_root else target_dir
+        os.makedirs(target_root, exist_ok=True)
+
+        for filename in files:
+            # 보존 파일 건너뛰기
+            rel_file = os.path.join(rel_root, filename) if rel_root else filename
+            if rel_file in PRESERVE_PATHS or filename in PRESERVE_PATHS:
+                continue
+
+            src_file = os.path.join(root, filename)
+            dst_file = os.path.join(target_root, filename)
+
+            try:
+                shutil.copy2(src_file, dst_file)
+            except (PermissionError, OSError):
+                # 실행 중인 파일은 건너뛰기 (Windows 잠금)
+                pass
+
+            processed += 1
+            if total_files > 0:
+                pct = int(60 + (processed / total_files) * 30)  # 60~90%
+                _set_progress("applying", min(pct, 90),
+                              f"파일 업데이트 중... ({processed}/{total_files})")
+
+
+def _restart_app():
+    """앱 프로세스 재시작"""
+    try:
+        # Windows: start.bat 재실행
+        if sys.platform == "win32":
+            start_bat = os.path.join(APP_ROOT, "start.bat")
+            if os.path.exists(start_bat):
+                subprocess.Popen(
+                    ["cmd", "/c", "start", "", start_bat],
+                    cwd=APP_ROOT,
+                    creationflags=subprocess.CREATE_NEW_CONSOLE,
+                )
+            else:
+                subprocess.Popen(
+                    [sys.executable, os.path.join(APP_ROOT, "app.py")],
+                    cwd=APP_ROOT,
+                    creationflags=subprocess.CREATE_NEW_CONSOLE,
+                )
+        else:
+            # Linux/Mac: python app.py 재실행
+            subprocess.Popen(
+                [sys.executable, os.path.join(APP_ROOT, "app.py")],
+                cwd=APP_ROOT,
+            )
+
+        # 현재 프로세스 종료
+        time.sleep(1)
+        os._exit(0)
+    except Exception as e:
+        _set_progress("error", 0, "", f"재시작 실패: {str(e)}. 수동으로 start.bat을 실행해주세요.")

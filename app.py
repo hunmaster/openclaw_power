@@ -36,6 +36,10 @@ from src.adb_ip_changer import ADBIPChanger
 from src.comment_tracker import CommentTracker
 from src.license_client import license_client, is_owner_mode, LIKE_TIERS, PLAN_FEATURES
 from src.lemonsqueezy_client import LemonSqueezyClient
+from src.updater import (
+    check_updates_async, get_update_status, check_for_updates,
+    perform_update, get_update_progress, get_current_version,
+)
 
 # Lemon Squeezy 클라이언트 초기화
 ls_client = LemonSqueezyClient()
@@ -3705,6 +3709,47 @@ def _update_env_var(env_path, key, value):
     os.environ[key] = value
 
 
+# ━━━━━━━━━━━━━━ 자동 업데이트 ━━━━━━━━━━━━━━
+
+@app.route("/api/update/status")
+@login_required
+def api_update_status():
+    """현재 업데이트 상태 (새 버전 유무, 현재 버전 정보)."""
+    return jsonify(get_update_status())
+
+
+@app.route("/api/update/check", methods=["POST"])
+@login_required
+def api_update_check():
+    """수동으로 업데이트 확인."""
+    result = check_for_updates()
+    result["current_version"] = get_current_version().get("version", "0.0.0")
+    return jsonify(result)
+
+
+@app.route("/api/update/apply", methods=["POST"])
+@login_required
+def api_update_apply():
+    """업데이트 적용 시작 (ZIP 다운로드 → 덮어쓰기 → 재시작)."""
+    progress = get_update_progress()
+    if progress["status"] not in ("idle", "error", "done"):
+        return jsonify({"error": "이미 업데이트가 진행 중입니다."}), 409
+
+    status = get_update_status()
+    if not status.get("needs_update"):
+        return jsonify({"error": "이미 최신 버전입니다."}), 400
+
+    result = perform_update()
+    return jsonify(result)
+
+
+@app.route("/api/update/progress")
+@login_required
+def api_update_progress():
+    """업데이트 진행 상태 (프론트엔드 폴링용)."""
+    return jsonify(get_update_progress())
+
+
 # ━━━ Lemon Squeezy 결제 연동 ━━━
 
 # 결제 상품 정의
@@ -3931,6 +3976,9 @@ else:
 
 # Lemon Squeezy 결제 초기화
 ls_client.initialize()
+
+# 시작 시 업데이트 체크 (비동기)
+check_updates_async()
 
 
 if __name__ == "__main__":

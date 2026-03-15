@@ -292,6 +292,30 @@
 </head>
 <body>
 
+<!-- 업데이트 알림 배너 -->
+<div id="updateBanner" style="display:none;background:linear-gradient(135deg,#6c5ce7,#a29bfe);padding:12px 24px;text-align:center;cursor:pointer;position:relative;z-index:1000;" onclick="showUpdateModal()">
+    <span style="color:white;font-size:14px;font-weight:600;" id="updateBannerText"></span>
+    <button onclick="event.stopPropagation();document.getElementById('updateBanner').style.display='none'" style="position:absolute;right:16px;top:50%;transform:translateY(-50%);background:none;border:none;color:rgba(255,255,255,0.7);font-size:18px;cursor:pointer">&times;</button>
+</div>
+
+<!-- 업데이트 모달 -->
+<div id="updateModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10000;justify-content:center;align-items:center;">
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:32px;max-width:480px;width:90%;">
+        <h3 style="margin-bottom:16px;font-size:18px;">새 버전이 있습니다</h3>
+        <div id="updateModalInfo" style="margin-bottom:20px;font-size:14px;color:var(--text-dim);line-height:1.6;"></div>
+        <div id="updateProgressWrap" style="display:none;margin-bottom:20px;">
+            <div style="background:var(--border);border-radius:8px;height:8px;overflow:hidden;margin-bottom:8px;">
+                <div id="updateProgressBar" style="height:100%;background:var(--accent);border-radius:8px;transition:width 0.3s;width:0%"></div>
+            </div>
+            <div id="updateProgressText" style="font-size:12px;color:var(--text-dim);text-align:center;"></div>
+        </div>
+        <div style="display:flex;gap:12px;justify-content:flex-end;" id="updateModalButtons">
+            <button class="btn btn-secondary" onclick="closeUpdateModal()">나중에</button>
+            <button class="btn btn-primary" id="btnApplyUpdate" onclick="applyUpdate()">지금 업데이트</button>
+        </div>
+    </div>
+</div>
+
 <div class="header">
     <h1><span>댓글</span> 부스터</h1>
     <div class="header-actions">
@@ -3978,8 +4002,117 @@
 
         // 상태 폴링 시작
         setInterval(pollStatus, 1500);
+
+        // 업데이트 체크 (앱 로드 후 5초 뒤)
+        setTimeout(checkForUpdates, 5000);
     }
     initApp();
+
+    // ─── 자동 업데이트 ───
+    let _updateData = null;
+
+    async function checkForUpdates() {
+        try {
+            const data = await api('/api/update/status');
+            if (!data) return;
+            _updateData = data;
+            if (data.needs_update) {
+                const banner = document.getElementById('updateBanner');
+                const bannerText = document.getElementById('updateBannerText');
+                const forceLabel = data.force_update ? ' (필수 업데이트)' : '';
+                bannerText.textContent = `새 버전 v${data.latest_version}이(가) 있습니다${forceLabel} — 클릭하여 업데이트`;
+                banner.style.display = 'block';
+                if (data.force_update) {
+                    banner.style.background = 'linear-gradient(135deg, #e74c3c, #c0392b)';
+                    showUpdateModal();
+                }
+            }
+        } catch (e) {
+            console.log('[Update] 버전 확인 실패:', e);
+        }
+    }
+
+    function showUpdateModal() {
+        if (!_updateData) return;
+        const modal = document.getElementById('updateModal');
+        const info = document.getElementById('updateModalInfo');
+        const forceNote = _updateData.force_update
+            ? '<div style="color:var(--red);font-weight:600;margin-bottom:8px;">이 업데이트는 필수입니다. 업데이트하지 않으면 정상 동작하지 않을 수 있습니다.</div>'
+            : '';
+        info.innerHTML = `
+            ${forceNote}
+            <div><strong>현재 버전:</strong> v${_updateData.current_version || _updateData.client_version}</div>
+            <div><strong>최신 버전:</strong> v${_updateData.latest_version}</div>
+            <div><strong>배포일:</strong> ${_updateData.release_date || '-'}</div>
+            <div style="margin-top:12px;"><strong>변경사항:</strong><br>${(_updateData.changelog || '').replace(/\n/g, '<br>')}</div>
+            <div style="margin-top:12px;color:var(--green);font-size:12px;">.env, config, data 폴더는 보존됩니다.</div>
+        `;
+        document.getElementById('updateProgressWrap').style.display = 'none';
+        document.getElementById('btnApplyUpdate').disabled = false;
+        document.getElementById('btnApplyUpdate').textContent = '지금 업데이트';
+        modal.style.display = 'flex';
+    }
+
+    function closeUpdateModal() {
+        document.getElementById('updateModal').style.display = 'none';
+    }
+
+    async function applyUpdate() {
+        const btn = document.getElementById('btnApplyUpdate');
+        btn.disabled = true;
+        btn.textContent = '업데이트 중...';
+        document.getElementById('updateProgressWrap').style.display = 'block';
+
+        try {
+            const res = await api('/api/update/apply', { method: 'POST' });
+            if (res && res.error) {
+                document.getElementById('updateProgressText').textContent = res.error;
+                btn.disabled = false;
+                btn.textContent = '재시도';
+                return;
+            }
+            // 진행 상태 폴링
+            pollUpdateProgress();
+        } catch (e) {
+            document.getElementById('updateProgressText').textContent = '업데이트 시작 실패: ' + e;
+            btn.disabled = false;
+            btn.textContent = '재시도';
+        }
+    }
+
+    async function pollUpdateProgress() {
+        const bar = document.getElementById('updateProgressBar');
+        const text = document.getElementById('updateProgressText');
+        const btn = document.getElementById('btnApplyUpdate');
+
+        const poll = async () => {
+            try {
+                const data = await api('/api/update/progress');
+                if (!data) return;
+                bar.style.width = data.progress + '%';
+                text.textContent = data.message || data.status;
+
+                if (data.status === 'error') {
+                    text.textContent = data.error || '업데이트 실패';
+                    text.style.color = 'var(--red)';
+                    btn.disabled = false;
+                    btn.textContent = '재시도';
+                    return;
+                }
+                if (data.status === 'done' || data.status === 'restarting') {
+                    text.textContent = '업데이트 완료! 잠시 후 페이지가 새로고침됩니다...';
+                    setTimeout(() => location.reload(), 5000);
+                    return;
+                }
+                setTimeout(poll, 1000);
+            } catch (e) {
+                // 서버 재시작 중일 수 있음
+                text.textContent = '앱이 재시작 중입니다. 잠시 후 새로고침합니다...';
+                setTimeout(() => location.reload(), 5000);
+            }
+        };
+        poll();
+    }
 
     // ─── 댓글 트래킹 ───
     let _trackAccountsLoaded = false;
