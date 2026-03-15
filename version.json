@@ -1,7 +1,7 @@
 {
-    "version": "1.0.0",
-    "build": 1,
+    "version": "1.1.0",
+    "build": 2,
     "release_date": "2026-03-15",
     "min_version": "1.0.0",
-    "changelog": "초기 릴리즈"
+    "changelog": "v1.1.0 업데이트\n- 계정 대량 등록 기능 추가\n- 수동 로그인 비밀번호 자동 입력\n- 노션 연결 버그 수정\n- ADB 자동 설치 (install_adb.bat)\n- EXE 시작 시 자동 업데이트 팝업\n- 구독 플랜 UI 리디자인"
 }
