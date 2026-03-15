@@ -1020,25 +1020,31 @@
         <div class="card" style="padding:20px;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
                 <h3 style="margin:0;font-size:16px;">가입 유저 목록</h3>
-                <button class="btn btn-secondary" onclick="loadUsers()" style="font-size:12px;">새로고침</button>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <span id="usersTotalCount" style="font-size:12px;color:var(--text-dim);"></span>
+                    <button class="btn btn-secondary btn-sm" onclick="loadUsers()">새로고침</button>
+                </div>
             </div>
+            <div style="overflow-x:auto;">
             <table style="width:100%;border-collapse:collapse;font-size:13px;">
                 <thead>
                     <tr style="border-bottom:1px solid var(--border);color:var(--text-dim);font-size:12px;">
                         <th style="padding:8px;text-align:left;">ID</th>
                         <th style="padding:8px;text-align:left;">이메일</th>
                         <th style="padding:8px;text-align:left;">닉네임</th>
+                        <th style="padding:8px;text-align:left;">플랜</th>
                         <th style="padding:8px;text-align:left;">라이선스 키</th>
                         <th style="padding:8px;text-align:left;">가입일</th>
                         <th style="padding:8px;text-align:left;">최근 로그인</th>
                         <th style="padding:8px;text-align:left;">상태</th>
+                        <th style="padding:8px;text-align:left;">관리</th>
                     </tr>
                 </thead>
                 <tbody id="usersTableBody">
-                    <tr><td colspan="7" style="padding:20px;text-align:center;color:var(--text-dim);">로딩 중...</td></tr>
+                    <tr><td colspan="9" style="padding:20px;text-align:center;color:var(--text-dim);">로딩 중...</td></tr>
                 </tbody>
             </table>
-            <div id="usersTotalCount" style="margin-top:12px;font-size:12px;color:var(--text-dim);"></div>
+            </div>
         </div>
     </div>
     {% endif %}
@@ -1053,10 +1059,10 @@
                 <div id="myPlan" style="font-size:24px;font-weight:800;color:var(--accent-light);">-</div>
                 <div style="font-size:11px;color:#888;margin-top:6px;">클릭하여 업그레이드</div>
             </div>
-            <div class="card" style="text-align:center;cursor:pointer;" onclick="openChargePopup()">
+            <div class="card" style="text-align:center;">
                 <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">잔여 토큰</div>
                 <div id="myTokens" style="font-size:24px;font-weight:800;color:#fbbf24;">-</div>
-                <div style="font-size:11px;color:#888;margin-top:6px;">클릭하여 충전</div>
+                <button onclick="openChargePopup()" style="margin-top:8px;padding:6px 16px;background:linear-gradient(135deg,#f59e0b,#ef4444);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;transition:all .2s" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">토큰 충전</button>
             </div>
             <div class="card" style="text-align:center;">
                 <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">최대 계정 수</div>
@@ -1176,6 +1182,17 @@
                     <input type="hidden" id="setSameVideoInterval" value="30">
                 </div>
                 <div>
+                    <h3 style="margin-bottom:16px;font-size:15px">좋아요 부스팅</h3>
+                    <div class="form-group">
+                        <label>좋아요 기본 수량</label>
+                        <input type="number" id="setSmmLikeQty" value="20" min="5" max="1000">
+                    </div>
+                    <div class="form-group">
+                        <label>좋아요 자동 주문 MAX <span style="color:var(--yellow);font-size:11px">초과 시 승인 대기</span></label>
+                        <input type="number" id="setSmmLikeMax" value="500" min="50" max="50000">
+                    </div>
+                </div>
+                <div>
                     <h3 style="margin-bottom:16px;font-size:15px">브라우저</h3>
                     <div class="form-group">
                         <label>브라우저 모드</label>
@@ -1187,6 +1204,15 @@
                 </div>
                 <div>
                     <h3 style="margin-bottom:16px;font-size:15px">ADB IP 변경 (비행기모드)</h3>
+                    <div style="background:rgba(116,185,255,0.06);border:1px solid rgba(116,185,255,0.15);border-radius:8px;padding:12px;margin-bottom:14px;font-size:11px;line-height:1.8;color:var(--text-dim)">
+                        <div style="font-weight:700;color:var(--blue);margin-bottom:6px;font-size:12px">설정 가이드</div>
+                        <div><b style="color:var(--text)">1.</b> 안드로이드 폰을 USB로 PC에 연결</div>
+                        <div><b style="color:var(--text)">2.</b> 폰 설정 > 개발자 옵션 > <b style="color:var(--text)">USB 디버깅 ON</b></div>
+                        <div><b style="color:var(--text)">3.</b> <a href="https://developer.android.com/tools/releases/platform-tools" target="_blank" style="color:var(--blue);text-decoration:underline">Android Platform Tools</a> 다운로드 후 압축 해제</div>
+                        <div><b style="color:var(--text)">4.</b> ADB 경로에 adb.exe 위치 입력 (예: <code style="background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">D:\platform-tools\adb.exe</code>)</div>
+                        <div><b style="color:var(--text)">5.</b> 활성화 후 "ADB 연결 테스트" 클릭하여 확인</div>
+                        <div style="margin-top:6px;color:#f59e0b;font-size:10px">* IP 변경 = 댓글 작성 시마다 비행기모드 ON/OFF로 자동 IP 변경 (차단 방지)</div>
+                    </div>
                     <div class="form-group">
                         <label>ADB IP 변경</label>
                         <select id="setAdbEnabled">
@@ -1195,22 +1221,22 @@
                         </select>
                     </div>
                     <div class="form-group">
-                        <label>ADB 경로</label>
+                        <label>ADB 경로 <span style="color:var(--text-dim);font-size:10px">adb.exe 전체 경로</span></label>
                         <input type="text" id="setAdbPath" value="adb" placeholder="예: D:\platform-tools\adb.exe">
                     </div>
                     <div class="form-group">
-                        <label>비행기모드 대기 (초)</label>
+                        <label>비행기모드 대기 (초) <span style="color:var(--text-dim);font-size:10px">IP 변경 후 안정화 대기</span></label>
                         <input type="number" id="setAdbWait" value="4" min="2" max="15">
                     </div>
                     <div class="form-group">
-                        <label>유선 인터넷 자동 제어</label>
+                        <label>유선 인터넷 자동 제어 <span style="color:var(--text-dim);font-size:10px">PC 유선랜 자동 ON/OFF</span></label>
                         <select id="setAdbAutoEthernet">
                             <option value="true">자동 (실행 시 끄고, 종료 시 복원)</option>
                             <option value="false">수동 (직접 관리)</option>
                         </select>
                     </div>
                     <div class="form-group">
-                        <label>유선 어댑터 이름</label>
+                        <label>유선 어댑터 이름 <span style="color:var(--text-dim);font-size:10px">네트워크 어댑터명</span></label>
                         <input type="text" id="setAdbEthernetName" value="이더넷" placeholder="이더넷">
                     </div>
                     <div style="margin-top:12px">
@@ -2250,6 +2276,8 @@
         document.getElementById('setMaxComments').value = data.MAX_COMMENTS_PER_DAY;
         document.getElementById('setCommentInterval').value = data.COMMENT_INTERVAL_SEC;
         document.getElementById('setSameVideoInterval').value = data.SAME_VIDEO_INTERVAL_MIN;
+        document.getElementById('setSmmLikeQty').value = data.SMM_LIKE_QUANTITY || '20';
+        document.getElementById('setSmmLikeMax').value = data.SMM_LIKE_AUTO_MAX || '500';
         document.getElementById('setHeadless').value = data.HEADLESS;
         document.getElementById('setAdbEnabled').value = data.ADB_IP_CHANGE_ENABLED || 'false';
         document.getElementById('setAdbPath').value = data.ADB_PATH || 'adb';
@@ -2311,6 +2339,8 @@
             MAX_COMMENTS_PER_DAY: document.getElementById('setMaxComments').value,
             COMMENT_INTERVAL_SEC: document.getElementById('setCommentInterval').value,
             SAME_VIDEO_INTERVAL_MIN: document.getElementById('setSameVideoInterval').value,
+            SMM_LIKE_QUANTITY: document.getElementById('setSmmLikeQty').value,
+            SMM_LIKE_AUTO_MAX: document.getElementById('setSmmLikeMax').value,
             HEADLESS: document.getElementById('setHeadless').value,
             ADB_IP_CHANGE_ENABLED: document.getElementById('setAdbEnabled').value,
             ADB_PATH: document.getElementById('setAdbPath').value,
@@ -2854,57 +2884,67 @@
     // ─── 상태 폴링 ───
     // ── 좋아요 승인 대기 리스트 (인라인) ──
     function renderLikeApprovalItem(item) {
-        const topStr = item.top_likes.map(n => n.toLocaleString()).join(', ');
         const extraQty = item.qty - (item.default_qty || 0);
-        // 원가 정보는 Owner만 표시
-        let costHtml = '';
+        // 예상 금액 (10원~20원/개 기준)
+        const costMin = (item.qty * 10).toLocaleString();
+        const costMax = (item.qty * 20).toLocaleString();
+        let costHtml = `<span style="color:#f59e0b">~₩${costMin}~${costMax}</span>`;
         if (IS_OWNER) {
-            const cost = (item.qty * 1.12 / 1000 * 1450).toFixed(0);
-            costHtml = ` &middot; 원가 <span style="color:var(--yellow)">~${Number(cost).toLocaleString()}원</span>`;
+            const ownerCost = (item.qty * 1.12 / 1000 * 1450).toFixed(0);
+            costHtml = `원가 <span style="color:var(--yellow)">~${Number(ownerCost).toLocaleString()}원</span>`;
         }
+
+        // 내 댓글 미리보기 (my_comment 필드)
+        const myComment = item.my_comment ? item.my_comment.replace(/</g,'&lt;').replace(/>/g,'&gt;') : '';
+        const myCommentHtml = myComment ? `
+            <div style="margin-bottom:10px;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);border-radius:6px;padding:8px 10px;font-size:11px">
+                <div style="color:#60a5fa;font-weight:600;margin-bottom:4px">내 댓글</div>
+                <div style="color:var(--text);line-height:1.5;word-break:break-all">${myComment}</div>
+            </div>` : '';
+
         return `
-        <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:8px">
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:8px" id="likeItem_${item.id}">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
                 <div style="display:flex;align-items:center;gap:10px">
                     <div style="background:rgba(255,217,61,0.12);border:1px solid rgba(255,217,61,0.3);border-radius:8px;padding:6px 12px;text-align:center">
                         <div style="font-size:20px;font-weight:800;color:var(--yellow)">${item.qty.toLocaleString()}</div>
-                        <div style="font-size:10px;color:var(--text-dim)">목표</div>
+                        <div style="font-size:10px;color:var(--text-dim)">추천 수량</div>
                     </div>
                     <div>
                         <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:2px;max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${item.video_title}">
                             ${item.video_title || '제목 없음'}
                         </div>
                         <div style="font-size:11px;color:var(--text-dim)">
-                            ${item.account} &middot; ${item.created_at}${costHtml}
+                            ${item.account} &middot; ${item.created_at} &middot; 예상비용 ${costHtml}
                         </div>
                     </div>
                 </div>
             </div>
+            ${myCommentHtml}
             <div style="display:flex;gap:12px;margin-bottom:10px;font-size:12px">
+                ${item.top_comments && item.top_comments.length > 0 ? item.top_comments.map((c, idx) => {
+                    const medal = idx === 0 ? '1st' : idx === 1 ? '2nd' : idx === 2 ? '3rd' : (idx+1)+'th';
+                    const likeCnt = (c.likes || 0).toLocaleString();
+                    return `<div style="flex:1;background:var(--card);border-radius:6px;padding:8px 10px;cursor:pointer;border:2px solid transparent;transition:all .2s" onclick="setLikeQtyFromRank(this, '${item.id}', ${c.likes || 0})" onmouseover="this.style.borderColor='rgba(255,217,61,0.4)'" onmouseout="this.style.borderColor='transparent'" title="이 순위 위로 올리기: ${(c.likes||0)+15}개 주문">
+                        <div style="color:var(--text-dim);margin-bottom:2px;font-size:10px">${medal} 댓글</div>
+                        <div style="color:var(--text);font-weight:600">♥ ${likeCnt}</div>
+                    </div>`;
+                }).join('') : `
                 <div style="flex:1;background:var(--card);border-radius:6px;padding:8px 10px">
-                    <div style="color:var(--text-dim);margin-bottom:2px">상위 댓글 좋아요</div>
-                    <div style="color:var(--text);font-weight:600">${topStr || '-'}</div>
-                </div>
-                <div style="background:var(--card);border-radius:6px;padding:8px 10px;text-align:center;min-width:80px">
-                    <div style="color:var(--text-dim);margin-bottom:2px">기본 주문</div>
-                    <div style="color:var(--green);font-weight:600">${(item.default_qty || 0).toLocaleString()}개</div>
-                </div>
-                <div style="background:var(--card);border-radius:6px;padding:8px 10px;text-align:center;min-width:80px">
-                    <div style="color:var(--text-dim);margin-bottom:2px">추가분</div>
-                    <div style="color:var(--yellow);font-weight:700">${extraQty > 0 ? '+' + extraQty.toLocaleString() : '-'}개</div>
-                </div>
+                    <div style="color:var(--text-dim);margin-bottom:2px">상위 좋아요</div>
+                    <div style="color:var(--text);font-weight:600">${item.top_likes.map(n => n.toLocaleString()).join(', ') || '-'}</div>
+                </div>`}
             </div>
             ${(item.top_comments && item.top_comments.length > 0) ? (_likePreviewAllowed ? `
             <div style="margin-bottom:10px;background:var(--card);border-radius:6px;padding:8px 10px;font-size:11px">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-                    <span style="color:var(--text-dim);font-weight:600">상위 댓글 미리보기</span>
+                    <span style="color:var(--text-dim);font-weight:600">상위 댓글 내용</span>
                     <span onclick="toggleCommentExpand(this)" style="color:var(--blue);cursor:pointer;font-size:10px;user-select:none" data-expanded="false">더보기 ▼</span>
                 </div>
                 ${item.top_comments.map((c, idx) => {
                     const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉';
                     const likeCnt = (c.likes || 0).toLocaleString();
                     const txt = (c.text || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-                    const isLong = txt.length > 50;
                     return `<div style="display:flex;align-items:flex-start;gap:6px;margin-bottom:4px;padding:4px 6px;border-radius:4px;background:rgba(255,255,255,0.03)">
                         <span style="flex-shrink:0">${medal}</span>
                         <span class="comment-preview-text" style="color:var(--text);line-height:1.4;word-break:break-all;overflow:hidden;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical" data-full="${txt}">${txt}</span>
@@ -2917,19 +2957,71 @@
                 <div style="color:var(--text-dim);font-size:11px">Business 플랜 이상부터 미리보기가 가능합니다</div>
                 <div style="color:#a78bfa;font-size:11px;margin-top:6px;text-decoration:underline">플랜 업그레이드 →</div>
             </div>`) : ''}
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+                <span style="font-size:12px;color:var(--text-dim);white-space:nowrap">주문 수량:</span>
+                <input type="number" id="likeQty_${item.id}" value="${item.qty}" min="10" max="50000" style="width:100px;padding:6px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:14px;font-weight:700;text-align:center" onchange="updateLikeCostPreview('${item.id}')">
+                <span style="font-size:11px;color:var(--text-dim)" id="likeCostPreview_${item.id}">예상 ₩${costMin}~${costMax}</span>
+            </div>
             <div style="display:flex;gap:8px">
                 ${(_currentTokenBalance >= (item.qty * 10) || IS_OWNER) ? `
-                <button onclick="approveSingleLike('${item.id}')" style="flex:1;padding:10px 0;background:var(--green);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;transition:opacity 0.2s" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
-                    승인 (${item.qty.toLocaleString()}개 주문)
+                <button id="likeApproveBtn_${item.id}" onclick="approveSingleLikeCustom('${item.id}')" style="flex:1;padding:10px 0;background:var(--green);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;transition:all 0.2s" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+                    승인
                 </button>` : `
                 <button onclick="showTokenShortagePopup(${item.qty})" style="flex:1;padding:10px 0;background:var(--border);color:var(--text-dim);border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;position:relative;overflow:hidden">
-                    <span style="color:#f87171">토큰 부족</span> · 승인 불가 (${item.qty.toLocaleString()}개)
+                    <span style="color:#f87171">토큰 부족</span> · 승인 불가
                 </button>`}
-                <button onclick="dismissSingleLike('${item.id}')" style="padding:10px 20px;background:var(--border);color:var(--text-dim);border:none;border-radius:8px;font-size:13px;cursor:pointer;transition:opacity 0.2s" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+                <button id="likeDismissBtn_${item.id}" onclick="dismissSingleLikeWithFeedback('${item.id}')" style="padding:10px 20px;background:var(--border);color:var(--text-dim);border:none;border-radius:8px;font-size:13px;cursor:pointer;transition:all 0.2s" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
                     무시
                 </button>
             </div>
         </div>`;
+    }
+
+    function setLikeQtyFromRank(el, itemId, rankLikes) {
+        const qty = rankLikes + Math.floor(Math.random() * 11) + 10; // rank + 10~20
+        const input = document.getElementById('likeQty_' + itemId);
+        if (input) {
+            input.value = qty;
+            updateLikeCostPreview(itemId);
+        }
+    }
+
+    function updateLikeCostPreview(itemId) {
+        const input = document.getElementById('likeQty_' + itemId);
+        const preview = document.getElementById('likeCostPreview_' + itemId);
+        if (input && preview) {
+            const qty = parseInt(input.value) || 0;
+            preview.textContent = `예상 ₩${(qty*10).toLocaleString()}~${(qty*20).toLocaleString()}`;
+        }
+    }
+
+    async function approveSingleLikeCustom(itemId) {
+        const input = document.getElementById('likeQty_' + itemId);
+        const btn = document.getElementById('likeApproveBtn_' + itemId);
+        const customQty = input ? parseInt(input.value) : null;
+        if (btn) { btn.disabled = true; btn.textContent = '처리 중...'; btn.style.opacity = '0.5'; }
+        const body = { id: itemId };
+        if (customQty) body.custom_qty = customQty;
+        const res = await postJson('/api/likes/approve', body);
+        if (res) {
+            if (btn) { btn.textContent = '완료!'; btn.style.background = '#166534'; }
+            setTimeout(() => pollLikePending(), 500);
+        } else {
+            if (btn) { btn.disabled = false; btn.textContent = '승인'; btn.style.opacity = '1'; }
+        }
+    }
+
+    async function dismissSingleLikeWithFeedback(itemId) {
+        const btn = document.getElementById('likeDismissBtn_' + itemId);
+        if (btn) { btn.disabled = true; btn.textContent = '처리 중...'; btn.style.opacity = '0.5'; }
+        const res = await postJson('/api/likes/dismiss', { id: itemId });
+        if (res) {
+            const row = document.getElementById('likeItem_' + itemId);
+            if (row) { row.style.opacity = '0.3'; row.style.transition = 'opacity 0.3s'; }
+            setTimeout(() => pollLikePending(), 500);
+        } else {
+            if (btn) { btn.disabled = false; btn.textContent = '무시'; btn.style.opacity = '1'; }
+        }
     }
 
     function showTokenShortagePopup(qty) {
@@ -4145,8 +4237,22 @@
         }
 
         try {
-            // 토큰 충전도 Lemon Squeezy 체크아웃으로 처리 (추후 토큰 상품 추가 시)
-            msg.innerHTML = '<span style="color:#f59e0b;">토큰 충전 기능은 곧 지원됩니다.</span>';
+            // 결제 설정에서 토큰 체크아웃 URL 확인
+            const configRes = await api('/api/payment/config');
+            const checkoutUrl = configRes?.checkout_urls?.[productId];
+
+            if (checkoutUrl) {
+                // LemonSqueezy 체크아웃으로 이동
+                if (window.LemonSqueezy) {
+                    window.LemonSqueezy.Url.Open(checkoutUrl);
+                } else {
+                    window.open(checkoutUrl, '_blank');
+                }
+                msg.innerHTML = '<span style="color:#22c55e;">결제 페이지가 열렸습니다. 결제 완료 후 토큰이 자동 충전됩니다.</span>';
+            } else {
+                // 토큰 상품 미등록 시 카카오 문의 안내
+                msg.innerHTML = '<span style="color:#f59e0b;">토큰 충전은 <a href="https://open.kakao.com/o/sHqk1tli" target="_blank" style="color:#60a5fa;text-decoration:underline;">카카오톡 문의</a>로 요청해주세요.</span>';
+            }
             btn.disabled = false; btn.textContent = '충전하기';
         } catch(e) {
             console.error('Charge error:', e);
@@ -4156,37 +4262,90 @@
     }
 
     // ─── 유저 관리 (관리자) ───
+    const PLAN_COLORS = { Free:'#888', Starter:'#60a5fa', Business:'#a78bfa', Agency:'#f59e0b', Enterprise:'#ef4444' };
+    let _adminPlans = ['Free','Starter','Business','Agency','Enterprise'];
+
     async function loadUsers() {
         const tbody = document.getElementById('usersTableBody');
         const countEl = document.getElementById('usersTotalCount');
         if (!tbody) return;
 
-        tbody.innerHTML = '<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--text-dim);">로딩 중...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" style="padding:20px;text-align:center;color:var(--text-dim);">로딩 중...</td></tr>';
         try {
             const data = await api('/api/admin/users');
-            if (data.error) { tbody.innerHTML = `<tr><td colspan="7" style="padding:20px;text-align:center;color:#f87171">${data.error}</td></tr>`; return; }
+            if (data.error) { tbody.innerHTML = `<tr><td colspan="9" style="padding:20px;text-align:center;color:#f87171">${data.error}</td></tr>`; return; }
 
+            if (data.plans) _adminPlans = data.plans;
             const users = data.users || [];
             if (!users.length) {
-                tbody.innerHTML = '<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--text-dim);">가입된 유저가 없습니다.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="9" style="padding:20px;text-align:center;color:var(--text-dim);">가입된 유저가 없습니다.</td></tr>';
                 return;
             }
 
-            tbody.innerHTML = users.map(u => `
-                <tr style="border-bottom:1px solid var(--border);">
+            tbody.innerHTML = users.map(u => {
+                const planOpts = _adminPlans.map(p =>
+                    `<option value="${p}" ${p === (u.plan||'Free') ? 'selected' : ''}>${p}</option>`
+                ).join('');
+                const planColor = PLAN_COLORS[u.plan||'Free'] || '#888';
+                return `
+                <tr style="border-bottom:1px solid var(--border);" id="userRow${u.id}">
                     <td style="padding:8px;">${u.id}</td>
                     <td style="padding:8px;">${u.email}</td>
                     <td style="padding:8px;">${u.nickname || '-'}</td>
-                    <td style="padding:8px;font-family:monospace;font-size:11px;">${u.license_key || '<span style="color:#888">미등록</span>'}</td>
+                    <td style="padding:8px;">
+                        <select onchange="changeUserPlan(${u.id}, this.value)" style="background:var(--bg);color:${planColor};border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:12px;font-weight:600;cursor:pointer;">
+                            ${planOpts}
+                        </select>
+                    </td>
+                    <td style="padding:8px;font-family:monospace;font-size:11px;">${u.license_key || '<span style="color:#888">-</span>'}</td>
                     <td style="padding:8px;font-size:11px;">${u.created_at ? new Date(u.created_at).toLocaleDateString('ko-KR') : '-'}</td>
                     <td style="padding:8px;font-size:11px;">${u.last_login ? new Date(u.last_login).toLocaleDateString('ko-KR') : '-'}</td>
-                    <td style="padding:8px;"><span style="color:${u.is_active ? '#22c55e' : '#ef4444'};font-size:11px;font-weight:600;">${u.is_active ? '활성' : '비활성'}</span></td>
-                </tr>
-            `).join('');
+                    <td style="padding:8px;">
+                        <span style="color:${u.is_active ? '#22c55e' : '#ef4444'};font-size:11px;font-weight:600;cursor:pointer;" onclick="toggleUserActive(${u.id}, ${!u.is_active})">${u.is_active ? '활성' : '비활성'}</span>
+                    </td>
+                    <td style="padding:8px;">
+                        <button class="btn btn-sm btn-secondary" onclick="toggleUserActive(${u.id}, ${!u.is_active})" style="font-size:11px;padding:3px 8px;">${u.is_active ? '비활성화' : '활성화'}</button>
+                    </td>
+                </tr>`;
+            }).join('');
 
             if (countEl) countEl.textContent = `총 ${users.length}명`;
         } catch (e) {
-            tbody.innerHTML = `<tr><td colspan="7" style="padding:20px;text-align:center;color:#f87171">로드 실패</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="9" style="padding:20px;text-align:center;color:#f87171">로드 실패</td></tr>`;
+        }
+    }
+
+    async function changeUserPlan(userId, newPlan) {
+        try {
+            const res = await api('/api/admin/update-user', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ user_id: userId, plan: newPlan })
+            });
+            if (res.success) {
+                const sel = document.querySelector(`#userRow${userId} select`);
+                if (sel) sel.style.color = PLAN_COLORS[newPlan] || '#888';
+            } else {
+                alert(res.error || '변경 실패');
+                loadUsers();
+            }
+        } catch (e) {
+            alert('플랜 변경 실패');
+            loadUsers();
+        }
+    }
+
+    async function toggleUserActive(userId, newState) {
+        try {
+            const res = await api('/api/admin/update-user', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ user_id: userId, is_active: newState })
+            });
+            if (res.success) loadUsers();
+            else alert(res.error || '변경 실패');
+        } catch (e) {
+            alert('상태 변경 실패');
         }
     }
 

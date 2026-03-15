@@ -74,6 +74,26 @@ def unauthorized():
 
 with app.app_context():
     db.create_all()
+    # 기존 DB에 새 컬럼/테이블 자동 추가 (마이그레이션)
+    import sqlite3 as _sqlite3
+    _db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "users.db")
+    if os.path.exists(_db_path):
+        _conn = _sqlite3.connect(_db_path)
+        _cursor = _conn.cursor()
+        _cursor.execute("PRAGMA table_info(users)")
+        _existing_cols = {row[1] for row in _cursor.fetchall()}
+        _new_cols = [
+            ("plan", "VARCHAR(50) DEFAULT 'Free'"),
+            ("agreed_terms", "BOOLEAN DEFAULT 0"),
+            ("agreed_at", "DATETIME"),
+        ]
+        for col_name, col_def in _new_cols:
+            if col_name not in _existing_cols:
+                _cursor.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_def}")
+        _conn.commit()
+        _conn.close()
+    # 새 테이블도 생성 (youtube_accounts, comment_tracking)
+    db.create_all()
 
 # 글로벌 상태
 automation_state = {
@@ -315,6 +335,8 @@ def api_register():
 
     user = User(email=email, nickname=nickname or email.split("@")[0])
     user.set_password(password)
+    user.agreed_terms = True
+    user.agreed_at = datetime.utcnow()
     db.session.add(user)
     db.session.commit()
 
@@ -983,6 +1005,7 @@ def api_likes_approve():
     data = request.get_json() or {}
     item_id = data.get("id")         # 개별 승인
     approve_all = data.get("all")    # 일괄 승인
+    custom_qty = data.get("custom_qty")  # 사용자 지정 수량
 
     smm = SMMClient()
     if not smm.enabled:
@@ -995,7 +1018,8 @@ def api_likes_approve():
         ]
 
         for item in targets:
-            order = smm.order_likes(item["comment_url"], quantity=item["qty"])
+            qty = custom_qty if (custom_qty and not approve_all) else item["qty"]
+            order = smm.order_likes(item["comment_url"], quantity=qty)
             if order.get("success"):
                 add_log(
                     f"[수동 승인] 좋아요 {item['qty']}개 주문 완료 | "
@@ -1870,6 +1894,7 @@ def _run_automation(limit=0, selected_ids=None):
                                 "default_qty": default_qty,
                                 "top_likes": top_likes,
                                 "top_comments": top_comment_texts,
+                                "my_comment": task.get("comment_text", "")[:200],
                                 "video_url": task["youtube_url"],
                                 "video_title": task.get("video_title", "")[:60],
                                 "account": current_label,
@@ -2897,12 +2922,52 @@ def api_admin_users():
             "id": u.id,
             "email": u.email,
             "nickname": u.nickname,
+            "plan": getattr(u, "plan", None) or "Free",
             "license_key": (u.license_key or "")[:12] + "..." if u.license_key else None,
             "created_at": u.created_at.isoformat() if u.created_at else None,
             "last_login": u.last_login.isoformat() if u.last_login else None,
             "is_active": u.is_active_user,
         } for u in users],
         "total": len(users),
+        "plans": User.VALID_PLANS,
+    })
+
+
+@app.route("/api/admin/update-user", methods=["POST"])
+def api_admin_update_user():
+    """관리자용: 유저 플랜/상태 변경."""
+    if not _admin_view_active:
+        return jsonify({"error": "관리자 권한이 필요합니다."}), 403
+
+    data = request.get_json() or {}
+    user_id = data.get("user_id")
+    if not user_id:
+        return jsonify({"error": "user_id가 필요합니다."}), 400
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "유저를 찾을 수 없습니다."}), 404
+
+    # 플랜 변경
+    new_plan = data.get("plan")
+    if new_plan:
+        if new_plan not in User.VALID_PLANS:
+            return jsonify({"error": f"유효하지 않은 플랜: {new_plan}"}), 400
+        user.plan = new_plan
+
+    # 활성/비활성 변경
+    if "is_active" in data:
+        user.is_active_user = bool(data["is_active"])
+
+    db.session.commit()
+    return jsonify({
+        "success": True,
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "plan": user.plan,
+            "is_active": user.is_active_user,
+        },
     })
 
 

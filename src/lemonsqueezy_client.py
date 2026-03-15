@@ -51,6 +51,20 @@ class LemonSqueezyClient:
                 self.checkout_urls[plan_id] = url
                 loaded += 1
                 print(f"[LemonSqueezy] 직접 체크아웃 URL 로드: {plan_id}")
+
+        # 토큰 충전 상품 URL 로드
+        token_urls = {
+            "token_500": os.getenv("LEMONSQUEEZY_CHECKOUT_TOKEN_500", ""),
+            "token_1200": os.getenv("LEMONSQUEEZY_CHECKOUT_TOKEN_1200", ""),
+            "token_3000": os.getenv("LEMONSQUEEZY_CHECKOUT_TOKEN_3000", ""),
+            "token_7000": os.getenv("LEMONSQUEEZY_CHECKOUT_TOKEN_7000", ""),
+        }
+        for token_id, url in token_urls.items():
+            if url:
+                self.checkout_urls[token_id] = url
+                loaded += 1
+                print(f"[LemonSqueezy] 토큰 충전 URL 로드: {token_id}")
+
         return loaded
 
     def initialize(self):
