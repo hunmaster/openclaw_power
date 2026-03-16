@@ -18,7 +18,8 @@ import tempfile
 
 APP_NAME = "CommentBoost"
 ENTRY_POINT = "desktop.py"
-VERSION_FILE = "version.json"
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+VERSION_FILE = os.path.join(_SCRIPT_DIR, "version.json")
 
 # PyInstaller에 포함할 데이터 파일/폴더
 DATA_FILES = [
@@ -87,6 +88,8 @@ def get_version():
 
 def build():
     """PyInstaller로 .exe 빌드"""
+    # 스크립트 위치 기준으로 작업 디렉토리 설정
+    os.chdir(_SCRIPT_DIR)
     version = get_version()
     print(f"[빌드] {APP_NAME} v{version} 빌드 시작...")
 
