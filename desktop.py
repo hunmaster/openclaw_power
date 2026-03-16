@@ -329,7 +329,22 @@ def _show_update_popup(current_ver, latest_ver, changelog, update_info):
                     except (PermissionError, OSError):
                         pass
 
-            # 4. 정리
+            # 4. version.json을 서버 최신 버전으로 갱신 (무한 루프 방지)
+            local_ver_path = os.path.join(_APP_ROOT, "version.json")
+            try:
+                import json as _json
+                new_ver = {
+                    "version": update_info.get("latest_version", "1.0.0"),
+                    "build": update_info.get("latest_build", 0),
+                    "release_date": update_info.get("release_date", ""),
+                }
+                with open(local_ver_path, "w", encoding="utf-8") as vf:
+                    _json.dump(new_ver, vf, ensure_ascii=False, indent=4)
+                _log.info(f"version.json 갱신: v{new_ver['version']}")
+            except Exception as ve:
+                _log.warning(f"version.json 갱신 실패: {ve}")
+
+            # 5. 정리
             _update_label("정리 중...", 90)
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
