@@ -262,12 +262,15 @@ def build():
 
     # landing/version.json 자동 동기화
     landing_ver_path = os.path.join("landing", "version.json")
-    with open(VERSION_FILE, "r", encoding="utf-8") as f:
-        ver_data = json.load(f)
-    ver_data["download_url"] = f"{zip_name}.zip"
-    with open(landing_ver_path, "w", encoding="utf-8") as f:
-        json.dump(ver_data, f, ensure_ascii=False, indent=4)
-    print(f"[빌드] landing/version.json 동기화: v{ver_data.get('version')}")
+    if os.path.exists(VERSION_FILE):
+        with open(VERSION_FILE, "r", encoding="utf-8") as f:
+            ver_data = json.load(f)
+        ver_data["download_url"] = f"{zip_name}.zip"
+        with open(landing_ver_path, "w", encoding="utf-8") as f:
+            json.dump(ver_data, f, ensure_ascii=False, indent=4)
+        print(f"[빌드] landing/version.json 동기화: v{ver_data.get('version')}")
+    else:
+        print("[빌드] 경고: version.json 없음 - landing 동기화 건너뜀")
 
     # 완료 안내
     print()
