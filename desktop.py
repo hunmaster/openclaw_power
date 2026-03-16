@@ -10,9 +10,24 @@ import sys
 import time
 import threading
 import socket
+import logging
 
 # 프로젝트 루트를 경로에 추가
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_APP_ROOT = os.path.dirname(os.path.abspath(__file__))
+if getattr(sys, 'frozen', False):
+    _APP_ROOT = os.path.dirname(sys.executable)
+sys.path.insert(0, _APP_ROOT)
+
+# 파일 로깅 설정 (--noconsole에서도 디버깅 가능)
+_log_dir = os.path.join(_APP_ROOT, "data")
+os.makedirs(_log_dir, exist_ok=True)
+logging.basicConfig(
+    filename=os.path.join(_log_dir, "desktop.log"),
+    level=logging.INFO,
+    format="%(asctime)s %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+_log = logging.getLogger("desktop")
 
 # Flask 앱 임포트 전에 환경 설정
 os.environ["DESKTOP_MODE"] = "1"
@@ -70,18 +85,19 @@ def check_and_show_update():
     """
     try:
         from src.updater import check_for_updates, get_current_version
-    except ImportError:
-        print("[Update] updater 모듈 로드 실패, 업데이트 건너뜀")
+    except ImportError as e:
+        _log.error(f"updater 모듈 로드 실패: {e}")
         return False
 
-    print("[Update] 업데이트 확인 중...")
+    _log.info("업데이트 확인 중...")
     update_info = check_for_updates()
+    _log.info(f"서버 응답: {update_info}")
 
     if not update_info.get("needs_update"):
         if update_info.get("error"):
-            print(f"[Update] 확인 실패: {update_info['error']}")
+            _log.warning(f"확인 실패: {update_info['error']}")
         else:
-            print("[Update] 최신 버전입니다.")
+            _log.info("최신 버전입니다.")
         return False
 
     current = get_current_version()
@@ -89,7 +105,7 @@ def check_and_show_update():
     latest_ver = update_info.get("latest_version", "?")
     changelog = update_info.get("changelog", "")
 
-    print(f"[Update] 새 버전 발견: v{current_ver} → v{latest_ver}")
+    _log.info(f"새 버전 발견: v{current_ver} → v{latest_ver}")
 
     # tkinter 팝업 표시
     return _show_update_popup(current_ver, latest_ver, changelog, update_info)
@@ -106,21 +122,31 @@ def _show_update_popup(current_ver, latest_ver, changelog, update_info):
 
     result = {"do_update": False}
 
-    root = tk.Tk()
+    # 전체 화면 반투명 검은 배경 (오버레이)
+    overlay = tk.Tk()
+    overlay.attributes("-fullscreen", True)
+    overlay.attributes("-alpha", 0.7)
+    overlay.configure(bg="#000000")
+    overlay.attributes("-topmost", True)
+    overlay.overrideredirect(True)  # 타이틀바 제거
+
+    # 메인 팝업 창
+    root = tk.Toplevel(overlay)
     root.title("CommentBoost 업데이트")
     root.resizable(False, False)
     root.configure(bg="#1a1a2e")
 
     # 창 크기 및 중앙 배치
     win_w, win_h = 480, 400
-    screen_w = root.winfo_screenwidth()
-    screen_h = root.winfo_screenheight()
+    screen_w = overlay.winfo_screenwidth()
+    screen_h = overlay.winfo_screenheight()
     x = (screen_w - win_w) // 2
     y = (screen_h - win_h) // 2
     root.geometry(f"{win_w}x{win_h}+{x}+{y}")
+    root.attributes("-topmost", True)
 
     # 아이콘 설정
-    icon_path = os.path.join(os.path.dirname(__file__), "app_icon.ico")
+    icon_path = os.path.join(_APP_ROOT, "app_icon.ico")
     if os.path.exists(icon_path):
         try:
             root.iconbitmap(icon_path)
@@ -206,7 +232,7 @@ def _show_update_popup(current_ver, latest_ver, changelog, update_info):
             _update_label("앱을 재시작합니다...", 100)
             time.sleep(1.5)
 
-            root.after(0, root.destroy)
+            root.after(0, lambda: [root.destroy(), overlay.destroy()])
             _restart_after_update()
 
         except Exception as e:
@@ -250,17 +276,19 @@ def _show_update_popup(current_ver, latest_ver, changelog, update_info):
     # 창 닫기 방지 (X 버튼 클릭 시 프로그램 종료)
     def on_close():
         root.destroy()
+        overlay.destroy()
         sys.exit(0)
 
     root.protocol("WM_DELETE_WINDOW", on_close)
 
+    # 오버레이 클릭 시에도 종료
+    overlay.bind("<Button-1>", lambda e: on_close())
+
     # 포커스
     root.lift()
-    root.attributes("-topmost", True)
-    root.after(100, lambda: root.attributes("-topmost", False))
     root.focus_force()
 
-    root.mainloop()
+    overlay.mainloop()
 
     return result["do_update"]
 
@@ -295,12 +323,13 @@ def _restart_after_update():
 
 def main():
     # ── 1단계: 업데이트 체크 ──
+    _log.info(f"앱 시작 (APP_ROOT: {_APP_ROOT})")
     try:
         updated = check_and_show_update()
         if updated:
             return  # 업데이트 후 재시작됨
     except Exception as e:
-        print(f"[Update] 업데이트 체크 오류 (무시): {e}")
+        _log.error(f"업데이트 체크 오류: {e}", exc_info=True)
 
     # ── 2단계: 앱 실행 ──
     try:
