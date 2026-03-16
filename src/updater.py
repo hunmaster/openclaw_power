@@ -32,12 +32,19 @@ DEFAULT_UPDATE_SERVER = "https://commentboost-app.fly.dev"
 # 절대 덮어쓰면 안 되는 파일/디렉토리 목록
 PRESERVE_PATHS = {
     ".env",
+    ".env.local",
     ".license",
     "config",
     "data",
-    # 사용자가 커스텀한 가능성이 있는 파일
-    ".env.local",
+    # 인증서 파일
+    "cert.pem",
+    "key.pem",
+    # Windows 폴더 설정
+    "desktop.ini",
 }
+
+# 보존해야 할 파일 확장자 (사용자 데이터)
+PRESERVE_EXTENSIONS = {".db", ".sqlite", ".sqlite3"}
 
 
 def get_current_version():
@@ -204,6 +211,11 @@ def perform_update():
             else:
                 source_dir = extract_dir
 
+            _set_progress("applying", 55, "사용자 데이터 백업 중...")
+
+            # 업데이트 전 사용자 데이터 백업
+            _backup_user_data()
+
             _set_progress("applying", 60, "파일 업데이트 중...")
 
             # 파일 덮어쓰기 (보존 목록 제외)
@@ -230,6 +242,36 @@ def perform_update():
     t = threading.Thread(target=_do_update, daemon=True)
     t.start()
     return {"status": "started", "message": "업데이트를 시작합니다."}
+
+
+def _backup_user_data():
+    """업데이트 전 사용자 데이터(DB, config, .env) 백업"""
+    backup_dir = os.path.join(APP_ROOT, "data", "_backup")
+    os.makedirs(backup_dir, exist_ok=True)
+
+    # DB 파일 백업
+    db_path = os.path.join(APP_ROOT, "data", "users.db")
+    if os.path.exists(db_path):
+        try:
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            shutil.copy2(db_path, os.path.join(backup_dir, f"users_{ts}.db"))
+            # 오래된 백업 정리 (최근 5개만 유지)
+            backups = sorted(
+                [f for f in os.listdir(backup_dir) if f.startswith("users_") and f.endswith(".db")],
+                reverse=True,
+            )
+            for old in backups[5:]:
+                os.remove(os.path.join(backup_dir, old))
+        except Exception as e:
+            print(f"[Update] DB 백업 실패 (무시): {e}")
+
+    # .env 백업
+    env_path = os.path.join(APP_ROOT, ".env")
+    if os.path.exists(env_path):
+        try:
+            shutil.copy2(env_path, os.path.join(backup_dir, ".env.bak"))
+        except Exception:
+            pass
 
 
 def _apply_update(source_dir, target_dir):
@@ -259,6 +301,10 @@ def _apply_update(source_dir, target_dir):
             # 보존 파일 건너뛰기
             rel_file = os.path.join(rel_root, filename) if rel_root else filename
             if rel_file in PRESERVE_PATHS or filename in PRESERVE_PATHS:
+                continue
+            # DB 등 사용자 데이터 파일 보존
+            _, ext = os.path.splitext(filename)
+            if ext.lower() in PRESERVE_EXTENSIONS:
                 continue
 
             src_file = os.path.join(root, filename)

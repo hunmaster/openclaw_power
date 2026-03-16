@@ -5813,6 +5813,12 @@
 }
 </style>
 
+<!-- 좌측 하단 버전 표시 -->
+<div style="position:fixed;bottom:24px;left:24px;z-index:9998;font-size:11px;color:#555;background:rgba(30,30,30,0.8);padding:4px 10px;border-radius:8px;border:1px solid #333;" id="versionBadge">v--</div>
+<script>
+fetch('/api/update/check',{method:'POST',headers:{'Content-Type':'application/json'}}).then(r=>r.ok?r.json():null).then(d=>{if(d)document.getElementById('versionBadge').textContent='v'+(d.current_version||'?')}).catch(()=>{});
+</script>
+
 <!-- 우측 하단 문의하기 플로팅 버튼 -->
 <a href="https://open.kakao.com/o/sHqk1tli" target="_blank" id="floatingContactBtn" style="position:fixed;bottom:24px;right:24px;z-index:9998;display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#fee500,#f7d200);color:#3c1e1e;padding:12px 20px;border-radius:50px;font-size:13px;font-weight:700;text-decoration:none;box-shadow:0 4px 16px rgba(0,0,0,0.3);transition:all 0.3s ease;cursor:pointer;" onmouseover="this.style.transform='scale(1.05)';this.style.boxShadow='0 6px 24px rgba(0,0,0,0.4)'" onmouseout="this.style.transform='scale(1)';this.style.boxShadow='0 4px 16px rgba(0,0,0,0.3)'">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="#3c1e1e"><path d="M12 3C6.48 3 2 6.58 2 11c0 2.83 1.85 5.31 4.62 6.72-.15.56-.82 2.98-.86 3.19 0 0-.02.11.04.16.07.05.15.02.15.02.2-.03 2.37-1.56 3.36-2.2.87.13 1.77.2 2.69.2 5.52 0 10-3.58 10-8S17.52 3 12 3z"/></svg>
