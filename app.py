@@ -11,18 +11,12 @@
 
 import os
 import sys
-import json
-import time
-import uuid
-import random
-import threading
-from collections import defaultdict, deque
-from datetime import datetime, timedelta
 
-# Windows 한국어 환경 (cp949) 인코딩 문제 해결
+# Windows 한국어 환경 (cp949) 인코딩 문제 해결 — 가장 먼저 실행
 # rich 라이브러리의 유니코드 박스 문자(╔, ╗ 등)가 cp949에서 인코딩 실패하는 문제 방지
 if sys.platform == "win32":
-    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+    os.environ["PYTHONIOENCODING"] = "utf-8"
+    # stdout/stderr 가 None 일 수 있음 (pythonw / pyinstaller --noconsole)
     for _stream in (sys.stdout, sys.stderr):
         if _stream and hasattr(_stream, "reconfigure"):
             try:
@@ -30,27 +24,50 @@ if sys.platform == "win32":
             except Exception:
                 pass
 
-from flask import Flask, render_template, jsonify, request, redirect, url_for, send_file
-from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-from dotenv import load_dotenv
+# 크래시 디버깅: 에러를 파일로 기록 (CMD 에 로그가 안 보일 때 확인용)
+_startup_log = os.path.join(os.path.dirname(os.path.abspath(__file__)), "startup_error.log")
+try:
+    import json
+    import time
+    import uuid
+    import random
+    import threading
+    from collections import defaultdict, deque
+    from datetime import datetime, timedelta
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from flask import Flask, render_template, jsonify, request, redirect, url_for, send_file
+    from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+    from dotenv import load_dotenv
 
-load_dotenv(override=True)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from src.notion_client import NotionManager
-from src.proxy_manager import ProxyManager
-from src.fingerprint import FingerprintManager
-from src.safety_rules import SafetyRules
-from src.smm_client import SMMClient
-from src.adb_ip_changer import ADBIPChanger
-from src.comment_tracker import CommentTracker
-from src.license_client import license_client, is_owner_mode, LIKE_TIERS, PLAN_FEATURES
-from src.lemonsqueezy_client import LemonSqueezyClient
-from src.updater import (
-    check_updates_async, get_update_status, check_for_updates,
-    perform_update, get_update_progress, get_current_version,
-)
+    load_dotenv(override=True)
+
+    from src.notion_client import NotionManager
+    from src.proxy_manager import ProxyManager
+    from src.fingerprint import FingerprintManager
+    from src.safety_rules import SafetyRules
+    from src.smm_client import SMMClient
+    from src.adb_ip_changer import ADBIPChanger
+    from src.comment_tracker import CommentTracker
+    from src.license_client import license_client, is_owner_mode, LIKE_TIERS, PLAN_FEATURES
+    from src.lemonsqueezy_client import LemonSqueezyClient
+    from src.updater import (
+        check_updates_async, get_update_status, check_for_updates,
+        perform_update, get_update_progress, get_current_version,
+    )
+except Exception as _startup_err:
+    import traceback as _tb
+    with open(_startup_log, "w", encoding="utf-8") as _f:
+        _f.write(f"=== 시작 에러 ({__import__('datetime').datetime.now()}) ===\n")
+        _tb.print_exc(file=_f)
+    # 터미널에도 출력 시도
+    try:
+        print(f"\n[에러] 앱 시작 실패! 상세 로그: {_startup_log}")
+        _tb.print_exc()
+    except Exception:
+        pass
+    sys.exit(1)
 
 # Lemon Squeezy 클라이언트 초기화
 ls_client = LemonSqueezyClient()
