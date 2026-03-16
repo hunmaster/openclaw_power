@@ -48,8 +48,15 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "commentboost-secret-fixed-key-2024")
 
 # ─── 데이터베이스 & 로그인 매니저 ───
-# Fly.io 볼륨 마운트(/data) 우선, 없으면 로컬 data 폴더 사용
-_data_dir = "/data" if os.path.isdir("/data") else os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+# Fly.io 볼륨 마운트(/data) 우선, 없으면 EXE 실행 폴더 기준 data 폴더 사용
+# PyInstaller EXE: __file__이 _internal/ 안을 가리키므로, sys.executable 기준으로 잡아야 함
+if os.path.isdir("/data"):
+    _data_dir = "/data"
+elif getattr(sys, 'frozen', False):
+    # PyInstaller EXE 실행 시: CommentBoost.exe가 있는 폴더 기준
+    _data_dir = os.path.join(os.path.dirname(sys.executable), "data")
+else:
+    _data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 os.makedirs(_data_dir, exist_ok=True)
 
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(_data_dir, "users.db")
@@ -491,6 +498,33 @@ def api_login():
 
     login_user(user, remember=True)
     return jsonify({"success": True, "user": user.to_dict()})
+
+
+@app.route("/api/auth/reset-password", methods=["POST"])
+def api_reset_password():
+    """비밀번호 재설정 (이메일 확인 후 새 비밀번호 설정)."""
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip().lower()
+    new_password = data.get("new_password") or ""
+
+    if not email or "@" not in email:
+        return jsonify({"error": "올바른 이메일을 입력해주세요."}), 400
+    if len(new_password) < 6:
+        return jsonify({"error": "비밀번호는 최소 6자 이상이어야 합니다."}), 400
+
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        return jsonify({"error": "가입되지 않은 이메일입니다."}), 404
+
+    user.set_password(new_password)
+    log = UserActivityLog(
+        user_id=user.id, email=email, action="reset_password",
+        ip_address=request.remote_addr,
+    )
+    db.session.add(log)
+    db.session.commit()
+
+    return jsonify({"success": True, "message": "비밀번호가 재설정되었습니다."})
 
 
 @app.route("/api/auth/logout", methods=["POST"])

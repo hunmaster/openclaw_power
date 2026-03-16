@@ -195,6 +195,34 @@
                 </div>
                 <button type="submit" class="btn-submit" id="loginBtn">로그인</button>
                 <div class="error-msg" id="loginError"></div>
+                <div style="text-align:center;margin-top:12px;">
+                    <a href="javascript:void(0)" onclick="switchAuthTab('reset')" style="color:var(--text-muted);font-size:12px;text-decoration:underline;">비밀번호를 잊으셨나요?</a>
+                </div>
+            </form>
+
+            <!-- 비밀번호 재설정 폼 -->
+            <form id="resetForm" style="display:none;" onsubmit="handleReset(event)">
+                <div style="text-align:center;margin-bottom:20px;">
+                    <p style="font-size:13px;color:var(--text-muted);line-height:1.6;">가입한 이메일을 입력하고<br>새 비밀번호를 설정하세요.</p>
+                </div>
+                <div class="form-group">
+                    <label>가입 이메일</label>
+                    <input type="email" id="resetEmail" placeholder="example@email.com" required autocomplete="email">
+                </div>
+                <div class="form-group">
+                    <label>새 비밀번호</label>
+                    <input type="password" id="resetNewPw" placeholder="6자 이상" required minlength="6" autocomplete="new-password">
+                </div>
+                <div class="form-group">
+                    <label>새 비밀번호 확인</label>
+                    <input type="password" id="resetNewPwConfirm" placeholder="비밀번호를 다시 입력" required autocomplete="new-password">
+                </div>
+                <button type="submit" class="btn-submit" id="resetBtn">비밀번호 재설정</button>
+                <div class="error-msg" id="resetError"></div>
+                <div class="success-msg" id="resetSuccess"></div>
+                <div style="text-align:center;margin-top:12px;">
+                    <a href="javascript:void(0)" onclick="switchAuthTab('login')" style="color:var(--text-muted);font-size:12px;text-decoration:underline;">← 로그인으로 돌아가기</a>
+                </div>
             </form>
 
             <!-- 회원가입 폼 -->
@@ -296,8 +324,55 @@
             });
             document.getElementById('loginForm').style.display = tab === 'login' ? 'block' : 'none';
             document.getElementById('registerForm').style.display = tab === 'register' ? 'block' : 'none';
+            document.getElementById('resetForm').style.display = tab === 'reset' ? 'block' : 'none';
+            // reset 탭에서는 상단 탭 비활성화
+            if (tab === 'reset') {
+                document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+            }
             document.getElementById('loginError').textContent = '';
             document.getElementById('registerError').textContent = '';
+            document.getElementById('resetError').textContent = '';
+            document.getElementById('resetSuccess').textContent = '';
+        }
+
+        async function handleReset(e) {
+            e.preventDefault();
+            const btn = document.getElementById('resetBtn');
+            const errEl = document.getElementById('resetError');
+            const successEl = document.getElementById('resetSuccess');
+            errEl.textContent = '';
+            successEl.textContent = '';
+
+            const newPw = document.getElementById('resetNewPw').value;
+            if (newPw !== document.getElementById('resetNewPwConfirm').value) {
+                errEl.textContent = '비밀번호가 일치하지 않습니다.';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = '처리 중...';
+            try {
+                const res = await fetch('/api/auth/reset-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: document.getElementById('resetEmail').value.trim(),
+                        new_password: newPw,
+                    })
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    successEl.textContent = '비밀번호가 재설정되었습니다. 로그인해주세요.';
+                    setTimeout(() => switchAuthTab('login'), 2000);
+                } else {
+                    errEl.textContent = data.error || '재설정에 실패했습니다.';
+                }
+            } catch (err) {
+                errEl.textContent = '서버에 연결할 수 없습니다.';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '비밀번호 재설정';
+            }
         }
 
         async function handleLogin(e) {

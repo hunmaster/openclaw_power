@@ -317,7 +317,7 @@
 </div>
 
 <div class="header">
-    <h1><span>댓글</span> 부스터</h1>
+    <h1><span>댓글</span> 부스터 <span id="headerVersion" style="font-size:12px;font-weight:400;color:#666;margin-left:8px;">ver --</span></h1>
     <div class="header-actions">
         <span id="licenseBadge" style="display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:12px;font-size:12px;font-weight:600;background:#3b82f620;color:#60a5fa;cursor:pointer;" onclick="openSubscriptionPopup()" title="구독 정보 및 업그레이드">
             <span id="licensePlanText">-</span>
@@ -5813,10 +5813,9 @@
 }
 </style>
 
-<!-- 좌측 하단 버전 표시 -->
-<div style="position:fixed;bottom:24px;left:24px;z-index:9998;font-size:11px;color:#555;background:rgba(30,30,30,0.8);padding:4px 10px;border-radius:8px;border:1px solid #333;" id="versionBadge">v--</div>
+<!-- 헤더 버전 로딩 -->
 <script>
-fetch('/api/update/check',{method:'POST',headers:{'Content-Type':'application/json'}}).then(r=>r.ok?r.json():null).then(d=>{if(d)document.getElementById('versionBadge').textContent='v'+(d.current_version||'?')}).catch(()=>{});
+fetch('/api/update/check',{method:'POST',headers:{'Content-Type':'application/json'}}).then(r=>r.ok?r.json():null).then(d=>{if(d){const el=document.getElementById('headerVersion');if(el)el.textContent='ver '+(d.current_version||'?')}}).catch(()=>{});
 </script>
 
 <!-- 우측 하단 문의하기 플로팅 버튼 -->

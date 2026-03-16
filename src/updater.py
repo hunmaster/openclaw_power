@@ -22,8 +22,11 @@ import subprocess
 import sys
 import requests
 
-# 현재 앱 루트 디렉토리
-APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# 현재 앱 루트 디렉토리 (PyInstaller EXE에서는 exe가 있는 폴더 기준)
+if getattr(sys, 'frozen', False):
+    APP_ROOT = os.path.dirname(sys.executable)
+else:
+    APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VERSION_FILE = os.path.join(APP_ROOT, "version.json")
 
 # 업데이트 서버 URL (랜딩 서버)

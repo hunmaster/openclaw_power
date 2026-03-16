@@ -200,7 +200,7 @@ def _show_update_popup(current_ver, latest_ver, changelog, update_info):
         """업데이트 실행 (백그라운드 스레드)"""
         try:
             from src.updater import (
-                get_update_server_url, _apply_update, APP_ROOT,
+                get_update_server_url, _apply_update, _backup_user_data, APP_ROOT,
                 _set_progress,
             )
             import requests
@@ -245,7 +245,11 @@ def _show_update_popup(current_ver, latest_ver, changelog, update_info):
             else:
                 source_dir = extract_dir
 
-            # 3. 파일 적용
+            # 3. 사용자 데이터 백업
+            _update_label("사용자 데이터 백업 중...", 60)
+            _backup_user_data()
+
+            # 4. 파일 적용
             _update_label("파일 업데이트 중...", 65)
             _apply_update(source_dir, APP_ROOT)
 
