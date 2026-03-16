@@ -93,7 +93,15 @@ def build():
     version = get_version()
     print(f"[빌드] {APP_NAME} v{version} 빌드 시작...")
 
-    # 이전 빌드 정리
+    # 이전 빌드 정리 (사용자 데이터 보존)
+    # dist/CommentBoost/data/ 는 사용자 DB가 있으므로 절대 삭제하지 않음
+    user_data_dir = os.path.join("dist", APP_NAME, "data")
+    user_data_backup = None
+    if os.path.exists(user_data_dir):
+        user_data_backup = os.path.join(tempfile.gettempdir(), f"commentboost_data_backup_{int(time.time())}")
+        shutil.copytree(user_data_dir, user_data_backup)
+        print(f"[빌드] 사용자 데이터 백업 완료: {user_data_backup}")
+
     for d in ["build", "dist"]:
         if os.path.exists(d):
             for attempt in range(3):
@@ -198,6 +206,13 @@ def build():
     os.makedirs(os.path.join(dist_dir, "config"), exist_ok=True)
     os.makedirs(os.path.join(dist_dir, "data"), exist_ok=True)
 
+    # 사용자 데이터 복원 (빌드 전 백업했던 data/ 폴더)
+    if user_data_backup and os.path.exists(user_data_backup):
+        restored_data_dir = os.path.join(dist_dir, "data")
+        shutil.copytree(user_data_backup, restored_data_dir, dirs_exist_ok=True)
+        shutil.rmtree(user_data_backup, ignore_errors=True)
+        print("[빌드] 사용자 데이터 복원 완료 (users.db, 설정 등 보존)")
+
     # config 예제 파일 복사
     for f in ["accounts.example.json", "proxies.example.txt"]:
         src_path = os.path.join("config", f)
@@ -229,11 +244,24 @@ def build():
         print("[빌드] 폴더 아이콘 설정 완료 (app_icon.ico)")
 
     # 업데이트 배포용 ZIP 자동 생성
+    # ZIP에 사용자 데이터(DB 등)가 포함되면 업데이트 시 빈 DB로 덮어쓸 수 있으므로 제외
+    dist_data_dir = os.path.join(dist_dir, "data")
+    dist_data_backup_for_zip = None
+    if os.path.exists(dist_data_dir) and os.listdir(dist_data_dir):
+        dist_data_backup_for_zip = os.path.join(tempfile.gettempdir(), f"commentboost_zip_data_{int(time.time())}")
+        shutil.move(dist_data_dir, dist_data_backup_for_zip)
+        os.makedirs(dist_data_dir, exist_ok=True)  # 빈 data/ 폴더 유지
+
     zip_name = "commentboost-latest"
     zip_path = shutil.make_archive(
         os.path.join("dist", zip_name), "zip", "dist", APP_NAME
     )
     print(f"[빌드] 업데이트 ZIP 생성: {zip_path}")
+
+    # ZIP 생성 후 사용자 데이터 복원
+    if dist_data_backup_for_zip and os.path.exists(dist_data_backup_for_zip):
+        shutil.rmtree(dist_data_dir, ignore_errors=True)
+        shutil.move(dist_data_backup_for_zip, dist_data_dir)
 
     # landing/releases/ 에 자동 복사 (Fly.io 배포 시 포함됨)
     releases_dir = os.path.join("landing", "releases")

@@ -58,6 +58,8 @@ elif getattr(sys, 'frozen', False):
 else:
     _data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 os.makedirs(_data_dir, exist_ok=True)
+print(f"[DB] 데이터 경로: {_data_dir}")
+print(f"[DB] users.db 존재: {os.path.exists(os.path.join(_data_dir, 'users.db'))}")
 
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(_data_dir, "users.db")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
