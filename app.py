@@ -734,8 +734,7 @@ def api_dashboard():
     # 상태별 카운트 (전체 DB 1회 조회)
     status_counts = {}
     try:
-        _ensure_notion_env()
-        notion = NotionManager()
+        notion = _create_notion_manager()
         status_counts = notion.count_all_statuses()
     except Exception:
         pass
@@ -832,8 +831,7 @@ def api_tasks():
                 _loading_state["message"] = "노션 데이터 불러오는 중..."
 
             try:
-                _ensure_notion_env()
-                notion = NotionManager()
+                notion = _create_notion_manager()
                 if status_filter == "전체":
                     tasks = notion.get_all_tasks(progress_callback=on_progress)
                 else:
@@ -978,11 +976,9 @@ def api_notion_debug():
     """노션 DB 구조를 확인합니다 (디버깅용)."""
     try:
         from notion_client import Client
-        load_dotenv(override=True)
-        _ensure_notion_env()
-        # 유저별 DB 설정 우선, os.getenv 폴백
-        token = _get_user_setting(current_user.id, "NOTION_API_TOKEN") or os.getenv("NOTION_API_TOKEN", "")
-        db_id = _get_user_setting(current_user.id, "NOTION_DATABASE_ID") or os.getenv("NOTION_DATABASE_ID", "")
+        token, db_id = _ensure_notion_env()
+        token = token or ""
+        db_id = db_id or ""
 
         if not token or not db_id:
             return jsonify({"error": "NOTION_API_TOKEN 또는 NOTION_DATABASE_ID 미설정"}), 400
@@ -1207,8 +1203,7 @@ def api_reply_status():
 def api_reply_preview():
     """대댓글 대기 작업 목록을 미리보기합니다."""
     try:
-        _ensure_notion_env()
-        notion = NotionManager()
+        notion = _create_notion_manager()
         tasks = notion.get_reply_pending_tasks()
         items = []
         for t in tasks:
@@ -1233,8 +1228,7 @@ def api_duplicate_scan():
         return jsonify({"error": "중복 스캔은 Business 플랜부터 사용 가능합니다.", "upgrade_required": True}), 403
 
     try:
-        _ensure_notion_env()
-        notion = NotionManager()
+        notion = _create_notion_manager()
         tasks = notion.get_pending_tasks()
         if not tasks:
             return jsonify({"duplicates": [], "clean_count": 0, "message": "대기 작업이 없습니다."})
@@ -1322,8 +1316,8 @@ def _get_user_setting(user_id, key, default=None):
 
 
 def _ensure_notion_env(user_id=None):
-    """유저 DB 설정의 Notion 토큰/DB ID를 os.environ에 반영합니다.
-    NotionManager()가 os.getenv()로 읽으므로, .env 파일이 없어도 동작하도록 합니다."""
+    """유저 DB 설정의 Notion 토큰/DB ID를 os.environ에 반영하고, (token, db_id)를 반환합니다.
+    NotionManager(token, database_id)로 직접 전달하여 .env 덮어쓰기 방지."""
     if user_id is None:
         try:
             if current_user and current_user.is_authenticated:
@@ -1347,6 +1341,15 @@ def _ensure_notion_env(user_id=None):
         val = _get_user_setting(user_id, col_key)
         if val:
             os.environ[col_key] = val
+
+    return token, db_id
+
+
+def _create_notion_manager(user_id=None):
+    """유저 설정에서 노션 토큰/DB ID를 읽어 NotionManager를 생성합니다.
+    .env 파일의 오래된 토큰이 유저 설정을 덮어쓰는 문제를 방지합니다."""
+    token, db_id = _ensure_notion_env(user_id)
+    return NotionManager(token=token, database_id=db_id)
 
 
 MASKED_PLACEHOLDER = "__MASKED__"
@@ -1401,8 +1404,7 @@ def api_likes_approve():
                 _save_like_order(order.get("order_id"), item["comment_url"], qty, source="approval")
                 # 좋아요 체크박스 업데이트
                 try:
-                    _ensure_notion_env()
-                    notion = NotionManager()
+                    notion = _create_notion_manager()
                     notion.update_like_checkbox(item["page_id"])
                 except Exception:
                     pass
@@ -1576,9 +1578,7 @@ def api_check_connections():
     else:
         try:
             # 유저 설정을 os.environ에 반영하여 NotionManager가 올바른 토큰 사용
-            os.environ["NOTION_API_TOKEN"] = notion_token
-            os.environ["NOTION_DATABASE_ID"] = notion_db_id
-            notion = NotionManager()
+            notion = NotionManager(token=notion_token, database_id=notion_db_id)
             tasks = notion.get_pending_tasks()
             results["notion"] = {"ok": True, "message": f"연결 성공! 대기 작업 {len(tasks)}개"}
         except Exception as e:
@@ -2298,8 +2298,7 @@ def _run_automation(limit=0, selected_ids=None):
         add_log(f"자동화 시작 {mode_label}", "info")
         save_automation_log("automation_start", detail=mode_label, level="info")
 
-        _ensure_notion_env()
-        notion = NotionManager()
+        notion = _create_notion_manager()
         proxy_manager = ProxyManager()
         fingerprint_manager = FingerprintManager()
         safety_rules = SafetyRules()
@@ -2729,8 +2728,7 @@ def _run_full_auto():
             # 다음 라운드 전 대기 작업 확인
             automation_state["current_task"] = "[재수집 중] 노션 대기 작업 확인..."
             try:
-                _ensure_notion_env()
-                notion = NotionManager()
+                notion = _create_notion_manager()
                 pending = notion.count_pending_tasks()
                 add_log(f"남은 대기 작업: {pending}건", "info")
             except Exception as e:
@@ -2783,8 +2781,7 @@ def _run_reply_automation(limit=0):
         mode_label = f"[대댓글 테스트 {limit}건]" if test_mode else "[대댓글 전체 실행]"
         add_log(f"=== 대댓글 자동화 시작 {mode_label} ===", "info")
 
-        _ensure_notion_env()
-        notion = NotionManager()
+        notion = _create_notion_manager()
         proxy_manager = ProxyManager()
         fingerprint_manager = FingerprintManager()
         accounts = load_accounts()
@@ -3359,8 +3356,7 @@ def api_tracking_import_notion():
     (댓글완료 / 대댓글완료 / 좋아요작업완료 상태의 작업)
     """
     try:
-        _ensure_notion_env()
-        notion = NotionManager()
+        notion = _create_notion_manager()
         tasks = notion.get_all_tasks()
 
         imported = 0

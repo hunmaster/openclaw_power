@@ -14,12 +14,13 @@ console = Console()
 
 
 class NotionManager:
-    def __init__(self):
-        # .env 변경사항을 매번 반영
-        load_dotenv(override=True)
+    def __init__(self, token=None, database_id=None):
+        # .env는 os.environ에 없는 키만 보충 (override=False)
+        # → _ensure_notion_env()가 이미 설정한 값을 덮어쓰지 않음
+        load_dotenv(override=False)
 
-        self.token = os.getenv("NOTION_API_TOKEN")
-        self.database_id = os.getenv("NOTION_DATABASE_ID")
+        self.token = token or os.getenv("NOTION_API_TOKEN")
+        self.database_id = database_id or os.getenv("NOTION_DATABASE_ID")
 
         if not self.token or not self.database_id:
             raise ValueError("NOTION_API_TOKEN과 NOTION_DATABASE_ID를 .env에 설정해주세요.")
