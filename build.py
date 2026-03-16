@@ -201,6 +201,11 @@ def build():
         if os.path.exists(src_path):
             shutil.copy2(src_path, os.path.join(dist_dir, "config", f))
 
+    # version.json을 EXE 옆에 복사 (updater가 참조)
+    if os.path.exists(VERSION_FILE):
+        shutil.copy2(VERSION_FILE, os.path.join(dist_dir, "version.json"))
+        print("[빌드] version.json 복사 완료")
+
     # install_adb.bat 복사
     if os.path.exists("install_adb.bat"):
         shutil.copy2("install_adb.bat", os.path.join(dist_dir, "install_adb.bat"))
