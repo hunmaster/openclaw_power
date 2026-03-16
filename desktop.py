@@ -61,8 +61,72 @@ def find_free_port(start=5000, end=5100):
     return start
 
 
+def _force_load_from_filesystem():
+    """
+    PyInstaller EXE에서 번들 캐시를 우회하고 디스크의 최신 코드를 로드.
+    업데이트 후 새 코드가 반영되려면 이 과정이 필수.
+    """
+    if not getattr(sys, 'frozen', False):
+        return  # 개발 환경에서는 불필요
+
+    import importlib.util
+
+    src_dir = os.path.join(_APP_ROOT, "src")
+    app_path = os.path.join(_APP_ROOT, "app.py")
+
+    if not os.path.exists(app_path):
+        _log.warning(f"app.py가 디스크에 없음: {app_path}")
+        return
+
+    _log.info("PyInstaller 번들 우회 - 디스크에서 최신 코드 로드")
+
+    # 1. 기존 번들 모듈 제거
+    for mod_name in list(sys.modules.keys()):
+        if mod_name == "app" or mod_name == "src" or mod_name.startswith("src."):
+            del sys.modules[mod_name]
+
+    # 2. src 패키지를 파일시스템에서 로드
+    src_init = os.path.join(src_dir, "__init__.py")
+    if os.path.exists(src_init):
+        spec = importlib.util.spec_from_file_location(
+            "src", src_init,
+            submodule_search_locations=[src_dir],
+        )
+        src_mod = importlib.util.module_from_spec(spec)
+        sys.modules["src"] = src_mod
+        spec.loader.exec_module(src_mod)
+
+    # 3. src 하위 모듈을 파일시스템에서 로드
+    if os.path.isdir(src_dir):
+        for fname in sorted(os.listdir(src_dir)):
+            if fname.endswith(".py") and fname != "__init__.py":
+                mod_name = f"src.{fname[:-3]}"
+                fpath = os.path.join(src_dir, fname)
+                try:
+                    spec = importlib.util.spec_from_file_location(mod_name, fpath)
+                    mod = importlib.util.module_from_spec(spec)
+                    sys.modules[mod_name] = mod
+                    spec.loader.exec_module(mod)
+                except Exception as e:
+                    _log.warning(f"모듈 로드 실패 {mod_name}: {e}")
+
+    # 4. app.py를 파일시스템에서 로드
+    try:
+        spec = importlib.util.spec_from_file_location("app", app_path)
+        app_mod = importlib.util.module_from_spec(spec)
+        sys.modules["app"] = app_mod
+        spec.loader.exec_module(app_mod)
+        _log.info("app.py 파일시스템 로드 완료")
+    except Exception as e:
+        _log.error(f"app.py 로드 실패: {e}", exc_info=True)
+        raise
+
+
 def start_flask(port):
     """Flask 서버를 별도 스레드에서 실행"""
+    # PyInstaller EXE에서는 번들된 코드 대신 디스크의 최신 코드 사용
+    _force_load_from_filesystem()
+
     from app import app, _start_scheduler
 
     _start_scheduler()

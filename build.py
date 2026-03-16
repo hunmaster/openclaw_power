@@ -202,6 +202,24 @@ def build():
     shutil.copy2("app.py", dist_dir)
     print("[빌드] app.py 복사 완료")
 
+    # templates/ 폴더 복사 (EXE 루트에도 필요 - 업데이트 후 Flask가 참조)
+    tpl_dst = os.path.join(dist_dir, "templates")
+    if os.path.exists(tpl_dst):
+        shutil.rmtree(tpl_dst)
+    if os.path.exists("templates"):
+        shutil.copytree("templates", tpl_dst,
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        print("[빌드] templates/ 폴더 복사 완료")
+
+    # static/ 폴더 복사 (EXE 루트에도 필요)
+    static_dst = os.path.join(dist_dir, "static")
+    if os.path.exists(static_dst):
+        shutil.rmtree(static_dst)
+    if os.path.exists("static"):
+        shutil.copytree("static", static_dst,
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        print("[빌드] static/ 폴더 복사 완료")
+
     # .env.example 복사
     if os.path.exists(".env.example"):
         shutil.copy2(".env.example", os.path.join(dist_dir, ".env.example"))

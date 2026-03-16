@@ -44,17 +44,27 @@ from src.updater import (
 # Lemon Squeezy 클라이언트 초기화
 ls_client = LemonSqueezyClient()
 
-app = Flask(__name__)
+# PyInstaller EXE에서는 __file__이 _internal/ 안을 가리키므로,
+# template/static/data 등은 모두 sys.executable 기준으로 잡아야 함
+if getattr(sys, 'frozen', False):
+    _exe_root = os.path.dirname(sys.executable)
+    app = Flask(
+        __name__,
+        template_folder=os.path.join(_exe_root, "templates"),
+        static_folder=os.path.join(_exe_root, "static"),
+    )
+else:
+    app = Flask(__name__)
+    _exe_root = None
+
 app.secret_key = os.environ.get("SECRET_KEY", "commentboost-secret-fixed-key-2024")
 
 # ─── 데이터베이스 & 로그인 매니저 ───
 # Fly.io 볼륨 마운트(/data) 우선, 없으면 EXE 실행 폴더 기준 data 폴더 사용
-# PyInstaller EXE: __file__이 _internal/ 안을 가리키므로, sys.executable 기준으로 잡아야 함
 if os.path.isdir("/data"):
     _data_dir = "/data"
-elif getattr(sys, 'frozen', False):
-    # PyInstaller EXE 실행 시: CommentBoost.exe가 있는 폴더 기준
-    _data_dir = os.path.join(os.path.dirname(sys.executable), "data")
+elif _exe_root:
+    _data_dir = os.path.join(_exe_root, "data")
 else:
     _data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 os.makedirs(_data_dir, exist_ok=True)
@@ -92,6 +102,21 @@ def unauthorized():
     if request.path.startswith("/api/"):
         return jsonify({"error": "로그인이 필요합니다."}), 401
     return redirect(url_for("auth_page"))
+
+
+@app.errorhandler(500)
+def internal_error(e):
+    """500 에러 발생 시 상세 로그 출력 (디버깅용)."""
+    import traceback
+    tb = traceback.format_exc()
+    print(f"[500 에러] {request.path}: {e}\n{tb}")
+    # desktop.log에도 기록
+    try:
+        import logging
+        logging.getLogger("desktop").error(f"500 에러 {request.path}: {e}\n{tb}")
+    except Exception:
+        pass
+    return jsonify({"error": "서버 내부 오류가 발생했습니다.", "detail": str(e), "path": request.path}), 500
 
 
 with app.app_context():
