@@ -530,6 +530,15 @@ def api_register():
     user.set_password(password)
     user.agreed_terms = True
     user.agreed_at = datetime.utcnow()
+
+    # 라이선스 플랜 → DB 자동 동기화
+    try:
+        license_plan = license_client.get_plan_name()
+        if license_plan and license_plan != "Free":
+            user.plan = license_plan
+    except Exception:
+        pass
+
     db.session.add(user)
     db.session.flush()  # ID 생성
 
@@ -557,6 +566,15 @@ def api_login():
         return jsonify({"error": "이메일 또는 비밀번호가 올바르지 않습니다."}), 401
 
     user.last_login = datetime.utcnow()
+
+    # 라이선스 플랜 → DB 자동 동기화 (상단 헤더와 유저목록 플랜 불일치 방지)
+    try:
+        license_plan = license_client.get_plan_name()
+        if license_plan and license_plan != "Free" and user.plan != license_plan:
+            user.plan = license_plan
+    except Exception:
+        pass
+
     _log_activity(user.id, email, "login")
 
     login_user(user, remember=True)
@@ -841,6 +859,21 @@ def api_tasks():
                             tasks = [t for t in all_tasks if not t.get("comment_done", False)]
                             add_log(f"[상태 자동감지] 실제 상태값: {found_statuses}")
                             add_log(f"[상태 자동감지] 댓글 미완료 작업: {len(tasks)}건 (전체 {len(all_tasks)}건)")
+            except ValueError as ve:
+                # 토큰/DB ID 미설정
+                add_log(f"[노션] 설정 오류: {ve}")
+                return jsonify({
+                    "error": f"노션 설정을 확인해주세요: {ve}",
+                    "tasks": [], "count": 0, "total_count": 0,
+                    "page": 1, "total_pages": 1,
+                }), 400
+            except Exception as notion_err:
+                add_log(f"[노션] 데이터 로딩 실패: {notion_err}")
+                return jsonify({
+                    "error": f"노션 데이터 로딩 실패: {notion_err}",
+                    "tasks": [], "count": 0, "total_count": 0,
+                    "page": 1, "total_pages": 1,
+                }), 500
             finally:
                 with _loading_lock:
                     _loading_state["active"] = False
