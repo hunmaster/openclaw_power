@@ -220,20 +220,41 @@ def build():
             ctypes.windll.kernel32.SetFileAttributesW(dist_dir, 0x01)  # READONLY (폴더 커스텀 아이콘 트리거)
         print("[빌드] 폴더 아이콘 설정 완료 (app_icon.ico)")
 
-    # Playwright 브라우저 번들링 안내
+    # 업데이트 배포용 ZIP 자동 생성
+    zip_name = "commentboost-latest"
+    zip_path = shutil.make_archive(
+        os.path.join("dist", zip_name), "zip", "dist", APP_NAME
+    )
+    print(f"[빌드] 업데이트 ZIP 생성: {zip_path}")
+
+    # landing/releases/ 에 자동 복사 (Fly.io 배포 시 포함됨)
+    releases_dir = os.path.join("landing", "releases")
+    os.makedirs(releases_dir, exist_ok=True)
+    release_dest = os.path.join(releases_dir, f"{zip_name}.zip")
+    shutil.copy2(zip_path, release_dest)
+    print(f"[빌드] 릴리즈 복사: {release_dest}")
+
+    # landing/version.json 자동 동기화
+    landing_ver_path = os.path.join("landing", "version.json")
+    with open(VERSION_FILE, "r", encoding="utf-8") as f:
+        ver_data = json.load(f)
+    ver_data["download_url"] = f"{zip_name}.zip"
+    with open(landing_ver_path, "w", encoding="utf-8") as f:
+        json.dump(ver_data, f, ensure_ascii=False, indent=4)
+    print(f"[빌드] landing/version.json 동기화: v{ver_data.get('version')}")
+
+    # 완료 안내
     print()
     print("=" * 60)
     print(f"[빌드] 완료: dist/{APP_NAME}/")
     print("=" * 60)
     print()
-    print("Playwright 브라우저 설치 (배포 폴더에서 실행):")
-    print(f"  cd dist/{APP_NAME}")
-    print(f"  {APP_NAME}.exe  (또는 python desktop.py)")
-    print()
     print("배포 방법:")
-    print(f"  1. dist/{APP_NAME}/ 폴더를 zip으로 압축")
-    print(f"  2. 랜딩페이지에 업로드")
-    print(f"  3. 사용자: zip 다운로드 → 압축해제 → {APP_NAME}.exe 실행")
+    print(f"  1. cd landing && fly deploy   (Fly.io 랜딩 서버 배포)")
+    print(f"  2. 사용자가 EXE 실행 → 자동 업데이트 팝업 표시")
+    print()
+    print("수동 배포:")
+    print(f"  dist/{zip_name}.zip 파일을 직접 배포해도 됩니다.")
     print()
     print("주의: Playwright Chromium은 사용자 PC에서 최초 실행 시 자동 설치됩니다.")
 

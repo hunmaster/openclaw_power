@@ -18,6 +18,12 @@ config/.license
 # SSL 인증서
 *.pem
 
+# 빌드 결과물
+build/
+dist/
+*.spec
+landing/releases/*.zip
+
 # Python
 __pycache__/
 *.py[cod]
