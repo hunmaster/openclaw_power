@@ -112,40 +112,25 @@ def check_and_show_update():
 
 
 def _show_update_popup(current_ver, latest_ver, changelog, update_info):
-    """tkinter 업데이트 팝업 표시. 업데이트 실행 시 True 반환."""
+    """tkinter 업데이트 팝업 표시. 전체화면 어두운 배경 + 중앙 카드."""
     try:
         import tkinter as tk
         from tkinter import ttk
     except ImportError:
-        print("[Update] tkinter 사용 불가, 업데이트 건너뜀")
+        _log.error("tkinter 사용 불가, 업데이트 건너뜀")
         return False
 
     result = {"do_update": False}
 
-    # 전체 화면 반투명 검은 배경 (오버레이)
-    overlay = tk.Tk()
-    overlay.attributes("-fullscreen", True)
-    overlay.attributes("-alpha", 0.7)
-    overlay.configure(bg="#000000")
-    overlay.attributes("-topmost", True)
-    overlay.overrideredirect(True)  # 타이틀바 제거
-
-    # 메인 팝업 창
-    root = tk.Toplevel(overlay)
+    # 전체화면 단일 창 (어두운 배경 + 중앙 팝업 카드)
+    root = tk.Tk()
     root.title("CommentBoost 업데이트")
-    root.resizable(False, False)
-    root.configure(bg="#1a1a2e")
-
-    # 창 크기 및 중앙 배치
-    win_w, win_h = 480, 400
-    screen_w = overlay.winfo_screenwidth()
-    screen_h = overlay.winfo_screenheight()
-    x = (screen_w - win_w) // 2
-    y = (screen_h - win_h) // 2
-    root.geometry(f"{win_w}x{win_h}+{x}+{y}")
+    root.attributes("-fullscreen", True)
     root.attributes("-topmost", True)
+    root.configure(bg="#0a0a0a")
+    root.overrideredirect(True)
 
-    # 아이콘 설정
+    # 아이콘
     icon_path = os.path.join(_APP_ROOT, "app_icon.ico")
     if os.path.exists(icon_path):
         try:
@@ -161,65 +146,66 @@ def _show_update_popup(current_ver, latest_ver, changelog, update_info):
     green = "#10b981"
     dim = "#888888"
 
-    # 메인 프레임
-    main_frame = tk.Frame(root, bg=bg, padx=30, pady=20)
-    main_frame.pack(fill="both", expand=True)
+    # 중앙 카드 프레임
+    card = tk.Frame(root, bg=bg, padx=40, pady=30,
+                    highlightbackground="#333355", highlightthickness=2)
+    card.place(relx=0.5, rely=0.5, anchor="center")
 
     # 제목
     tk.Label(
-        main_frame, text="신규 업데이트가 있습니다!",
-        font=("맑은 고딕", 16, "bold"), fg="#ffffff", bg=bg,
-    ).pack(pady=(10, 16))
+        card, text="신규 업데이트가 있습니다!",
+        font=("맑은 고딕", 18, "bold"), fg="#ffffff", bg=bg,
+    ).pack(pady=(10, 20))
 
     # 버전 정보 카드
-    ver_frame = tk.Frame(main_frame, bg=card_bg, padx=20, pady=14,
+    ver_frame = tk.Frame(card, bg=card_bg, padx=24, pady=16,
                          highlightbackground="#333355", highlightthickness=1)
-    ver_frame.pack(fill="x", pady=(0, 12))
+    ver_frame.pack(fill="x", pady=(0, 16))
 
     tk.Label(
         ver_frame, text=f"현재 버전:  v{current_ver}",
-        font=("맑은 고딕", 11), fg=dim, bg=card_bg, anchor="w",
+        font=("맑은 고딕", 12), fg=dim, bg=card_bg, anchor="w",
     ).pack(fill="x")
     tk.Label(
         ver_frame, text=f"최신 버전:  v{latest_ver}",
-        font=("맑은 고딕", 11, "bold"), fg=green, bg=card_bg, anchor="w",
-    ).pack(fill="x", pady=(4, 0))
+        font=("맑은 고딕", 12, "bold"), fg=green, bg=card_bg, anchor="w",
+    ).pack(fill="x", pady=(6, 0))
 
     # 변경 사항
     if changelog:
         tk.Label(
-            main_frame, text="변경 사항",
-            font=("맑은 고딕", 10, "bold"), fg=text_color, bg=bg, anchor="w",
-        ).pack(fill="x", pady=(4, 4))
+            card, text="변경 사항",
+            font=("맑은 고딕", 11, "bold"), fg=text_color, bg=bg, anchor="w",
+        ).pack(fill="x", pady=(4, 6))
 
-        log_frame = tk.Frame(main_frame, bg=card_bg, padx=12, pady=10,
+        log_frame = tk.Frame(card, bg=card_bg, padx=14, pady=12,
                              highlightbackground="#333355", highlightthickness=1)
-        log_frame.pack(fill="x", pady=(0, 12))
+        log_frame.pack(fill="x", pady=(0, 16))
 
         log_text = tk.Text(
             log_frame, height=5, wrap="word", bg=card_bg, fg=text_color,
-            font=("맑은 고딕", 10), relief="flat", borderwidth=0,
+            font=("맑은 고딕", 10), relief="flat", borderwidth=0, width=50,
         )
         log_text.insert("1.0", changelog)
         log_text.config(state="disabled")
         log_text.pack(fill="x")
 
     # 프로그레스 바 (처음엔 숨김)
-    progress_frame = tk.Frame(main_frame, bg=bg)
+    progress_frame = tk.Frame(card, bg=bg)
     progress_label = tk.Label(progress_frame, text="", font=("맑은 고딕", 10), fg=text_color, bg=bg)
-    progress_label.pack(fill="x", pady=(0, 4))
-    progress_bar = ttk.Progressbar(progress_frame, length=400, mode="determinate")
+    progress_label.pack(fill="x", pady=(0, 6))
+    progress_bar = ttk.Progressbar(progress_frame, length=420, mode="determinate")
     progress_bar.pack(fill="x")
 
     # 버튼 프레임
-    btn_frame = tk.Frame(main_frame, bg=bg)
-    btn_frame.pack(fill="x", pady=(8, 0))
+    btn_frame = tk.Frame(card, bg=bg)
+    btn_frame.pack(fill="x", pady=(10, 0))
 
     def on_update():
         result["do_update"] = True
         update_btn.config(state="disabled", text="업데이트 중...")
         btn_frame.pack_forget()
-        progress_frame.pack(fill="x", pady=(8, 0))
+        progress_frame.pack(fill="x", pady=(10, 0))
         threading.Thread(target=_run_update, daemon=True).start()
 
     def _run_update():
@@ -232,7 +218,7 @@ def _show_update_popup(current_ver, latest_ver, changelog, update_info):
             _update_label("앱을 재시작합니다...", 100)
             time.sleep(1.5)
 
-            root.after(0, lambda: [root.destroy(), overlay.destroy()])
+            root.after(0, root.destroy)
             _restart_after_update()
 
         except Exception as e:
@@ -250,7 +236,6 @@ def _show_update_popup(current_ver, latest_ver, changelog, update_info):
         """에러 발생 시 재시도 버튼 표시"""
         def _do():
             progress_label.config(fg="#ef4444")
-            # 재시도 버튼 표시
             retry_btn = tk.Button(
                 progress_frame, text="재시도", font=("맑은 고딕", 11, "bold"),
                 bg=accent, fg="#ffffff", relief="flat", padx=20, pady=6,
@@ -259,36 +244,32 @@ def _show_update_popup(current_ver, latest_ver, changelog, update_info):
             retry_btn.pack(pady=(10, 0))
         root.after(0, _do)
 
-    # 업데이트 버튼 (필수 - 나중에 없음)
+    # 업데이트 버튼
     update_btn = tk.Button(
-        btn_frame, text="업데이트 하기", font=("맑은 고딕", 12, "bold"),
+        btn_frame, text="업데이트 하기", font=("맑은 고딕", 13, "bold"),
         bg=accent, fg="#ffffff", activebackground="#6d28d9", activeforeground="#ffffff",
-        relief="flat", padx=24, pady=8, cursor="hand2", command=on_update,
+        relief="flat", padx=30, pady=10, cursor="hand2", command=on_update,
     )
     update_btn.pack(expand=True)
 
     # 안내 문구
     tk.Label(
-        main_frame, text="※ 업데이트를 완료해야 프로그램을 사용할 수 있습니다.",
+        card, text="※ 업데이트를 완료해야 프로그램을 사용할 수 있습니다.",
         font=("맑은 고딕", 9), fg="#ef4444", bg=bg,
-    ).pack(pady=(8, 0))
+    ).pack(pady=(12, 0))
 
-    # 창 닫기 방지 (X 버튼 클릭 시 프로그램 종료)
+    # ESC/X 버튼 → 프로그램 종료
     def on_close():
         root.destroy()
-        overlay.destroy()
         sys.exit(0)
 
     root.protocol("WM_DELETE_WINDOW", on_close)
-
-    # 오버레이 클릭 시에도 종료
-    overlay.bind("<Button-1>", lambda e: on_close())
+    root.bind("<Escape>", lambda e: on_close())
 
     # 포커스
-    root.lift()
     root.focus_force()
 
-    overlay.mainloop()
+    root.mainloop()
 
     return result["do_update"]
 
