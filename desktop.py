@@ -12,6 +12,16 @@ import threading
 import socket
 import logging
 
+# Windows 한국어 환경 (cp949) 인코딩 문제 해결
+if sys.platform == "win32":
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+    for _stream in (sys.stdout, sys.stderr):
+        if _stream and hasattr(_stream, "reconfigure"):
+            try:
+                _stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
 # 프로젝트 루트를 경로에 추가
 _APP_ROOT = os.path.dirname(os.path.abspath(__file__))
 if getattr(sys, 'frozen', False):
