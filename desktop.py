@@ -128,13 +128,20 @@ def _show_update_popup(current_ver, latest_ver, changelog, update_info):
     root.resizable(False, False)
     root.configure(bg="#1a1a2e")
 
-    # 창 크기 및 중앙 배치
-    win_w, win_h = 500, 420
+    # 창 너비 고정, 높이는 콘텐츠에 맞게 자동 조절
+    win_w = 500
+    root.update_idletasks()
     screen_w = root.winfo_screenwidth()
     screen_h = root.winfo_screenheight()
-    x = (screen_w - win_w) // 2
-    y = (screen_h - win_h) // 2
-    root.geometry(f"{win_w}x{win_h}+{x}+{y}")
+
+    def _center_window():
+        root.update_idletasks()
+        win_h = root.winfo_reqheight()
+        x = (screen_w - win_w) // 2
+        y = (screen_h - win_h) // 2
+        root.geometry(f"{win_w}x{win_h}+{x}+{y}")
+
+    root.after(50, _center_window)
 
     # 아이콘
     icon_path = os.path.join(_APP_ROOT, "app_icon.ico")
