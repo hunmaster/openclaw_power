@@ -107,7 +107,7 @@ class UserSettings(db.Model):
         "SMM_LIKE_AUTO_MAX": "500",
         "HEADLESS": "false",
         "ADB_IP_CHANGE_ENABLED": "false",
-        "ADB_PATH": "adb",
+        "ADB_PATH": "D:\\platform-tools\\adb.exe",
         "ADB_AIRPLANE_WAIT": "4",
         "ADB_AUTO_ETHERNET": "true",
         "ADB_ETHERNET_NAME": "이더넷",

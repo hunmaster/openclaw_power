@@ -49,6 +49,7 @@ class YouTubeBot:
                 "--disable-dev-shm-usage",
                 "--disable-infobars",
                 "--disable-extensions",
+                "--start-maximized",
             ],
         }
 
@@ -197,6 +198,12 @@ class YouTubeBot:
         try:
             self.page.goto("https://accounts.google.com/signin")
             time.sleep(2)
+
+            # 브라우저 창을 최상위로 (PyWebView 뒤에 숨는 문제 방지)
+            try:
+                self.page.bring_to_front()
+            except Exception:
+                pass
 
             # 이메일 자동 입력 (선택)
             if email:

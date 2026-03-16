@@ -684,6 +684,7 @@ def api_dashboard():
     # 상태별 카운트 (전체 DB 1회 조회)
     status_counts = {}
     try:
+        _ensure_notion_env()
         notion = NotionManager()
         status_counts = notion.count_all_statuses()
     except Exception:
@@ -781,6 +782,7 @@ def api_tasks():
                 _loading_state["message"] = "노션 데이터 불러오는 중..."
 
             try:
+                _ensure_notion_env()
                 notion = NotionManager()
                 if status_filter == "전체":
                     tasks = notion.get_all_tasks(progress_callback=on_progress)
@@ -1139,6 +1141,7 @@ def api_reply_status():
 def api_reply_preview():
     """대댓글 대기 작업 목록을 미리보기합니다."""
     try:
+        _ensure_notion_env()
         notion = NotionManager()
         tasks = notion.get_reply_pending_tasks()
         items = []
@@ -1164,6 +1167,7 @@ def api_duplicate_scan():
         return jsonify({"error": "중복 스캔은 Business 플랜부터 사용 가능합니다.", "upgrade_required": True}), 403
 
     try:
+        _ensure_notion_env()
         notion = NotionManager()
         tasks = notion.get_pending_tasks()
         if not tasks:
@@ -1251,6 +1255,34 @@ def _get_user_setting(user_id, key, default=None):
     return os.getenv(key, default or UserSettings.DEFAULTS.get(key, ""))
 
 
+def _ensure_notion_env(user_id=None):
+    """유저 DB 설정의 Notion 토큰/DB ID를 os.environ에 반영합니다.
+    NotionManager()가 os.getenv()로 읽으므로, .env 파일이 없어도 동작하도록 합니다."""
+    if user_id is None:
+        try:
+            if current_user and current_user.is_authenticated:
+                user_id = current_user.id
+            else:
+                user_id = 1
+        except Exception:
+            user_id = 1
+
+    token = _get_user_setting(user_id, "NOTION_API_TOKEN")
+    db_id = _get_user_setting(user_id, "NOTION_DATABASE_ID")
+    if token:
+        os.environ["NOTION_API_TOKEN"] = token
+    if db_id:
+        os.environ["NOTION_DATABASE_ID"] = db_id
+
+    # 컬럼명 설정도 반영
+    for col_key in ["NOTION_COLUMN_YOUTUBE_URL", "NOTION_COLUMN_COMMENT_TEXT",
+                     "NOTION_COLUMN_COMMENT_RESULT_URL", "NOTION_COLUMN_STATUS",
+                     "NOTION_COLUMN_ACCOUNT"]:
+        val = _get_user_setting(user_id, col_key)
+        if val:
+            os.environ[col_key] = val
+
+
 MASKED_PLACEHOLDER = "__MASKED__"
 
 
@@ -1303,6 +1335,7 @@ def api_likes_approve():
                 _save_like_order(order.get("order_id"), item["comment_url"], qty, source="approval")
                 # 좋아요 체크박스 업데이트
                 try:
+                    _ensure_notion_env()
                     notion = NotionManager()
                     notion.update_like_checkbox(item["page_id"])
                 except Exception:
@@ -1451,13 +1484,23 @@ def api_check_connections():
     """모든 API 연동 상태를 확인합니다."""
     results = {}
 
-    # 1. .env 파일 존재 여부 (여러 경로 확인)
+    # 1. .env 파일 존재 여부 (여러 경로 확인) — 유저 DB 설정이 있으면 .env 없어도 OK
     env_candidates = [
         os.path.join(os.path.dirname(__file__), ".env"),
         os.path.join(os.getcwd(), ".env"),
     ]
     env_exists = any(os.path.exists(p) for p in env_candidates)
-    results["env_file"] = {"ok": env_exists, "message": ".env 파일 존재" if env_exists else ".env 파일이 없습니다. .env.example을 복사하세요."}
+    # 유저 DB에 핵심 설정이 있으면 .env 없어도 정상
+    has_user_settings = bool(
+        _get_user_setting(current_user.id, "NOTION_API_TOKEN")
+        and _get_user_setting(current_user.id, "NOTION_DATABASE_ID")
+    )
+    if env_exists:
+        results["env_file"] = {"ok": True, "message": ".env 파일 존재"}
+    elif has_user_settings:
+        results["env_file"] = {"ok": True, "message": ".env 파일 없음 (유저 DB 설정 사용 중)"}
+    else:
+        results["env_file"] = {"ok": False, "message": ".env 파일이 없습니다. .env.example을 복사하거나 설정 페이지에서 API 키를 입력하세요."}
 
     # 2. Notion API 연결 테스트 (유저별 DB 설정 우선)
     notion_token = _get_user_setting(current_user.id, "NOTION_API_TOKEN") or os.getenv("NOTION_API_TOKEN", "")
@@ -1544,6 +1587,41 @@ def api_adb_install_bat():
     """ADB 자동 설치 bat 파일을 다운로드합니다."""
     bat_path = os.path.join(os.path.dirname(__file__), "install_adb.bat")
     return send_file(bat_path, as_attachment=True, download_name="install_adb.bat")
+
+
+@app.route("/api/adb/run-install", methods=["POST"])
+@login_required
+def api_adb_run_install():
+    """ADB Platform Tools를 서버에서 직접 설치합니다 (PyWebView에서 bat 다운로드 안 될 때)."""
+    import subprocess
+    import platform
+
+    if platform.system() != "Windows":
+        return jsonify({"error": "ADB 자동 설치는 Windows에서만 지원됩니다."}), 400
+
+    bat_path = os.path.join(os.path.dirname(__file__), "install_adb.bat")
+    if not os.path.exists(bat_path):
+        return jsonify({"error": "install_adb.bat 파일을 찾을 수 없습니다."}), 404
+
+    try:
+        # bat 파일을 새 창에서 실행 (사용자가 진행상황을 볼 수 있도록)
+        subprocess.Popen(
+            ["cmd", "/c", "start", "ADB 자동 설치", bat_path],
+            cwd=os.path.dirname(bat_path),
+        )
+
+        # 설치될 ADB 경로 반환 (D: 있으면 D:, 없으면 C:)
+        if os.path.exists("D:\\"):
+            adb_path = "D:\\platform-tools\\adb.exe"
+        else:
+            adb_path = "C:\\platform-tools\\adb.exe"
+
+        return jsonify({
+            "message": "ADB 설치 프로그램이 실행되었습니다.\n새 창에서 설치가 진행됩니다.\n설치 완료 후 ADB 경로를 확인하세요.",
+            "adb_path": adb_path,
+        })
+    except Exception as e:
+        return jsonify({"error": f"설치 실행 실패: {str(e)}"}), 500
 
 
 @app.route("/api/adb/test", methods=["POST"])
@@ -1813,6 +1891,14 @@ def api_manual_login():
 
             manual_login_state["message"] = "브라우저를 여는 중..."
             bot.start_browser()
+
+            # 브라우저 창을 최상위로 올리기 (PyWebView 뒤에 숨는 문제 방지)
+            try:
+                if bot.page:
+                    bot.page.bring_to_front()
+            except Exception:
+                pass
+
             manual_login_state["message"] = "브라우저가 열렸습니다. 로그인을 완료해주세요."
             print(f"[manual_login] 브라우저 시작됨, email={email}")
             password = account.get("password", "")
@@ -2020,6 +2106,7 @@ def _run_automation(limit=0, selected_ids=None):
         add_log(f"자동화 시작 {mode_label}", "info")
         save_automation_log("automation_start", detail=mode_label, level="info")
 
+        _ensure_notion_env()
         notion = NotionManager()
         proxy_manager = ProxyManager()
         fingerprint_manager = FingerprintManager()
@@ -2450,6 +2537,7 @@ def _run_full_auto():
             # 다음 라운드 전 대기 작업 확인
             automation_state["current_task"] = "[재수집 중] 노션 대기 작업 확인..."
             try:
+                _ensure_notion_env()
                 notion = NotionManager()
                 pending = notion.count_pending_tasks()
                 add_log(f"남은 대기 작업: {pending}건", "info")
@@ -2503,6 +2591,7 @@ def _run_reply_automation(limit=0):
         mode_label = f"[대댓글 테스트 {limit}건]" if test_mode else "[대댓글 전체 실행]"
         add_log(f"=== 대댓글 자동화 시작 {mode_label} ===", "info")
 
+        _ensure_notion_env()
         notion = NotionManager()
         proxy_manager = ProxyManager()
         fingerprint_manager = FingerprintManager()
@@ -3078,6 +3167,7 @@ def api_tracking_import_notion():
     (댓글완료 / 대댓글완료 / 좋아요작업완료 상태의 작업)
     """
     try:
+        _ensure_notion_env()
         notion = NotionManager()
         tasks = notion.get_all_tasks()
 

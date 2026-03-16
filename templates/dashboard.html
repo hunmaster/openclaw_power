@@ -2872,9 +2872,44 @@
         document.getElementById('setAdbEthernetName').value = data.ADB_ETHERNET_NAME || '이더넷';
     }
 
-    // ─── ADB 자동 설치 bat 다운로드 ───
-    function downloadAdbInstaller() {
-        window.location.href = '/api/adb/install-bat';
+    // ─── ADB 자동 설치 (서버에서 직접 실행) ───
+    async function downloadAdbInstaller() {
+        try {
+            // 서버에서 bat 파일을 직접 실행 (새 cmd 창이 열림)
+            const data = await api('/api/adb/run-install', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({}),
+            });
+            if (data && data.error) {
+                alert(data.error);
+            } else if (data && data.message) {
+                alert(data.message);
+                // 설치 후 ADB 경로 자동 업데이트
+                if (data.adb_path) {
+                    const pathInput = document.getElementById('setAdbPath');
+                    if (pathInput) pathInput.value = data.adb_path;
+                }
+            }
+        } catch (e) {
+            // 폴백: bat 파일 직접 다운로드 시도
+            try {
+                const res = await fetch('/api/adb/install-bat');
+                if (!res.ok) { alert('ADB 설치 실패'); return; }
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'install_adb.bat';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                alert('install_adb.bat 파일이 다운로드됩니다.\n다운로드된 파일을 더블클릭하여 실행하세요.');
+            } catch (e2) {
+                alert('ADB 설치 실패: ' + e2.message);
+            }
+        }
     }
 
     // ─── ADB 연결 테스트 ───
