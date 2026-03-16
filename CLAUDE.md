@@ -5,7 +5,7 @@
 - **스택**: Flask + SQLAlchemy + PyWebView + Playwright + PyInstaller
 - **구조**: 데스크탑 앱 (EXE) + 랜딩 서버 (Fly.io)
 - **결제**: Lemon Squeezy 구독/크레딧
-- **현재 버전**: v1.1.0
+- **현재 버전**: v1.2.0
 
 ## 디렉토리 구조
 ```
