@@ -249,27 +249,42 @@ def _show_update_popup(current_ver, latest_ver, changelog, update_info):
                 "download_url", "commentboost-latest.zip")
             download_url = f"{server_url}/download/{download_filename}"
 
-            # 1. ZIP 다운로드
+            # 1. ZIP 다운로드 (최대 3회 재시도)
             _update_label("업데이트 파일 다운로드 중...", 10)
             tmp_dir = tempfile.mkdtemp(prefix="commentboost_update_")
             zip_path = os.path.join(tmp_dir, "update.zip")
 
-            resp = requests.get(download_url, stream=True, timeout=120)
-            if resp.status_code != 200:
-                shutil.rmtree(tmp_dir, ignore_errors=True)
-                raise RuntimeError(f"다운로드 실패 (HTTP {resp.status_code})")
+            for attempt in range(3):
+                try:
+                    resp = requests.get(download_url, stream=True, timeout=180)
+                    if resp.status_code != 200:
+                        raise RuntimeError(f"HTTP {resp.status_code}")
 
-            total_size = int(resp.headers.get("content-length", 0))
-            downloaded = 0
-            with open(zip_path, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=8192):
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if total_size > 0:
-                        pct = int(10 + (downloaded / total_size) * 40)
-                        _update_label(
-                            f"다운로드 중... {downloaded // 1024}KB / {total_size // 1024}KB",
-                            min(pct, 50))
+                    total_size = int(resp.headers.get("content-length", 0))
+                    downloaded = 0
+                    with open(zip_path, "wb") as f:
+                        for chunk in resp.iter_content(chunk_size=32768):
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if total_size > 0:
+                                pct = int(10 + (downloaded / total_size) * 40)
+                                _update_label(
+                                    f"다운로드 중... {downloaded // 1024}KB / {total_size // 1024}KB",
+                                    min(pct, 50))
+
+                    # 다운로드 완료 검증
+                    if total_size > 0 and downloaded < total_size:
+                        raise RuntimeError(f"불완전한 다운로드 ({downloaded}/{total_size})")
+                    break  # 성공
+
+                except Exception as dl_err:
+                    if attempt < 2:
+                        wait = (attempt + 1) * 3
+                        _update_label(f"다운로드 재시도 {attempt + 2}/3... ({wait}초 대기)", 10)
+                        time.sleep(wait)
+                    else:
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
+                        raise RuntimeError(f"다운로드 실패 (3회 시도): {dl_err}")
 
             # 2. 압축 해제
             _update_label("압축 해제 중...", 55)
