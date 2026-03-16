@@ -188,10 +188,14 @@ def build():
 
     dist_dir = final_dist
 
-    # src/ 폴더 복사 (소스 코드)
+    # src/ 폴더 복사 (소스 코드) - 기존 파일 완전 교체
     src_dst = os.path.join(dist_dir, "src")
+    if os.path.exists(src_dst):
+        shutil.rmtree(src_dst)
     if os.path.exists("src"):
-        shutil.copytree("src", src_dst, dirs_exist_ok=True)
+        # __pycache__ 제외하고 복사
+        shutil.copytree("src", src_dst,
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
         print("[빌드] src/ 폴더 복사 완료")
 
     # app.py 복사 (Flask 앱)
