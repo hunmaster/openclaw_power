@@ -192,13 +192,9 @@ def _show_update_popup(current_ver, latest_ver, changelog, update_info):
     def on_update():
         result["do_update"] = True
         update_btn.config(state="disabled", text="업데이트 중...")
-        skip_btn.config(state="disabled")
         btn_frame.pack_forget()
         progress_frame.pack(fill="x", pady=(8, 0))
         threading.Thread(target=_run_update, daemon=True).start()
-
-    def on_skip():
-        root.destroy()
 
     def _run_update():
         """업데이트 실행 (백그라운드 스레드)"""
@@ -277,30 +273,38 @@ def _show_update_popup(current_ver, latest_ver, changelog, update_info):
         root.after(0, _do)
 
     def _show_error_and_continue():
-        """에러 발생 시 3초 후 앱을 그냥 실행"""
+        """에러 발생 시 재시도 버튼 표시"""
         def _do():
             progress_label.config(fg="#ef4444")
-            root.after(3000, root.destroy)
+            # 재시도 버튼 표시
+            retry_btn = tk.Button(
+                progress_frame, text="재시도", font=("맑은 고딕", 11, "bold"),
+                bg=accent, fg="#ffffff", relief="flat", padx=20, pady=6,
+                cursor="hand2", command=lambda: [retry_btn.destroy(), on_update()],
+            )
+            retry_btn.pack(pady=(10, 0))
         root.after(0, _do)
 
-    # 업데이트 버튼
+    # 업데이트 버튼 (필수 - 나중에 없음)
     update_btn = tk.Button(
         btn_frame, text="업데이트 하기", font=("맑은 고딕", 12, "bold"),
         bg=accent, fg="#ffffff", activebackground="#6d28d9", activeforeground="#ffffff",
         relief="flat", padx=24, pady=8, cursor="hand2", command=on_update,
     )
-    update_btn.pack(side="left", expand=True, padx=(0, 8))
+    update_btn.pack(expand=True)
 
-    # 나중에 버튼
-    skip_btn = tk.Button(
-        btn_frame, text="나중에", font=("맑은 고딕", 11),
-        bg="#333355", fg=text_color, activebackground="#444466", activeforeground="#ffffff",
-        relief="flat", padx=24, pady=8, cursor="hand2", command=on_skip,
-    )
-    skip_btn.pack(side="left", expand=True)
+    # 안내 문구
+    tk.Label(
+        main_frame, text="※ 업데이트를 완료해야 프로그램을 사용할 수 있습니다.",
+        font=("맑은 고딕", 9), fg="#ef4444", bg=bg,
+    ).pack(pady=(8, 0))
 
-    # ESC로 닫기
-    root.bind("<Escape>", lambda e: on_skip())
+    # 창 닫기 방지 (X 버튼 클릭 시 프로그램 종료)
+    def on_close():
+        root.destroy()
+        sys.exit(0)
+
+    root.protocol("WM_DELETE_WINDOW", on_close)
 
     # 포커스
     root.lift()
