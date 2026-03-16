@@ -14,6 +14,7 @@ import subprocess
 import shutil
 import json
 import time
+import tempfile
 
 APP_NAME = "CommentBoost"
 ENTRY_POINT = "desktop.py"
@@ -52,6 +53,28 @@ EXCLUDES = [
 ]
 
 
+def _remove_readonly_recursive(path):
+    """Windows에서 READONLY/SYSTEM/HIDDEN 속성 재귀 해제 (삭제 전 필수)"""
+    import stat
+    for root, dirs, files in os.walk(path):
+        for name in files:
+            fp = os.path.join(root, name)
+            try:
+                os.chmod(fp, stat.S_IWRITE)
+            except Exception:
+                pass
+        for name in dirs:
+            dp = os.path.join(root, name)
+            try:
+                os.chmod(dp, stat.S_IWRITE)
+            except Exception:
+                pass
+    try:
+        os.chmod(path, stat.S_IWRITE)
+    except Exception:
+        pass
+
+
 def get_version():
     """version.json에서 버전 정보 읽기"""
     try:
@@ -72,6 +95,9 @@ def build():
         if os.path.exists(d):
             for attempt in range(3):
                 try:
+                    # Windows: READONLY 속성 해제 후 삭제
+                    if sys.platform == "win32":
+                        _remove_readonly_recursive(d)
                     shutil.rmtree(d)
                     print(f"[빌드] {d}/ 폴더 정리")
                     break
@@ -93,12 +119,18 @@ def build():
                     print(f"[빌드] {d}/ 폴더 정리 실패: {e}")
                     break
 
+    # 임시 distpath 사용 (Windows에서 백신/인덱서가 .pyd 파일을 잠그는 COLLECT 단계 PermissionError 방지)
+    tmp_dist = tempfile.mkdtemp(prefix="commentboost_dist_")
+    print(f"[빌드] 임시 출력 경로: {tmp_dist}")
+
     # PyInstaller 명령 구성
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--name", APP_NAME,
         "--noconfirm",
         "--clean",
+        # 임시 경로로 출력 (COLLECT 단계 PermissionError 방지)
+        "--distpath", tmp_dist,
         # 폴더 모드 (onedir) - Playwright 브라우저 포함 위해
         "--onedir",
         # 콘솔 창 숨기기
@@ -130,10 +162,20 @@ def build():
     result = subprocess.run(cmd, cwd=os.path.dirname(os.path.abspath(__file__)))
 
     if result.returncode != 0:
+        # 임시 폴더 정리
+        shutil.rmtree(tmp_dist, ignore_errors=True)
         print("[빌드] 빌드 실패!")
         sys.exit(1)
 
-    dist_dir = os.path.join("dist", APP_NAME)
+    # 임시 출력을 dist/로 이동
+    final_dist = os.path.join("dist", APP_NAME)
+    tmp_app_dir = os.path.join(tmp_dist, APP_NAME)
+    os.makedirs("dist", exist_ok=True)
+    shutil.move(tmp_app_dir, final_dist)
+    shutil.rmtree(tmp_dist, ignore_errors=True)
+    print(f"[빌드] 빌드 결과를 dist/{APP_NAME}/으로 이동 완료")
+
+    dist_dir = final_dist
 
     # src/ 폴더 복사 (소스 코드)
     src_dst = os.path.join(dist_dir, "src")
