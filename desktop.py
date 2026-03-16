@@ -33,6 +33,22 @@ _log = logging.getLogger("desktop")
 os.environ["DESKTOP_MODE"] = "1"
 
 
+def _load_updater():
+    """
+    src/updater.py를 파일시스템에서 직접 로드.
+    PyInstaller 번들이 옛날 코드를 캐시하는 문제를 우회.
+    """
+    import importlib.util
+    updater_path = os.path.join(_APP_ROOT, "src", "updater.py")
+    if not os.path.exists(updater_path):
+        _log.error(f"updater.py 없음: {updater_path}")
+        return None
+    spec = importlib.util.spec_from_file_location("src.updater", updater_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def find_free_port(start=5000, end=5100):
     """사용 가능한 포트 찾기"""
     for port in range(start, end):
@@ -83,14 +99,12 @@ def check_and_show_update():
     업데이트가 있으면 tkinter 팝업을 표시하고, 사용자가 승인하면 업데이트 진행.
     Returns: True면 업데이트 완료 후 재시작 필요, False면 그냥 앱 실행
     """
-    try:
-        from src.updater import check_for_updates, get_current_version
-    except ImportError as e:
-        _log.error(f"updater 모듈 로드 실패: {e}")
+    updater = _load_updater()
+    if not updater:
         return False
 
     _log.info("업데이트 확인 중...")
-    update_info = check_for_updates()
+    update_info = updater.check_for_updates()
     _log.info(f"서버 응답: {update_info}")
 
     if not update_info.get("needs_update"):
@@ -100,7 +114,7 @@ def check_and_show_update():
             _log.info("최신 버전입니다.")
         return False
 
-    current = get_current_version()
+    current = updater.get_current_version()
     current_ver = current.get("version", "0.0.0")
     latest_ver = update_info.get("latest_version", "?")
     changelog = update_info.get("changelog", "")
@@ -223,9 +237,8 @@ def _show_update_popup(current_ver, latest_ver, changelog, update_info):
     def _run_update():
         """업데이트 실행 (공통 로직 사용)"""
         try:
-            from src.updater import download_and_apply
-
-            download_and_apply(update_info, progress_callback=_update_label)
+            updater = _load_updater()
+            updater.download_and_apply(update_info, progress_callback=_update_label)
 
             _update_label("앱을 재시작합니다...", 100)
             time.sleep(1.5)
