@@ -247,9 +247,11 @@ def _show_update_popup(current_ver, latest_ver, changelog, update_info):
             _restart_after_update()
 
         except Exception as e:
+            import traceback
+            err_detail = traceback.format_exc()
             _log.error(f"업데이트 실행 오류: {e}", exc_info=True)
             _update_label(f"업데이트 오류: {str(e)}", 0)
-            _show_error_and_continue()
+            _show_error_and_continue(err_detail)
 
     def _update_label(text, pct):
         """스레드 안전하게 UI 업데이트"""
@@ -258,10 +260,29 @@ def _show_update_popup(current_ver, latest_ver, changelog, update_info):
             progress_bar["value"] = pct
         root.after(0, _do)
 
-    def _show_error_and_continue():
-        """에러 발생 시 재시도/종료 버튼 표시"""
+    def _show_error_and_continue(err_detail=""):
+        """에러 발생 시 전체 에러 로그 + 재시도/종료 버튼 표시"""
         def _do():
             progress_label.config(fg="#ef4444")
+
+            # 에러 상세 로그 (복사 가능한 Text 위젯)
+            if err_detail:
+                err_text = tk.Text(
+                    progress_frame, height=6, wrap="word",
+                    bg="#1a0a0a", fg="#ff6b6b", font=("Consolas", 9),
+                    relief="flat", borderwidth=1, highlightbackground="#ef4444",
+                    highlightthickness=1,
+                )
+                err_text.insert("1.0", err_detail)
+                err_text.config(state="normal")  # 복사 가능하도록 유지
+                err_text.pack(fill="x", pady=(8, 0))
+
+                # 창 너비를 에러 메시지에 맞게 확장
+                root.update_idletasks()
+                needed_w = max(600, root.winfo_reqwidth())
+                root.geometry(f"{needed_w}x{root.winfo_reqheight()}")
+                _center_window()
+
             err_btn_frame = tk.Frame(progress_frame, bg=bg)
             err_btn_frame.pack(pady=(10, 0))
             tk.Button(
