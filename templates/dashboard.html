@@ -2872,44 +2872,111 @@
         document.getElementById('setAdbEthernetName').value = data.ADB_ETHERNET_NAME || '이더넷';
     }
 
-    // ─── ADB 자동 설치 (서버에서 직접 실행) ───
+    // ─── ADB 자동 설치 (백그라운드 + UI 팝업) ───
+    function showAdbInstallPopup(title, message, progress, isDone, isError) {
+        let popup = document.getElementById('adbInstallPopup');
+        if (!popup) {
+            popup = document.createElement('div');
+            popup.id = 'adbInstallPopup';
+            popup.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:10002;display:flex;justify-content:center;align-items:center';
+            popup.innerHTML = `
+                <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:28px 32px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.4)">
+                    <h3 id="adbPopupTitle" style="margin:0 0 16px;font-size:16px;color:var(--text)"></h3>
+                    <p id="adbPopupMsg" style="margin:0 0 16px;font-size:13px;color:var(--text-dim);line-height:1.6"></p>
+                    <div style="background:var(--bg);border-radius:6px;height:8px;overflow:hidden;margin-bottom:12px">
+                        <div id="adbPopupBar" style="height:100%;background:var(--accent);border-radius:6px;transition:width 0.3s ease;width:0%"></div>
+                    </div>
+                    <div style="text-align:right">
+                        <button id="adbPopupClose" class="btn btn-sm btn-secondary" style="display:none" onclick="closeAdbInstallPopup()">닫기</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(popup);
+        }
+        popup.style.display = 'flex';
+        document.getElementById('adbPopupTitle').textContent = title;
+        document.getElementById('adbPopupMsg').textContent = message;
+        document.getElementById('adbPopupBar').style.width = progress + '%';
+        if (isError) {
+            document.getElementById('adbPopupBar').style.background = 'var(--red)';
+        } else if (isDone) {
+            document.getElementById('adbPopupBar').style.background = 'var(--green)';
+        } else {
+            document.getElementById('adbPopupBar').style.background = 'var(--accent)';
+        }
+        document.getElementById('adbPopupClose').style.display = (isDone || isError) ? 'inline-block' : 'none';
+    }
+
+    function closeAdbInstallPopup() {
+        const popup = document.getElementById('adbInstallPopup');
+        if (popup) popup.style.display = 'none';
+    }
+
     async function downloadAdbInstaller() {
-        try {
-            // 서버에서 bat 파일을 직접 실행 (새 cmd 창이 열림)
-            const data = await api('/api/adb/run-install', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({}),
-            });
-            if (data && data.error) {
-                alert(data.error);
-            } else if (data && data.message) {
-                alert(data.message);
-                // 설치 후 ADB 경로 자동 업데이트
+        // 먼저 설치 시작 요청
+        const data = await api('/api/adb/run-install', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+        });
+
+        if (!data) {
+            showAdbInstallPopup('ADB 설치 실패', '서버 연결 실패', 0, false, true);
+            return;
+        }
+
+        // 이미 설치된 경우 → 재설치 확인
+        if (data.already_installed) {
+            if (!confirm(`${data.message}\n\n재설치하시겠습니까?`)) {
                 if (data.adb_path) {
                     const pathInput = document.getElementById('setAdbPath');
                     if (pathInput) pathInput.value = data.adb_path;
                 }
+                return;
             }
-        } catch (e) {
-            // 폴백: bat 파일 직접 다운로드 시도
-            try {
-                const res = await fetch('/api/adb/install-bat');
-                if (!res.ok) { alert('ADB 설치 실패'); return; }
-                const blob = await res.blob();
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'install_adb.bat';
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                alert('install_adb.bat 파일이 다운로드됩니다.\n다운로드된 파일을 더블클릭하여 실행하세요.');
-            } catch (e2) {
-                alert('ADB 설치 실패: ' + e2.message);
+            // 강제 재설치
+            const forceData = await api('/api/adb/run-install', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ force: true }),
+            });
+            if (forceData && forceData.error) {
+                showAdbInstallPopup('ADB 설치 실패', forceData.error, 0, false, true);
+                return;
             }
+        } else if (data.error) {
+            showAdbInstallPopup('ADB 설치 실패', data.error, 0, false, true);
+            return;
         }
+
+        // ADB 경로 미리 설정
+        if (data.adb_path) {
+            const pathInput = document.getElementById('setAdbPath');
+            if (pathInput) pathInput.value = data.adb_path;
+        }
+
+        // 진행 상태 팝업 표시 + 폴링
+        showAdbInstallPopup('ADB 설치 중...', '다운로드 준비 중...', 5, false, false);
+
+        const pollTimer = setInterval(async () => {
+            const status = await api('/api/adb/install-status');
+            if (!status) return;
+
+            if (status.step === 'done') {
+                clearInterval(pollTimer);
+                showAdbInstallPopup('ADB 설치 완료', status.message, 100, true, false);
+                // ADB 경로 자동 업데이트
+                if (status.adb_path) {
+                    const pathInput = document.getElementById('setAdbPath');
+                    if (pathInput) pathInput.value = status.adb_path;
+                }
+            } else if (status.step === 'error') {
+                clearInterval(pollTimer);
+                showAdbInstallPopup('ADB 설치 실패', status.message, status.progress, false, true);
+            } else if (status.step) {
+                const titles = { downloading: 'ADB 다운로드 중...', extracting: 'ADB 압축 해제 중...', verifying: 'ADB 설치 확인 중...' };
+                showAdbInstallPopup(titles[status.step] || 'ADB 설치 중...', status.message, status.progress, false, false);
+            }
+        }, 500);
     }
 
     // ─── ADB 연결 테스트 ───

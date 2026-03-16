@@ -39,7 +39,13 @@ class YouTubeBot:
 
     def start_browser(self):
         """안티디텍트 지문이 적용된 시크릿 모드 브라우저를 시작합니다."""
-        self.playwright = sync_playwright().start()
+        console.print(f"[blue]브라우저 시작 (headless={self.headless})...[/blue]")
+
+        try:
+            self.playwright = sync_playwright().start()
+        except Exception as e:
+            console.print(f"[red]Playwright 초기화 실패: {e}[/red]")
+            raise RuntimeError(f"Playwright 초기화 실패: {e}. 'pip install playwright && playwright install chromium' 실행 필요") from e
 
         launch_args = {
             "headless": self.headless,
@@ -58,7 +64,13 @@ class YouTubeBot:
             launch_args["proxy"] = self.proxy_config
             console.print(f"[blue]프록시 연결: {self.proxy_config.get('server', 'N/A')}[/blue]")
 
-        self.browser = self.playwright.chromium.launch(**launch_args)
+        try:
+            self.browser = self.playwright.chromium.launch(**launch_args)
+        except Exception as e:
+            console.print(f"[red]Chromium 브라우저 실행 실패: {e}[/red]")
+            self.playwright.stop()
+            self.playwright = None
+            raise RuntimeError(f"Chromium 실행 실패: {e}. 'playwright install chromium' 실행 필요") from e
 
         # 안티디텍트 지문 기반 컨텍스트 설정
         if self.fingerprint_manager and self.account_label:

@@ -914,6 +914,7 @@ def api_notion_debug():
     try:
         from notion_client import Client
         load_dotenv(override=True)
+        _ensure_notion_env()
         # 유저별 DB 설정 우선, os.getenv 폴백
         token = _get_user_setting(current_user.id, "NOTION_API_TOKEN") or os.getenv("NOTION_API_TOKEN", "")
         db_id = _get_user_setting(current_user.id, "NOTION_DATABASE_ID") or os.getenv("NOTION_DATABASE_ID", "")
@@ -932,8 +933,8 @@ def api_notion_debug():
                 "id": prop.get("id", ""),
             }
 
-        # 댓글작업전 상태의 샘플 3개 조회
-        col_status = os.getenv("NOTION_COLUMN_STATUS", "상태")
+        # 댓글작업전 상태의 샘플 3개 조회 (유저 설정 컬럼명 우선)
+        col_status = _get_user_setting(current_user.id, "NOTION_COLUMN_STATUS") or os.getenv("NOTION_COLUMN_STATUS", "상태")
         try:
             response = client.databases.query(
                 database_id=db_id,
@@ -985,11 +986,11 @@ def api_notion_debug():
                     env_columns[key.strip()] = val.strip()
 
         expected = {
-            "영상 링크": env_columns.get("NOTION_COLUMN_YOUTUBE_URL", "영상 링크"),
-            "댓글 원고": env_columns.get("NOTION_COLUMN_COMMENT_TEXT", "댓글 원고"),
-            "상태": env_columns.get("NOTION_COLUMN_STATUS", "상태"),
-            "댓글 계정": env_columns.get("NOTION_COLUMN_ACCOUNT", "댓글 계정"),
-            "댓글 url": env_columns.get("NOTION_COLUMN_COMMENT_RESULT_URL", "댓글 url"),
+            "영상 링크": _get_user_setting(current_user.id, "NOTION_COLUMN_YOUTUBE_URL") or env_columns.get("NOTION_COLUMN_YOUTUBE_URL", "영상 링크"),
+            "댓글 원고": _get_user_setting(current_user.id, "NOTION_COLUMN_COMMENT_TEXT") or env_columns.get("NOTION_COLUMN_COMMENT_TEXT", "댓글 원고"),
+            "상태": _get_user_setting(current_user.id, "NOTION_COLUMN_STATUS") or env_columns.get("NOTION_COLUMN_STATUS", "상태"),
+            "댓글 계정": _get_user_setting(current_user.id, "NOTION_COLUMN_ACCOUNT") or env_columns.get("NOTION_COLUMN_ACCOUNT", "댓글 계정"),
+            "댓글 url": _get_user_setting(current_user.id, "NOTION_COLUMN_COMMENT_RESULT_URL") or env_columns.get("NOTION_COLUMN_COMMENT_RESULT_URL", "댓글 url"),
         }
 
         # 매칭 확인
@@ -1589,39 +1590,143 @@ def api_adb_install_bat():
     return send_file(bat_path, as_attachment=True, download_name="install_adb.bat")
 
 
+# ADB 설치 상태 관리
+_adb_install_state = {
+    "active": False,
+    "step": "",      # downloading, extracting, verifying, done, error
+    "message": "",
+    "progress": 0,   # 0~100
+    "adb_path": "",
+}
+
+
 @app.route("/api/adb/run-install", methods=["POST"])
 @login_required
 def api_adb_run_install():
-    """ADB Platform Tools를 서버에서 직접 설치합니다 (PyWebView에서 bat 다운로드 안 될 때)."""
-    import subprocess
+    """ADB Platform Tools를 백그라운드에서 설치합니다 (CMD 창 없이)."""
     import platform
 
     if platform.system() != "Windows":
         return jsonify({"error": "ADB 자동 설치는 Windows에서만 지원됩니다."}), 400
 
-    bat_path = os.path.join(os.path.dirname(__file__), "install_adb.bat")
-    if not os.path.exists(bat_path):
-        return jsonify({"error": "install_adb.bat 파일을 찾을 수 없습니다."}), 404
+    if _adb_install_state["active"]:
+        return jsonify({"error": "이미 설치가 진행 중입니다."}), 409
 
-    try:
-        # bat 파일을 새 창에서 실행 (사용자가 진행상황을 볼 수 있도록)
-        subprocess.Popen(
-            ["cmd", "/c", "start", "ADB 자동 설치", bat_path],
-            cwd=os.path.dirname(bat_path),
-        )
+    data = request.get_json() or {}
+    force = data.get("force", False)
 
-        # 설치될 ADB 경로 반환 (D: 있으면 D:, 없으면 C:)
-        if os.path.exists("D:\\"):
-            adb_path = "D:\\platform-tools\\adb.exe"
-        else:
-            adb_path = "C:\\platform-tools\\adb.exe"
+    # 설치 경로 결정
+    if os.path.exists("D:\\"):
+        install_dir = "D:\\platform-tools"
+    else:
+        install_dir = "C:\\platform-tools"
+    adb_path = os.path.join(install_dir, "adb.exe")
 
+    # 이미 설치되어 있으면 확인
+    if os.path.exists(adb_path) and not force:
         return jsonify({
-            "message": "ADB 설치 프로그램이 실행되었습니다.\n새 창에서 설치가 진행됩니다.\n설치 완료 후 ADB 경로를 확인하세요.",
+            "already_installed": True,
             "adb_path": adb_path,
+            "message": f"ADB가 이미 설치되어 있습니다: {adb_path}",
         })
-    except Exception as e:
-        return jsonify({"error": f"설치 실행 실패: {str(e)}"}), 500
+
+    def _do_install():
+        import urllib.request
+        import zipfile
+        import shutil
+        import tempfile
+
+        _adb_install_state["active"] = True
+        _adb_install_state["adb_path"] = adb_path
+
+        try:
+            download_url = "https://dl.google.com/android/repository/platform-tools-latest-windows.zip"
+            zip_path = os.path.join(tempfile.gettempdir(), "platform-tools.zip")
+
+            # 1단계: 다운로드
+            _adb_install_state["step"] = "downloading"
+            _adb_install_state["message"] = "Android Platform Tools 다운로드 중..."
+            _adb_install_state["progress"] = 10
+            print(f"[ADB설치] 다운로드 시작: {download_url}")
+
+            urllib.request.urlretrieve(download_url, zip_path)
+
+            # 파일 크기 확인
+            file_size = os.path.getsize(zip_path)
+            if file_size < 1000000:
+                raise RuntimeError(f"다운로드 파일이 너무 작습니다 ({file_size} bytes)")
+
+            _adb_install_state["progress"] = 50
+            _adb_install_state["message"] = f"다운로드 완료 ({file_size // 1024 // 1024}MB)"
+            print(f"[ADB설치] 다운로드 완료: {file_size} bytes")
+
+            # 2단계: 압축 해제
+            _adb_install_state["step"] = "extracting"
+            _adb_install_state["message"] = f"압축 해제 중... ({install_dir})"
+            _adb_install_state["progress"] = 60
+
+            # 기존 폴더 삭제
+            if os.path.exists(install_dir):
+                shutil.rmtree(install_dir, ignore_errors=True)
+
+            extract_dir = os.path.join(tempfile.gettempdir(), "adb_extract")
+            if os.path.exists(extract_dir):
+                shutil.rmtree(extract_dir, ignore_errors=True)
+
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                zf.extractall(extract_dir)
+
+            # platform-tools 폴더 이동
+            extracted = os.path.join(extract_dir, "platform-tools")
+            if os.path.exists(extracted):
+                shutil.move(extracted, install_dir)
+            else:
+                shutil.move(extract_dir, install_dir)
+
+            _adb_install_state["progress"] = 85
+
+            # 임시 파일 정리
+            try:
+                os.remove(zip_path)
+                shutil.rmtree(extract_dir, ignore_errors=True)
+            except Exception:
+                pass
+
+            # 3단계: 설치 확인
+            _adb_install_state["step"] = "verifying"
+            _adb_install_state["message"] = "설치 확인 중..."
+            _adb_install_state["progress"] = 90
+
+            if not os.path.exists(adb_path):
+                raise RuntimeError("설치 후 adb.exe를 찾을 수 없습니다")
+
+            _adb_install_state["step"] = "done"
+            _adb_install_state["message"] = f"설치 완료! ADB 경로: {adb_path}"
+            _adb_install_state["progress"] = 100
+            print(f"[ADB설치] 설치 완료: {adb_path}")
+
+        except Exception as e:
+            print(f"[ADB설치] 오류: {e}")
+            _adb_install_state["step"] = "error"
+            _adb_install_state["message"] = f"설치 실패: {str(e)}"
+            _adb_install_state["progress"] = 0
+        finally:
+            _adb_install_state["active"] = False
+
+    thread = threading.Thread(target=_do_install, daemon=True)
+    thread.start()
+
+    return jsonify({
+        "message": "ADB 설치가 백그라운드에서 시작되었습니다.",
+        "adb_path": adb_path,
+    })
+
+
+@app.route("/api/adb/install-status")
+@login_required
+def api_adb_install_status():
+    """ADB 설치 진행 상태를 반환합니다."""
+    return jsonify(_adb_install_state)
 
 
 @app.route("/api/adb/test", methods=["POST"])
@@ -1890,12 +1995,32 @@ def api_manual_login():
             manual_login_bot = bot
 
             manual_login_state["message"] = "브라우저를 여는 중..."
-            bot.start_browser()
+            print(f"[manual_login] start_browser() 호출 시작...")
+
+            try:
+                bot.start_browser()
+            except Exception as browser_err:
+                err_msg = str(browser_err)
+                print(f"[manual_login] start_browser() 실패: {err_msg}")
+                # Playwright 설치 안내
+                if "executable" in err_msg.lower() or "browser" in err_msg.lower() or "chromium" in err_msg.lower():
+                    manual_login_state["status"] = "failed"
+                    manual_login_state["message"] = f"브라우저 실행 실패: Chromium이 설치되지 않았습니다. 터미널에서 'playwright install chromium' 실행 필요"
+                else:
+                    manual_login_state["status"] = "failed"
+                    manual_login_state["message"] = f"브라우저 실행 실패: {err_msg}"
+                return
+
+            print(f"[manual_login] start_browser() 성공, page={bot.page is not None}")
+
+            if not bot.page:
+                manual_login_state["status"] = "failed"
+                manual_login_state["message"] = "브라우저 페이지 생성 실패"
+                return
 
             # 브라우저 창을 최상위로 올리기 (PyWebView 뒤에 숨는 문제 방지)
             try:
-                if bot.page:
-                    bot.page.bring_to_front()
+                bot.page.bring_to_front()
             except Exception:
                 pass
 
@@ -1912,7 +2037,9 @@ def api_manual_login():
                 manual_login_state["status"] = "failed"
                 manual_login_state["message"] = "로그인 시간 초과 또는 실패"
         except Exception as e:
+            import traceback
             print(f"[manual_login] 오류: {e}")
+            traceback.print_exc()
             manual_login_state["status"] = "failed"
             manual_login_state["message"] = f"오류: {str(e)}"
         finally:
