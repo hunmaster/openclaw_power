@@ -76,6 +76,15 @@ def load_user(user_id):
     return db.session.get(User, int(user_id))
 
 
+def _log_activity(user_id, email, action):
+    """활동 로그 기록 헬퍼."""
+    db.session.add(UserActivityLog(
+        user_id=user_id, email=email, action=action,
+        ip_address=request.remote_addr,
+    ))
+    db.session.commit()
+
+
 @login_manager.unauthorized_handler
 def unauthorized():
     if request.path.startswith("/api/"):
@@ -489,12 +498,7 @@ def api_login():
         return jsonify({"error": "이메일 또는 비밀번호가 올바르지 않습니다."}), 401
 
     user.last_login = datetime.utcnow()
-    log = UserActivityLog(
-        user_id=user.id, email=email, action="login",
-        ip_address=request.remote_addr,
-    )
-    db.session.add(log)
-    db.session.commit()
+    _log_activity(user.id, email, "login")
 
     login_user(user, remember=True)
     return jsonify({"success": True, "user": user.to_dict()})
@@ -517,12 +521,7 @@ def api_reset_password():
         return jsonify({"error": "가입되지 않은 이메일입니다."}), 404
 
     user.set_password(new_password)
-    log = UserActivityLog(
-        user_id=user.id, email=email, action="reset_password",
-        ip_address=request.remote_addr,
-    )
-    db.session.add(log)
-    db.session.commit()
+    _log_activity(user.id, email, "reset_password")
 
     return jsonify({"success": True, "message": "비밀번호가 재설정되었습니다."})
 
@@ -531,12 +530,7 @@ def api_reset_password():
 @login_required
 def api_logout():
     """로그아웃."""
-    log = UserActivityLog(
-        user_id=current_user.id, email=current_user.email, action="logout",
-        ip_address=request.remote_addr,
-    )
-    db.session.add(log)
-    db.session.commit()
+    _log_activity(current_user.id, current_user.email, "logout")
     logout_user()
     return jsonify({"success": True})
 

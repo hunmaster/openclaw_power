@@ -163,77 +163,73 @@ def _set_progress(status, progress, message, error=None):
     _update_progress["error"] = error
 
 
+def download_and_apply(update_info, progress_callback=None):
+    """
+    업데이트 다운로드 → 백업 → 적용 공통 로직.
+    desktop.py 팝업과 perform_update() 모두 이 함수를 사용.
+    progress_callback(message, percent): 진행 상황 콜백 (없으면 _set_progress 사용)
+    """
+    report = progress_callback or (lambda msg, pct: _set_progress("downloading", pct, msg))
+
+    server_url = get_update_server_url()
+    download_filename = update_info.get("download_url", "commentboost-latest.zip")
+    download_url = f"{server_url}/download/{download_filename}"
+
+    # 1. ZIP 다운로드
+    report("업데이트 파일 다운로드 중...", 10)
+    tmp_dir = tempfile.mkdtemp(prefix="commentboost_update_")
+    zip_path = os.path.join(tmp_dir, "update.zip")
+
+    resp = requests.get(download_url, stream=True, timeout=120)
+    if resp.status_code != 200:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise RuntimeError(f"다운로드 실패 (HTTP {resp.status_code})")
+
+    total_size = int(resp.headers.get("content-length", 0))
+    downloaded = 0
+    with open(zip_path, "wb") as f:
+        for chunk in resp.iter_content(chunk_size=8192):
+            f.write(chunk)
+            downloaded += len(chunk)
+            if total_size > 0:
+                pct = int(10 + (downloaded / total_size) * 40)
+                report(f"다운로드 중... {downloaded // 1024}KB / {total_size // 1024}KB", min(pct, 50))
+
+    # 2. 압축 해제
+    report("압축 해제 중...", 55)
+    extract_dir = os.path.join(tmp_dir, "extracted")
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        zf.extractall(extract_dir)
+
+    entries = os.listdir(extract_dir)
+    if len(entries) == 1 and os.path.isdir(os.path.join(extract_dir, entries[0])):
+        source_dir = os.path.join(extract_dir, entries[0])
+    else:
+        source_dir = extract_dir
+
+    # 3. 백업
+    report("사용자 데이터 백업 중...", 60)
+    _backup_user_data()
+
+    # 4. 파일 적용
+    report("파일 업데이트 중...", 65)
+    _apply_update(source_dir, APP_ROOT)
+
+    # 5. 정리
+    report("정리 중...", 90)
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    report("업데이트 완료!", 100)
+
+
 def perform_update():
-    """
-    업데이트 실행 (백그라운드 스레드에서 호출).
-    1. ZIP 다운로드
-    2. 임시 폴더에 압축 해제
-    3. 보존 파일 제외하고 덮어쓰기
-    4. version.json 업데이트
-    5. 앱 재시작
-    """
+    """대시보드에서 호출하는 업데이트 (백그라운드 스레드)."""
     def _do_update():
         try:
-            _set_progress("downloading", 10, "업데이트 파일 다운로드 중...")
-
-            server_url = get_update_server_url()
-            download_filename = _update_info.get("download_url", "commentboost-latest.zip") if _update_info else "commentboost-latest.zip"
-            download_url = f"{server_url}/download/{download_filename}"
-
-            # ZIP 다운로드
-            tmp_dir = tempfile.mkdtemp(prefix="commentboost_update_")
-            zip_path = os.path.join(tmp_dir, "update.zip")
-
-            resp = requests.get(download_url, stream=True, timeout=60)
-            if resp.status_code != 200:
-                _set_progress("error", 0, "", f"다운로드 실패 (HTTP {resp.status_code})")
-                return
-
-            total_size = int(resp.headers.get("content-length", 0))
-            downloaded = 0
-
-            with open(zip_path, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=8192):
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if total_size > 0:
-                        pct = int(10 + (downloaded / total_size) * 40)  # 10~50%
-                        _set_progress("downloading", min(pct, 50), f"다운로드 중... {downloaded // 1024}KB")
-
-            _set_progress("extracting", 55, "압축 해제 중...")
-
-            # ZIP 압축 해제
-            extract_dir = os.path.join(tmp_dir, "extracted")
-            with zipfile.ZipFile(zip_path, "r") as zf:
-                zf.extractall(extract_dir)
-
-            # ZIP 내 루트 디렉토리 확인 (ZIP 안에 폴더가 하나 있을 수 있음)
-            entries = os.listdir(extract_dir)
-            if len(entries) == 1 and os.path.isdir(os.path.join(extract_dir, entries[0])):
-                source_dir = os.path.join(extract_dir, entries[0])
-            else:
-                source_dir = extract_dir
-
-            _set_progress("applying", 55, "사용자 데이터 백업 중...")
-
-            # 업데이트 전 사용자 데이터 백업
-            _backup_user_data()
-
-            _set_progress("applying", 60, "파일 업데이트 중...")
-
-            # 파일 덮어쓰기 (보존 목록 제외)
-            _apply_update(source_dir, APP_ROOT)
-
-            _set_progress("applying", 90, "정리 중...")
-
-            # 임시 파일 정리
-            shutil.rmtree(tmp_dir, ignore_errors=True)
+            download_and_apply(_update_info or {})
 
             _set_progress("restarting", 95, "앱을 재시작합니다...")
-
-            # 잠시 대기 후 재시작 (프론트엔드가 상태를 읽을 시간)
             time.sleep(2)
-
             _set_progress("done", 100, "업데이트 완료! 앱을 재시작합니다.")
 
             # 앱 재시작

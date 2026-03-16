@@ -197,69 +197,13 @@ def _show_update_popup(current_ver, latest_ver, changelog, update_info):
         threading.Thread(target=_run_update, daemon=True).start()
 
     def _run_update():
-        """업데이트 실행 (백그라운드 스레드)"""
+        """업데이트 실행 (공통 로직 사용)"""
         try:
-            from src.updater import (
-                get_update_server_url, _apply_update, _backup_user_data, APP_ROOT,
-                _set_progress,
-            )
-            import requests
-            import tempfile
-            import zipfile
+            from src.updater import download_and_apply
 
-            # 1. 다운로드
-            _update_label("업데이트 파일 다운로드 중...", 10)
-            server_url = get_update_server_url()
-            download_filename = update_info.get("download_url", "commentboost-latest.zip")
-            download_url = f"{server_url}/download/{download_filename}"
+            download_and_apply(update_info, progress_callback=_update_label)
 
-            tmp_dir = tempfile.mkdtemp(prefix="commentboost_update_")
-            zip_path = os.path.join(tmp_dir, "update.zip")
-
-            resp = requests.get(download_url, stream=True, timeout=120)
-            if resp.status_code != 200:
-                _update_label(f"다운로드 실패 (HTTP {resp.status_code})", 0)
-                _show_error_and_continue()
-                return
-
-            total_size = int(resp.headers.get("content-length", 0))
-            downloaded = 0
-
-            with open(zip_path, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=8192):
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if total_size > 0:
-                        pct = int(10 + (downloaded / total_size) * 40)
-                        _update_label(f"다운로드 중... {downloaded // 1024}KB / {total_size // 1024}KB", pct)
-
-            # 2. 압축 해제
-            _update_label("압축 해제 중...", 55)
-            extract_dir = os.path.join(tmp_dir, "extracted")
-            with zipfile.ZipFile(zip_path, "r") as zf:
-                zf.extractall(extract_dir)
-
-            entries = os.listdir(extract_dir)
-            if len(entries) == 1 and os.path.isdir(os.path.join(extract_dir, entries[0])):
-                source_dir = os.path.join(extract_dir, entries[0])
-            else:
-                source_dir = extract_dir
-
-            # 3. 사용자 데이터 백업
-            _update_label("사용자 데이터 백업 중...", 60)
-            _backup_user_data()
-
-            # 4. 파일 적용
-            _update_label("파일 업데이트 중...", 65)
-            _apply_update(source_dir, APP_ROOT)
-
-            # 4. 정리
-            _update_label("정리 중...", 90)
-            import shutil
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-
-            # 5. 완료 → 재시작
-            _update_label("업데이트 완료! 앱을 재시작합니다...", 100)
+            _update_label("앱을 재시작합니다...", 100)
             time.sleep(1.5)
 
             root.after(0, root.destroy)
