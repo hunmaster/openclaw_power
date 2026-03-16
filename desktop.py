@@ -235,10 +235,88 @@ def _show_update_popup(current_ver, latest_ver, changelog, update_info):
         threading.Thread(target=_run_update, daemon=True).start()
 
     def _run_update():
-        """업데이트 실행 (공통 로직 사용)"""
+        """업데이트 다운로드 → 적용 → 재시작 (외부 모듈 의존 없이 직접 실행)"""
         try:
-            updater = _load_updater()
-            updater.download_and_apply(update_info, progress_callback=_update_label)
+            import requests
+            import tempfile
+            import zipfile
+            import shutil
+
+            # 서버 URL
+            server_url = os.environ.get(
+                "UPDATE_SERVER_URL", "https://commentboost-app.fly.dev")
+            download_filename = update_info.get(
+                "download_url", "commentboost-latest.zip")
+            download_url = f"{server_url}/download/{download_filename}"
+
+            # 1. ZIP 다운로드
+            _update_label("업데이트 파일 다운로드 중...", 10)
+            tmp_dir = tempfile.mkdtemp(prefix="commentboost_update_")
+            zip_path = os.path.join(tmp_dir, "update.zip")
+
+            resp = requests.get(download_url, stream=True, timeout=120)
+            if resp.status_code != 200:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                raise RuntimeError(f"다운로드 실패 (HTTP {resp.status_code})")
+
+            total_size = int(resp.headers.get("content-length", 0))
+            downloaded = 0
+            with open(zip_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total_size > 0:
+                        pct = int(10 + (downloaded / total_size) * 40)
+                        _update_label(
+                            f"다운로드 중... {downloaded // 1024}KB / {total_size // 1024}KB",
+                            min(pct, 50))
+
+            # 2. 압축 해제
+            _update_label("압축 해제 중...", 55)
+            extract_dir = os.path.join(tmp_dir, "extracted")
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                zf.extractall(extract_dir)
+
+            entries = os.listdir(extract_dir)
+            if len(entries) == 1 and os.path.isdir(
+                    os.path.join(extract_dir, entries[0])):
+                source_dir = os.path.join(extract_dir, entries[0])
+            else:
+                source_dir = extract_dir
+
+            # 3. 파일 적용 (보존 대상 제외)
+            _update_label("파일 업데이트 중...", 65)
+            preserve = {".env", ".env.local", ".license", "config", "data",
+                        "cert.pem", "key.pem", "desktop.ini"}
+            preserve_ext = {".db", ".sqlite", ".sqlite3"}
+
+            for root_d, dirs, files in os.walk(source_dir):
+                rel_root = os.path.relpath(root_d, source_dir)
+                if rel_root == ".":
+                    rel_root = ""
+                top = rel_root.split(os.sep)[0] if rel_root else ""
+                if top in preserve:
+                    continue
+                target_root = os.path.join(
+                    _APP_ROOT, rel_root) if rel_root else _APP_ROOT
+                os.makedirs(target_root, exist_ok=True)
+                for fn in files:
+                    rel_file = os.path.join(rel_root, fn) if rel_root else fn
+                    if rel_file in preserve or fn in preserve:
+                        continue
+                    _, ext = os.path.splitext(fn)
+                    if ext.lower() in preserve_ext:
+                        continue
+                    try:
+                        shutil.copy2(
+                            os.path.join(root_d, fn),
+                            os.path.join(target_root, fn))
+                    except (PermissionError, OSError):
+                        pass
+
+            # 4. 정리
+            _update_label("정리 중...", 90)
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
             _update_label("앱을 재시작합니다...", 100)
             time.sleep(1.5)
