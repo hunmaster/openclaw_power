@@ -70,7 +70,11 @@ except Exception as _startup_err:
     sys.exit(1)
 
 # Lemon Squeezy 클라이언트 초기화
-ls_client = LemonSqueezyClient()
+try:
+    ls_client = LemonSqueezyClient()
+except Exception as _ls_init_err:
+    print(f"[LemonSqueezy] 클라이언트 생성 오류: {_ls_init_err}")
+    ls_client = None
 
 # PyInstaller EXE에서는 __file__이 _internal/ 안을 가리키므로,
 # template/static/data 등은 모두 sys.executable 기준으로 잡아야 함
@@ -4718,20 +4722,30 @@ def api_payment_open_checkout():
 
 
 # 시작 시 라이선스 자동 검증
-if not is_owner_mode():
-    _lic_result = license_client.auto_verify()
-    if _lic_result.get("valid"):
-        print(f"[License] 라이선스 검증 성공: {license_client.get_plan_name()}")
+try:
+    if not is_owner_mode():
+        _lic_result = license_client.auto_verify()
+        if _lic_result.get("valid"):
+            print(f"[License] 라이선스 검증 성공: {license_client.get_plan_name()}")
+        else:
+            print(f"[License] 라이선스 미인증 (셋업 필요): {_lic_result.get('error', '')}")
     else:
-        print(f"[License] 라이선스 미인증 (셋업 필요): {_lic_result.get('error', '')}")
-else:
-    print("[License] Owner 모드 - 라이선스 검증 스킵")
+        print("[License] Owner 모드 - 라이선스 검증 스킵")
+except Exception as _lic_err:
+    print(f"[License] 라이선스 검증 중 오류 (무시하고 계속): {_lic_err}")
 
 # Lemon Squeezy 결제 초기화
-ls_client.initialize()
+try:
+    if ls_client:
+        ls_client.initialize()
+except Exception as _ls_err:
+    print(f"[LemonSqueezy] 초기화 오류 (무시하고 계속): {_ls_err}")
 
 # 시작 시 업데이트 체크 (비동기)
-check_updates_async()
+try:
+    check_updates_async()
+except Exception as _upd_err:
+    print(f"[Updater] 업데이트 체크 오류 (무시하고 계속): {_upd_err}")
 
 
 if __name__ == "__main__":
