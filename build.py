@@ -43,7 +43,7 @@ HIDDEN_IMPORTS = [
 
 # 제외할 모듈 (빌드 크기 줄이기)
 EXCLUDES = [
-    "tkinter",
+    # tkinter는 업데이트 팝업에서 사용하므로 제외하면 안 됨
     "matplotlib",
     "numpy",
     "pandas",
